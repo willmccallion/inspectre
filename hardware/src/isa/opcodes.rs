@@ -1,0 +1,21 @@
+pub const OP_LOAD: u32 = 0b0000011;
+pub const OP_LOAD_FP: u32 = 0b0000111;
+pub const OP_IMM: u32 = 0b0010011;
+pub const OP_AUIPC: u32 = 0b0010111;
+pub const OP_IMM_32: u32 = 0b0011011;
+pub const OP_STORE: u32 = 0b0100011;
+pub const OP_STORE_FP: u32 = 0b0100111;
+pub const OP_AMO: u32 = 0b0101111;
+pub const OP_REG: u32 = 0b0110011;
+pub const OP_LUI: u32 = 0b0110111;
+pub const OP_REG_32: u32 = 0b0111011;
+pub const OP_FP: u32 = 0b1010011;
+pub const OP_BRANCH: u32 = 0b1100011;
+pub const OP_JALR: u32 = 0b1100111;
+pub const OP_JAL: u32 = 0b1101111;
+pub const OP_SYSTEM: u32 = 0b1110011;
+
+pub const OP_FMADD: u32 = 0b1000011;
+pub const OP_FMSUB: u32 = 0b1000111;
+pub const OP_FNMSUB: u32 = 0b1001011;
+pub const OP_FNMADD: u32 = 0b1001111;

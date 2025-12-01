@@ -1,0 +1,69 @@
+[general]
+trace_instructions = false
+start_pc = "0x80000000"
+
+[system]
+uart_base = "0x10000000"
+disk_base = "0x90000000"
+ram_base = "0x80000000"
+
+[memory]
+ram_size = "0x08000000"
+controller = "DRAM"
+t_cas = 14
+t_ras = 34
+t_pre = 14
+tlb_size = 128
+
+[cache.l1_i]
+enabled = true
+size_bytes = 32768 # 32KB
+line_bytes = 64
+ways = 8
+policy = "PLRU"
+latency = 1
+prefetcher = "NextLine"
+prefetch_degree = 1
+
+[cache.l1_d]
+enabled = true
+size_bytes = 32768
+line_bytes = 64
+ways = 8
+policy = "PLRU"
+latency = 1
+prefetcher = "Stride"
+prefetch_table_size = 64
+prefetch_degree = 1
+
+[cache.l2]
+enabled = true
+size_bytes = 524288 # 512KB
+line_bytes = 64
+ways = 8
+policy = "PLRU"
+latency = 10
+prefetcher = "None"
+prefetch_table_size = 0
+prefetch_degree = 0
+
+[cache.l3]
+enabled = true
+size_bytes = 2097152 # 2MB
+line_bytes = 64
+ways = 16
+policy = "Random"
+latency = 35
+prefetcher = "None"
+prefetch_table_size = 0
+prefetch_degree = 0
+
+[pipeline]
+branch_predictor = "Tournament"
+btb_size = 2048
+ras_size = 32
+
+[pipeline.tournament]
+global_size_bits = 13
+local_hist_bits = 10
+local_pred_bits = 11

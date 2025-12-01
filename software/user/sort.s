@@ -218,3 +218,4 @@ seed:
     .balign 8
 my_array:
     .space 2048                               # 256 * 8 bytes
+

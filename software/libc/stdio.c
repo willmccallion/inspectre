@@ -44,6 +44,28 @@ static void print_num(long long n, int base, int sign) {
   }
 }
 
+static void print_double(double v, int precision) {
+  if (v < 0) {
+    putchar('-');
+    v = -v;
+  }
+
+  long int_part = (long)v;
+  double remainder = v - int_part;
+
+  // Print Integer part
+  print_num(int_part, 10, 0);
+  putchar('.');
+
+  // Print Fractional part
+  while (precision-- > 0) {
+    remainder *= 10.0;
+    int digit = (int)remainder;
+    putchar(digit + '0');
+    remainder -= digit;
+  }
+}
+
 // The printf logic
 void printf(const char *fmt, ...) {
   va_list args;
@@ -56,9 +78,20 @@ void printf(const char *fmt, ...) {
     }
 
     p++; // Skip '%'
+
+    // Check for length modifier 'l' (long)
+    int is_long = 0;
+    if (*p == 'l') {
+      is_long = 1;
+      p++;
+      // Handle 'll' (long long) - treat same as long for 64-bit
+      if (*p == 'l') {
+        p++;
+      }
+    }
+
     switch (*p) {
     case 'c': {
-      // char is promoted to int in varargs
       int c = va_arg(args, int);
       putchar(c);
       break;
@@ -72,18 +105,38 @@ void printf(const char *fmt, ...) {
       break;
     }
     case 'd': {
-      int d = va_arg(args, int);
+      long long d;
+      if (is_long) {
+        d = va_arg(args, long);
+      } else {
+        d = va_arg(args, int);
+      }
       print_num(d, 10, 1);
       break;
     }
     case 'u': {
-      unsigned int u = va_arg(args, unsigned int);
+      unsigned long long u;
+      if (is_long) {
+        u = va_arg(args, unsigned long);
+      } else {
+        u = va_arg(args, unsigned int);
+      }
       print_num(u, 10, 0);
       break;
     }
     case 'x': {
-      unsigned int x = va_arg(args, unsigned int);
+      unsigned long long x;
+      if (is_long) {
+        x = va_arg(args, unsigned long);
+      } else {
+        x = va_arg(args, unsigned int);
+      }
       print_num(x, 16, 0);
+      break;
+    }
+    case 'f': {
+      double f = va_arg(args, double); // float is promoted to double in varargs
+      print_double(f, 6);              // Default to 6 decimal places
       break;
     }
     case '%': {
@@ -91,8 +144,9 @@ void printf(const char *fmt, ...) {
       break;
     }
     default: {
-      // Unknown specifier, just print it
       putchar('%');
+      if (is_long)
+        putchar('l');
       putchar(*p);
       break;
     }

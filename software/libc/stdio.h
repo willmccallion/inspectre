@@ -3,7 +3,6 @@
 
 #include <stdarg.h>
 
-// The base address of your UART in the simulator
 #define UART_BASE 0x10000000UL
 
 void putchar(char c);

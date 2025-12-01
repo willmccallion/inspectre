@@ -1,0 +1,71 @@
+[general]
+trace_instructions = false
+start_pc = "0x80000000"
+
+[system]
+uart_base = "0x10000000"
+disk_base = "0x90000000"
+ram_base = "0x80000000"
+
+[memory]
+ram_size = "0x10000000" # 256MB
+controller = "DRAM"
+t_cas = 12
+t_ras = 28
+t_pre = 12
+tlb_size = 128
+
+[cache.l1_i]
+enabled = true
+size_bytes = 65536 # 64KB
+line_bytes = 64
+ways = 8
+policy = "PLRU"
+latency = 1
+prefetcher = "NextLine"
+prefetch_degree = 2
+
+[cache.l1_d]
+enabled = true
+size_bytes = 65536
+line_bytes = 64
+ways = 8
+policy = "PLRU"
+latency = 1
+prefetcher = "Stride"
+prefetch_table_size = 128
+prefetch_degree = 2
+
+[cache.l2]
+enabled = true
+size_bytes = 1048576 # 1MB
+line_bytes = 64
+ways = 16
+policy = "PLRU"
+latency = 8
+prefetcher = "NextLine"
+prefetch_degree = 1
+
+[cache.l3]
+enabled = true
+size_bytes = 8388608 # 8MB
+line_bytes = 64
+ways = 16
+policy = "PLRU"
+latency = 28
+prefetcher = "None"
+prefetch_table_size = 0
+prefetch_degree = 0
+
+[pipeline]
+branch_predictor = "TAGE"
+btb_size = 4096
+ras_size = 48
+
+[pipeline.tage]
+num_banks = 4
+table_size = 2048
+loop_table_size = 256
+reset_interval = 2000
+history_lengths = [5, 15, 44, 130]
+tag_widths = [9, 9, 10, 10]

@@ -6,7 +6,7 @@
 _start:
     # Set up Kernel Stack
     li sp, 0x800FF000
-    
+
     # Initialize sscratch to 0. 
     csrw sscratch, zero
 
@@ -20,7 +20,7 @@ hang:
 switch_to_user:
     # Save Kernel Callee-Saved Registers to Stack
     addi sp, sp, -112
-    
+
     sd ra, 0(sp)
     sd s0, 8(sp)
     sd s1, 16(sp)

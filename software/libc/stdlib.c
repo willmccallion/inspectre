@@ -20,6 +20,7 @@ static char *heap_top = NULL;
 static void *sbrk(long increment) {
   if (heap_top == NULL) {
     heap_top = &_end;
+
     unsigned long addr = (unsigned long)heap_top;
     if (addr % ALIGN_SIZE != 0) {
       heap_top += (ALIGN_SIZE - (addr % ALIGN_SIZE));
@@ -29,7 +30,6 @@ static void *sbrk(long increment) {
   char *old_top = heap_top;
 
   // Hard limit check
-  // 0x80200000 (Load) + 0x1000000 (16MB) = 0x81200000
   if ((unsigned long)(heap_top + increment) >= 0x81200000) {
     return (void *)-1;
   }

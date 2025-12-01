@@ -1,0 +1,11 @@
+pub const LR: u32 = 0b00010;
+pub const SC: u32 = 0b00011;
+pub const AMOSWAP: u32 = 0b00001;
+pub const AMOADD: u32 = 0b00000;
+pub const AMOXOR: u32 = 0b00100;
+pub const AMOAND: u32 = 0b01100;
+pub const AMOOR: u32 = 0b01000;
+pub const AMOMIN: u32 = 0b10000;
+pub const AMOMAX: u32 = 0b10100;
+pub const AMOMINU: u32 = 0b11000;
+pub const AMOMAXU: u32 = 0b11100;
