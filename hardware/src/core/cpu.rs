@@ -8,7 +8,7 @@ use super::register_file::RegisterFile;
 use super::stages;
 use super::types::{AccessType, PhysAddr, TranslationResult, Trap, VirtAddr};
 use crate::config::Config;
-use crate::isa::{abi, csr, sys_ops};
+use crate::isa::{abi, csr};
 use crate::stats::SimStats;
 use crate::system::System;
 
@@ -28,6 +28,10 @@ pub struct Csrs {
     pub mtval: u64,
     pub stval: u64,
     pub misa: u64,
+    pub medeleg: u64,
+    pub mideleg: u64,
+    pub mip: u64,
+    pub mie: u64,
 }
 
 pub struct Cpu {
@@ -72,27 +76,25 @@ impl Cpu {
             let s = override_str.trim_start_matches("0x");
             u64::from_str_radix(s, 16).unwrap_or(0x8000_0000_0014_1101)
         } else {
-            // Default RV64IMAFD:
-            // 63:62 = 2 (RV64)
-            // Extensions: A(0), D(3), F(5), I(8), M(12)
+            // Default RV64IMAFDC
             let mut val: u64 = 2 << 62;
-            val |= 1 << 0; // A - Atomic
-            val |= 1 << 3; // D - Double Float
-            val |= 1 << 5; // F - Single Float
-            val |= 1 << 8; // I - Integer
-            val |= 1 << 12; // M - Multiply/Divide
+            val |= 1 << 0; // A
+            val |= 1 << 2; // C
+            val |= 1 << 3; // D
+            val |= 1 << 5; // F
+            val |= 1 << 8; // I
+            val |= 1 << 12; // M
+            val |= 1 << 18; // S
+            val |= 1 << 20; // U
             val
         };
 
-        // Initialize CSRs including the configured MISA
         let csrs = Csrs {
-            mstatus: csr::MSTATUS_FS_INIT,
-            sstatus: csr::MSTATUS_FS_INIT,
+            mstatus: 0xa000_00000, // SXL=2, UXL=2
             misa: configured_misa,
             ..Default::default()
         };
 
-        // Initialize branch predictor from config
         let bp: Box<dyn BranchPredictor> = match config.pipeline.branch_predictor.as_str() {
             "Static" => Box::new(bp::static_bp::StaticPredictor::new(
                 config.pipeline.btb_size,
@@ -154,63 +156,63 @@ impl Cpu {
             return Ok(());
         }
 
-        // Timer & Interrupt Handling
-        let timer_irq = self.bus.tick();
+        // 1. Update Time/Interrupts from Bus
+        let (timer_irq, external_irq) = self.bus.tick();
 
-        // Update MIP for Timer
-        let mut mip = self.csr_read(csr::MIP);
+        // 2. Update MIP
+        let mut mip = self.csrs.mip;
         if timer_irq {
             mip |= csr::MIP_MTIP;
         } else {
             mip &= !csr::MIP_MTIP;
         }
-        self.csr_write(csr::MIP, mip);
+        if external_irq {
+            mip |= csr::MIP_MEIP;
+        } else {
+            mip &= !csr::MIP_MEIP;
+        }
+        self.csrs.mip = mip;
 
-        let mie = self.csr_read(csr::MIE);
+        // 3. Check Interrupts
+        let mie = self.csrs.mie;
         let mstatus = self.csrs.mstatus;
 
-        // Extract Global Interrupt Enables
         let m_global_ie = (mstatus & csr::MSTATUS_MIE) != 0;
         let s_global_ie = (mstatus & csr::MSTATUS_SIE) != 0;
-        let u_global_ie = (mstatus & csr::MSTATUS_UIE) != 0;
 
-        let check_irq = |pending_bit: u64, enable_bit: u64, mode: u8, global_ie: bool| -> bool {
-            let pending = (mip & pending_bit) != 0;
+        let check = |bit: u64, enable_bit: u64, deleg_bit: u64| -> Option<Trap> {
+            let pending = (mip & bit) != 0;
             let enabled = (mie & enable_bit) != 0;
             if !pending || !enabled {
-                return false;
+                return None;
             }
 
-            if self.privilege < mode {
-                return true;
-            }
-            if self.privilege == mode {
-                return global_ie;
-            }
-            false
-        };
+            let delegated = (self.csrs.mideleg & deleg_bit) != 0;
+            let target_priv = if delegated { 1 } else { 3 };
 
-        // Priority Order (External > Software > Timer, M > S > U)
-        let trap_cause = if check_irq(csr::MIP_MEIP, csr::MIE_MEIP, 3, m_global_ie) {
-            Some(Trap::ExternalInterrupt)
-        } else if check_irq(csr::MIP_MSIP, csr::MIE_MSIP, 3, m_global_ie) {
-            Some(Trap::MachineSoftwareInterrupt)
-        } else if check_irq(csr::MIP_MTIP, csr::MIE_MTIE, 3, m_global_ie) {
-            Some(Trap::MachineTimerInterrupt)
-        } else if check_irq(csr::MIP_SEIP, csr::MIE_SEIP, 1, s_global_ie) {
-            Some(Trap::ExternalInterrupt)
-        } else if check_irq(csr::MIP_SSIP, csr::MIE_SSIP, 1, s_global_ie) {
-            Some(Trap::SupervisorSoftwareInterrupt)
-        } else if check_irq(csr::MIP_STIP, csr::MIE_STIE, 1, s_global_ie) {
-            Some(Trap::SupervisorTimerInterrupt)
-        } else if check_irq(csr::MIP_USIP, csr::MIE_USIP, 0, u_global_ie) {
-            Some(Trap::UserSoftwareInterrupt)
-        } else {
+            if self.privilege < target_priv {
+                return Some(self.irq_to_trap(bit));
+            }
+            if self.privilege == target_priv {
+                if target_priv == 3 && m_global_ie {
+                    return Some(self.irq_to_trap(bit));
+                }
+                if target_priv == 1 && s_global_ie {
+                    return Some(self.irq_to_trap(bit));
+                }
+            }
             None
         };
 
-        if let Some(trap) = trap_cause {
-            self.trap(trap, self.pc);
+        let trap = check(csr::MIP_MEIP, csr::MIE_MEIP, 1 << 11)
+            .or_else(|| check(csr::MIP_MSIP, csr::MIE_MSIP, 1 << 3))
+            .or_else(|| check(csr::MIP_MTIP, csr::MIE_MTIE, 1 << 7))
+            .or_else(|| check(csr::MIP_SEIP, csr::MIE_SEIP, 1 << 9))
+            .or_else(|| check(csr::MIP_SSIP, csr::MIE_SSIP, 1 << 1))
+            .or_else(|| check(csr::MIP_STIP, csr::MIE_STIE, 1 << 5));
+
+        if let Some(t) = trap {
+            self.trap(t, self.pc);
             return Ok(());
         }
 
@@ -218,7 +220,6 @@ impl Cpu {
             self.print_pipeline_diagram();
         }
 
-        // Handle stalls (Memory)
         if self.stall_cycles > 0 {
             self.stall_cycles -= 1;
             self.stats.cycles += 1;
@@ -226,8 +227,6 @@ impl Cpu {
             self.track_mode_cycles();
             return Ok(());
         }
-
-        // Handle stalls (ALU / Multi-cycle ops)
         if self.alu_timer > 0 {
             self.alu_timer -= 1;
             self.stats.cycles += 1;
@@ -235,48 +234,45 @@ impl Cpu {
             return Ok(());
         }
 
-        // Advance cycle & stats
         self.stats.cycles += 1;
         self.track_mode_cycles();
 
-        // Write Back Stage
         if let Err(trap) = stages::write_back::wb_stage(self) {
             return Err(format!("{:?}", trap));
         }
-
-        // Check for program exit
         if self.exit_code.is_some() {
             return Ok(());
         }
 
-        // Latch MEM result to WB
         self.wb_latch = self.mem_wb.clone();
-
-        // Memory & Execute Stages
         stages::memory_access::mem_stage(self)?;
         stages::execute::execute_stage(self)?;
 
-        // Hazard Detection (Load-Use)
         let is_load_use_hazard = control::need_stall_load_use(&self.id_ex, &self.if_id);
-
         if is_load_use_hazard {
-            // Stall: Inject Bubble into ID/EX, do not fetch new instruction
             self.id_ex = IdEx::bubble();
             self.stats.stalls_data += 1;
         } else {
-            // Normal operation: Decode & Fetch
             stages::decode::decode_stage(self)?;
-
-            // Only fetch if IF/ID is empty (simplified in-order logic)
             if self.if_id.entries.is_empty() {
                 stages::fetch::fetch_stage(self)?;
             }
         }
 
-        // Hardwire zero register
         self.regs.write(abi::REG_ZERO, 0);
-
         Ok(())
+    }
+
+    fn irq_to_trap(&self, bit: u64) -> Trap {
+        match bit {
+            csr::MIP_MEIP => Trap::ExternalInterrupt,
+            csr::MIP_MSIP => Trap::MachineSoftwareInterrupt,
+            csr::MIP_MTIP => Trap::MachineTimerInterrupt,
+            csr::MIP_SEIP => Trap::ExternalInterrupt,
+            csr::MIP_SSIP => Trap::SupervisorSoftwareInterrupt,
+            csr::MIP_STIP => Trap::SupervisorTimerInterrupt,
+            _ => Trap::MachineTimerInterrupt,
+        }
     }
 
     pub fn translate(&mut self, vaddr: VirtAddr, access: AccessType) -> TranslationResult {
@@ -292,12 +288,9 @@ impl Cpu {
             }
             return TranslationResult::success(PhysAddr::new(paddr), 0);
         }
-
-        // Standard MMU Translation (SV39)
         let res = self
             .mmu
             .translate(vaddr, access, self.privilege, &self.csrs, &mut self.bus.bus);
-
         if res.trap.is_none() {
             let paddr = res.paddr.val();
             if !self.bus.bus.is_valid_address(paddr) {
@@ -315,10 +308,8 @@ impl Cpu {
     pub fn simulate_memory_access(&mut self, addr: PhysAddr, access: AccessType) -> u64 {
         let mut total_penalty = 0;
         let raw_addr = addr.val();
-
         let ram_latency = self.bus.mem_controller.access_latency(raw_addr);
         let next_lat = ram_latency;
-
         let is_inst = matches!(access, AccessType::Fetch);
         let is_write = matches!(access, AccessType::Write);
 
@@ -335,7 +326,6 @@ impl Cpu {
         };
 
         total_penalty += l1_pen;
-
         if is_inst && self.l1_i_cache.enabled {
             if l1_hit {
                 self.stats.icache_hits += 1;
@@ -354,7 +344,6 @@ impl Cpu {
             total_penalty += self.l2_cache.latency;
             let (l2_hit, l2_pen) = self.l2_cache.access(raw_addr, is_write, next_lat);
             total_penalty += l2_pen;
-
             if l2_hit {
                 self.stats.l2_hits += 1;
                 return total_penalty;
@@ -366,7 +355,6 @@ impl Cpu {
             total_penalty += self.l3_cache.latency;
             let (l3_hit, l3_pen) = self.l3_cache.access(raw_addr, is_write, next_lat);
             total_penalty += l3_pen;
-
             if l3_hit {
                 self.stats.l3_hits += 1;
                 return total_penalty;
@@ -377,93 +365,107 @@ impl Cpu {
         total_penalty += self.bus.bus.calculate_transit_time(8);
         total_penalty += ram_latency;
         total_penalty += self.bus.bus.calculate_transit_time(64);
-
         total_penalty
     }
 
     pub fn trap(&mut self, cause: Trap, epc: u64) {
-        let code = match cause {
-            Trap::InstructionAddressMisaligned(_) => 0,
-            Trap::InstructionAccessFault(_) => 1,
-            Trap::IllegalInstruction(_) => 2,
-            Trap::Breakpoint(_) => 3,
-            Trap::LoadAddressMisaligned(_) => 4,
-            Trap::LoadAccessFault(_) => 5,
-            Trap::StoreAddressMisaligned(_) => 6,
-            Trap::StoreAccessFault(_) => 7,
-            Trap::EnvironmentCallFromUMode => 8,
-            Trap::EnvironmentCallFromSMode => 9,
-            Trap::EnvironmentCallFromMMode => 11,
-            Trap::InstructionPageFault(_) => 12,
-            Trap::LoadPageFault(_) => 13,
-            Trap::StorePageFault(_) => 15,
-            Trap::MachineTimerInterrupt => 0x8000_0000_0000_0007,
+        let (is_interrupt, code) = match cause {
+            Trap::InstructionAddressMisaligned(_) => (false, 0),
+            Trap::InstructionAccessFault(_) => (false, 1),
+            Trap::IllegalInstruction(_) => (false, 2),
+            Trap::Breakpoint(_) => (false, 3),
+            Trap::LoadAddressMisaligned(_) => (false, 4),
+            Trap::LoadAccessFault(_) => (false, 5),
+            Trap::StoreAddressMisaligned(_) => (false, 6),
+            Trap::StoreAccessFault(_) => (false, 7),
+            Trap::EnvironmentCallFromUMode => (false, 8),
+            Trap::EnvironmentCallFromSMode => (false, 9),
+            Trap::EnvironmentCallFromMMode => (false, 11),
+            Trap::InstructionPageFault(_) => (false, 12),
+            Trap::LoadPageFault(_) => (false, 13),
+            Trap::StorePageFault(_) => (false, 15),
+            Trap::UserSoftwareInterrupt => (true, 0),
+            Trap::SupervisorSoftwareInterrupt => (true, 1),
+            Trap::MachineSoftwareInterrupt => (true, 3),
+            Trap::SupervisorTimerInterrupt => (true, 5),
+            Trap::MachineTimerInterrupt => (true, 7),
+            Trap::ExternalInterrupt => (true, 9),
+            Trap::RequestedTrap(c) => (false, c),
+        };
+
+        let deleg_mask = if is_interrupt {
+            self.csrs.mideleg
+        } else {
+            self.csrs.medeleg
+        };
+        let delegate_to_s = (self.privilege <= 1) && ((deleg_mask >> code) & 1) != 0;
+
+        let tval = match cause {
+            Trap::InstructionAddressMisaligned(a)
+            | Trap::InstructionAccessFault(a)
+            | Trap::LoadAddressMisaligned(a)
+            | Trap::LoadAccessFault(a)
+            | Trap::StoreAddressMisaligned(a)
+            | Trap::StoreAccessFault(a)
+            | Trap::InstructionPageFault(a)
+            | Trap::LoadPageFault(a)
+            | Trap::StorePageFault(a) => a,
+            Trap::IllegalInstruction(i) => i as u64,
             _ => 0,
         };
 
-        if self.direct_mode {
-            if let Trap::EnvironmentCallFromUMode = cause {
-                let get_reg = |reg: usize, cpu: &Self| -> u64 {
-                    if reg == abi::REG_ZERO {
-                        return 0;
-                    }
-                    // Check EX/MEM bundle
-                    for ex in cpu.ex_mem.entries.iter().rev() {
-                        if ex.ctrl.reg_write && ex.rd == reg {
-                            return ex.alu;
-                        }
-                    }
-                    // Check MEM/WB bundle
-                    for wb in cpu.mem_wb.entries.iter().rev() {
-                        if wb.ctrl.reg_write && wb.rd == reg {
-                            if wb.ctrl.mem_read {
-                                return wb.load_data;
-                            } else {
-                                return wb.alu;
-                            }
-                        }
-                    }
-                    cpu.regs.read(reg)
-                };
+        if delegate_to_s {
+            self.csrs.scause = if is_interrupt { (1 << 63) | code } else { code };
+            self.csrs.sepc = epc;
+            self.csrs.stval = tval;
 
-                let a7 = get_reg(abi::REG_A7, self);
-                if a7 == sys_ops::SYS_EXIT {
-                    let code = get_reg(abi::REG_A0, self);
-                    self.exit_code = Some(code);
-                    return;
-                }
+            let mut sstatus = self.csrs.sstatus;
+            if (sstatus & csr::MSTATUS_SIE) != 0 {
+                sstatus |= csr::MSTATUS_SPIE;
+            } else {
+                sstatus &= !csr::MSTATUS_SPIE;
             }
-            eprintln!(
-                "Unhandled Trap in Direct Mode: Cause={:?}, PC={:#x}",
-                cause, epc
-            );
-            self.exit_code = Some(1);
-            return;
+            if self.privilege == 1 {
+                sstatus |= csr::MSTATUS_SPP;
+            } else {
+                sstatus &= !csr::MSTATUS_SPP;
+            }
+            sstatus &= !csr::MSTATUS_SIE;
+            self.csrs.sstatus = sstatus;
+
+            self.privilege = 1;
+            self.pc = (self.csrs.stvec & !3)
+                + (if (self.csrs.stvec & 1) != 0 && is_interrupt {
+                    4 * code
+                } else {
+                    0
+                });
+        } else {
+            self.csrs.mcause = if is_interrupt { (1 << 63) | code } else { code };
+            self.csrs.mepc = epc;
+            self.csrs.mtval = tval;
+
+            let mut mstatus = self.csrs.mstatus;
+            if (mstatus & csr::MSTATUS_MIE) != 0 {
+                mstatus |= csr::MSTATUS_MPIE;
+            } else {
+                mstatus &= !csr::MSTATUS_MPIE;
+            }
+            mstatus &= !csr::MSTATUS_MPP;
+            mstatus |= (self.privilege as u64) << 11;
+            mstatus &= !csr::MSTATUS_MIE;
+            self.csrs.mstatus = mstatus;
+
+            self.privilege = 3;
+            self.pc = (self.csrs.mtvec & !3)
+                + (if (self.csrs.mtvec & 1) != 0 && is_interrupt {
+                    4 * code
+                } else {
+                    0
+                });
         }
 
         self.stats.traps_taken += 1;
-        self.csrs.sepc = epc;
-        self.csrs.scause = code;
-
-        let mut sstatus = self.csrs.sstatus;
-        if self.privilege == 0 {
-            sstatus &= !csr::MSTATUS_SPP;
-        } else {
-            sstatus |= csr::MSTATUS_SPP;
-        }
-        let sie = (sstatus & csr::MSTATUS_MIE) != 0;
-        if sie {
-            sstatus |= csr::MSTATUS_MPIE;
-        } else {
-            sstatus &= !csr::MSTATUS_MPIE;
-        }
-        sstatus &= !csr::MSTATUS_MIE;
-        self.csrs.sstatus = sstatus;
-
-        let vector = self.csrs.stvec & !3;
-        self.pc = vector;
-        self.privilege = 1;
-
         self.if_id = Default::default();
         self.id_ex = IdEx::default();
     }
@@ -503,37 +505,28 @@ impl Cpu {
             csr::MARCHID => 0,
             csr::MIMPID => 0,
             csr::MHARTID => 0,
-
             csr::MSTATUS => self.csrs.mstatus,
-            csr::MEDELEG => 0,
-            csr::MIDELEG => 0,
-            csr::MIE => 0,
+            csr::MEDELEG => self.csrs.medeleg,
+            csr::MIDELEG => self.csrs.mideleg,
+            csr::MIE => self.csrs.mie,
             csr::MTVEC => self.csrs.mtvec,
-            csr::MCOUNTEREN => 0,
             csr::MISA => self.csrs.misa,
-
             csr::MSCRATCH => self.csrs.mscratch,
             csr::MEPC => self.csrs.mepc,
             csr::MCAUSE => self.csrs.mcause,
             csr::MTVAL => self.csrs.mtval,
-            csr::MIP => 0,
-
+            csr::MIP => self.csrs.mip,
             csr::SSTATUS => self.csrs.sstatus,
-            csr::SIE => 0,
+            csr::SIE => self.csrs.mie & self.csrs.mideleg,
             csr::STVEC => self.csrs.stvec,
-            csr::SCOUNTEREN => 0,
-
             csr::SSCRATCH => self.csrs.sscratch,
             csr::SEPC => self.csrs.sepc,
             csr::SCAUSE => self.csrs.scause,
             csr::STVAL => self.csrs.stval,
-            csr::SIP => 0,
-
+            csr::SIP => self.csrs.mip & self.csrs.mideleg,
             csr::SATP => self.csrs.satp,
-
             csr::CYCLE | csr::MCYCLE | csr::TIME => self.stats.cycles,
             csr::INSTRET | csr::MINSTRET => self.stats.instructions_retired,
-
             _ => 0,
         }
     }
@@ -543,58 +536,89 @@ impl Cpu {
             csr::CSR_SIM_PANIC => {
                 self.trap(Trap::RequestedTrap(val), self.pc);
             }
-
             csr::MSTATUS => self.csrs.mstatus = val,
-            csr::MEDELEG => {}
-            csr::MIDELEG => {}
-            csr::MIE => {}
+            csr::MEDELEG => self.csrs.medeleg = val,
+            csr::MIDELEG => self.csrs.mideleg = val,
+            csr::MIE => self.csrs.mie = val,
             csr::MTVEC => self.csrs.mtvec = val,
-            csr::MCOUNTEREN => {}
             csr::MISA => self.csrs.misa = val,
-
             csr::MSCRATCH => self.csrs.mscratch = val,
             csr::MEPC => self.csrs.mepc = val & !1,
             csr::MCAUSE => self.csrs.mcause = val,
             csr::MTVAL => self.csrs.mtval = val,
-            csr::MIP => {}
-
-            csr::SSTATUS => self.csrs.sstatus = val,
-            csr::SIE => {}
+            csr::MIP => {
+                let mask = csr::MIP_SSIP | csr::MIP_STIP | csr::MIP_SEIP;
+                self.csrs.mip = (self.csrs.mip & !mask) | (val & mask);
+            }
+            csr::SSTATUS => {
+                let mask = csr::MSTATUS_SIE
+                    | csr::MSTATUS_SPIE
+                    | csr::MSTATUS_SPP
+                    | csr::MSTATUS_FS
+                    | csr::MSTATUS_SUM
+                    | csr::MSTATUS_MXR;
+                self.csrs.mstatus = (self.csrs.mstatus & !mask) | (val & mask);
+                self.csrs.sstatus = self.csrs.mstatus & mask;
+            }
+            csr::SIE => {
+                let mask = self.csrs.mideleg;
+                self.csrs.mie = (self.csrs.mie & !mask) | (val & mask);
+            }
             csr::STVEC => self.csrs.stvec = val,
-            csr::SCOUNTEREN => {}
-
             csr::SSCRATCH => self.csrs.sscratch = val,
             csr::SEPC => self.csrs.sepc = val & !1,
             csr::SCAUSE => self.csrs.scause = val,
             csr::STVAL => self.csrs.stval = val,
-            csr::SIP => {}
-
+            csr::SIP => {
+                let mask = self.csrs.mideleg & (csr::MIP_SSIP);
+                self.csrs.mip = (self.csrs.mip & !mask) | (val & mask);
+            }
             csr::SATP => self.csrs.satp = val,
-
             _ => {}
         }
     }
 
     pub(crate) fn do_mret(&mut self) {
         self.pc = self.csrs.mepc & !1;
-        self.privilege = 1;
+        let mstatus = self.csrs.mstatus;
+        let mpp = (mstatus >> 11) & 3;
+        let mpie = (mstatus & csr::MSTATUS_MPIE) != 0;
+
+        self.privilege = mpp as u8;
+        let mut new_mstatus = mstatus;
+        if mpie {
+            new_mstatus |= csr::MSTATUS_MIE;
+        } else {
+            new_mstatus &= !csr::MSTATUS_MIE;
+        }
+        new_mstatus |= csr::MSTATUS_MPIE;
+        new_mstatus &= !csr::MSTATUS_MPP;
+
+        self.csrs.mstatus = new_mstatus;
         self.if_id = Default::default();
         self.id_ex = IdEx::default();
     }
 
     pub(crate) fn do_sret(&mut self) {
         self.pc = self.csrs.sepc & !1;
-        let spp = (self.csrs.sstatus & csr::MSTATUS_SPP) != 0;
+        let sstatus = self.csrs.sstatus;
+        let spp = (sstatus & csr::MSTATUS_SPP) != 0;
+        let spie = (sstatus & csr::MSTATUS_SPIE) != 0;
+
         self.privilege = if spp { 1 } else { 0 };
-        let spie = (self.csrs.sstatus & csr::MSTATUS_MPIE) != 0;
-
+        let mut new_sstatus = sstatus;
         if spie {
-            self.csrs.sstatus |= csr::MSTATUS_MIE;
+            new_sstatus |= csr::MSTATUS_SIE;
         } else {
-            self.csrs.sstatus &= !csr::MSTATUS_MIE;
+            new_sstatus &= !csr::MSTATUS_SIE;
         }
+        new_sstatus |= csr::MSTATUS_SPIE;
+        new_sstatus &= !csr::MSTATUS_SPP;
 
-        self.csrs.sstatus |= csr::MSTATUS_MPIE;
+        self.csrs.sstatus = new_sstatus;
+        let mask = csr::MSTATUS_SIE | csr::MSTATUS_SPIE | csr::MSTATUS_SPP;
+        self.csrs.mstatus = (self.csrs.mstatus & !mask) | (new_sstatus & mask);
+
         self.if_id = Default::default();
         self.id_ex = IdEx::default();
     }

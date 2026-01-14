@@ -1,0 +1,59 @@
+[general]
+trace_instructions = false
+start_pc = "0x80000000"
+user_stack_size = "0x800000"
+
+[system]
+ram_base = "0x80000000"
+uart_base = "0x10000000"
+disk_base = "0x10001000" # VirtIO
+clint_base = "0x02000000"
+syscon_base = "0x00100000"
+kernel_offset = "0x200000"
+bus_width = 8
+bus_latency = 1
+clint_divider = 100
+
+[memory]
+ram_size = "0x8000000" # 128MB
+controller = "Simple"
+row_miss_latency = 10
+tlb_size = 64
+
+[cache.l1_i]
+enabled = true
+size_bytes = 16384
+line_bytes = 64
+ways = 4
+policy = "LRU"
+latency = 1
+
+[cache.l1_d]
+enabled = true
+size_bytes = 16384
+line_bytes = 64
+ways = 4
+policy = "LRU"
+latency = 1
+
+[cache.l2]
+enabled = true
+size_bytes = 262144
+line_bytes = 64
+ways = 8
+policy = "LRU"
+latency = 10
+
+[cache.l3]
+enabled = false
+size_bytes = 0
+line_bytes = 64
+ways = 1
+policy = "LRU"
+latency = 0
+
+[pipeline]
+width = 1
+branch_predictor = "Perceptron"
+btb_size = 512
+ras_size = 16

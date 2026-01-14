@@ -20,11 +20,14 @@ struct Args {
     #[arg(short, long, default_value = "hardware/configs/default.toml")]
     config: String,
 
-    #[arg(short, long, default_value = "software/disk.img")]
+    #[arg(short, long, default_value = "software/Image")] // Default to Linux Image
     disk: String,
 
     #[arg(short, long)]
     file: Option<String>,
+
+    #[arg(long)]
+    dtb: Option<String>,
 }
 
 fn main() {
@@ -52,7 +55,7 @@ fn main() {
         cpu.privilege = 0; // User mode
     } else {
         println!("[*] Full System Mode");
-        loader::setup_kernel_load(&mut cpu, &config, disk_path);
+        loader::setup_kernel_load(&mut cpu, &config, disk_path, args.dtb);
     }
 
     loop {
