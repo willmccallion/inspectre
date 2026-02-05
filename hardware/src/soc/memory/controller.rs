@@ -1,77 +1,74 @@
-//! Memory Timing Controller.
+//! Memory controller implementations for latency modeling.
 //!
-//! This module defines the `MemoryController` trait and implementations for
-//! simulating memory access latencies. It supports both simple fixed-latency
-//! models and more complex DRAM timing models that account for row buffer
-//! locality.
+//! This module provides:
+//! 1. **SimpleController:** Fixed latency per access (no row-buffer modeling).
+//! 2. **DramController:** Row-buffer-aware latency (CAS, RAS, precharge) for DRAM-style timing.
+//!
+//! Controllers are `Send + Sync` for use with the Python bindings and multi-threaded simulation.
 
-/// Trait for memory controller implementations.
-pub trait MemoryController {
-    /// Calculates the latency for a memory access at a specific address.
+/// Trait for memory controller implementations that report access latency in cycles.
+///
+/// Implementors must be `Send + Sync` for thread-safe use with the bus and Python bindings.
+pub trait MemoryController: Send + Sync {
+    /// Returns the number of cycles required for an access to the given address.
     ///
     /// # Arguments
     ///
-    /// * `addr` - The physical address being accessed.
+    /// * `addr` - Physical address being accessed (may be used for row-buffer modeling).
     ///
     /// # Returns
     ///
-    /// The latency in CPU cycles.
+    /// Latency in simulation cycles.
     fn access_latency(&mut self, addr: u64) -> u64;
 }
 
-/// A simple memory controller with fixed latency.
-///
-/// Models an ideal memory system where every access takes a constant amount of time,
-/// ignoring row buffer locality or refresh cycles.
+/// Fixed-latency memory controller; every access takes the same number of cycles.
 pub struct SimpleController {
-    /// Fixed latency per access.
     latency: u64,
 }
 
 impl SimpleController {
-    /// Creates a new SimpleController.
+    /// Creates a simple controller with the given fixed latency in cycles.
     ///
     /// # Arguments
     ///
-    /// * `latency` - The fixed latency in cycles.
+    /// * `latency` - Cycles per access.
+    ///
+    /// # Returns
+    ///
+    /// A new `SimpleController`.
     pub fn new(latency: u64) -> Self {
         Self { latency }
     }
 }
 
 impl MemoryController for SimpleController {
-    /// Returns the fixed latency regardless of the address.
     fn access_latency(&mut self, _addr: u64) -> u64 {
         self.latency
     }
 }
 
-/// A DRAM-aware memory controller.
-///
-/// Simulates basic DRAM timing parameters including Row Access Strobe (RAS),
-/// Column Access Strobe (CAS), and Precharge (PRE). It tracks the currently
-/// open row to simulate row buffer hits (lower latency) and misses (higher latency).
+/// DRAM-style controller with row buffer; models CAS, RAS, and precharge latencies.
 pub struct DramController {
-    /// The index of the currently open row, if any.
     last_row: Option<u64>,
-    /// Column Access Strobe latency (Column command to data).
     t_cas: u64,
-    /// Row Access Strobe latency (Row Active command to Column command).
     t_ras: u64,
-    /// Precharge latency (Precharge command to Row Active command).
     t_pre: u64,
-    /// Bitmask used to extract the row index from a physical address.
     row_mask: u64,
 }
 
 impl DramController {
-    /// Creates a new DramController.
+    /// Creates a DRAM controller with the given timing parameters (in cycles).
     ///
     /// # Arguments
     ///
-    /// * `t_cas` - CAS latency.
-    /// * `t_ras` - RAS latency.
+    /// * `t_cas` - Column access strobe latency.
+    /// * `t_ras` - Row access strobe latency.
     /// * `t_pre` - Precharge latency.
+    ///
+    /// # Returns
+    ///
+    /// A new `DramController` with no row currently open.
     pub fn new(t_cas: u64, t_ras: u64, t_pre: u64) -> Self {
         Self {
             last_row: None,
@@ -84,14 +81,8 @@ impl DramController {
 }
 
 impl MemoryController for DramController {
-    /// Calculates latency based on row buffer state.
-    ///
-    /// * **Row Hit:** If the requested row is already open, latency is just `t_cas`.
-    /// * **Row Miss (Open):** If a different row is open, it must be precharged first: `t_pre + t_ras + t_cas`.
-    /// * **Row Miss (Closed):** If no row is open, the row must be activated: `t_ras + t_cas`.
     fn access_latency(&mut self, addr: u64) -> u64 {
         let row = addr & self.row_mask;
-
         match self.last_row {
             Some(open_row) if open_row == row => self.t_cas,
             Some(_) => {

@@ -1,44 +1,34 @@
-.PHONY: all clean run build-software build-hardware linux run-linux
+# Top-level Makefile: build all software and the simulator.
+# Use this to build everything; use software/Makefile for software-only.
 
-all: build-software build-hardware
+.PHONY: all software hardware linux clean run-bare run-linux
 
-build-software:
-	@echo "[Root] Building Bare Metal Software..."
+# Default: build simulator and all bare-metal software (kernel, user, benchmarks, disk).
+# Linux (Image + rootfs) is separate: make linux
+all: hardware software
+
+# RISC-V simulator (release binary at target/release/sim)
+hardware:
+	cargo build --release
+
+# Bare-metal: kernel, user programs, benchmarks, disk image.
+# Does not build Linux; use 'make linux' for that.
+software:
 	$(MAKE) -C software
 
-build-hardware:
-	@echo "[Root] Building CPU Simulator..."
-	cd hardware && cargo build --release
-
-test:
-	@echo "[Root] Testing CPU Simulator..."
-	cd hardware && cargo test --release
-
+# Linux: Buildroot Image + rootfs (downloads Buildroot, builds kernel + rootfs).
+# Output: software/linux/output/Image, disk.img, fw_jump.bin
 linux:
-	@echo "[Root] Building Linux (This takes time)..."
 	$(MAKE) -C software linux
 
-# Run Bare Metal
-run: all
-	@echo "[Root] Booting Bare Metal RISC-V System..."
-	./hardware/target/release/riscv-emulator \
-		--config hardware/configs/default.toml \
-		--kernel software/bin/kernel/kernel.bin
-		--disk software/disk.img
+# Convenience: run a bare-metal binary (builds if needed)
+run-bare: hardware software
+	./target/release/sim run -f software/bin/benchmarks/qsort.bin
 
-# Run Linux
-run-linux: build-hardware
-	@echo "[Root] Booting Linux..."
-	@if [ ! -f software/linux/output/Image ]; then \
-		echo "Error: Linux Image not found. Run 'make linux' first."; \
-		exit 1; \
-	fi
-	./hardware/target/release/riscv-emulator \
-		--config hardware/configs/linux.toml \
-		--kernel software/linux/output/Image \
-		--disk software/linux/output/disk.img \
-		--dtb software/linux/system.dtb
+# Convenience: build Linux then boot (builds if needed)
+run-linux: hardware
+	./target/release/sim script scripts/setup/boot_linux.py
 
 clean:
 	$(MAKE) -C software clean
-	rm -rf hardware/target
+	cargo clean

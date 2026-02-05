@@ -1,8 +1,11 @@
 //! CPU Core Definition and Initialization.
 //!
-//! This module defines the central `Cpu` structure that holds the state of the
-//! processor, including registers, pipeline latches, memory subsystems, and
-//! configuration. It serves as the container for the simulation state.
+//! This module defines the central `Cpu` structure, which serves as the container for the
+//! entire processor state. It coordinates the following:
+//! 1. **State Management:** Maintains registers, program counter, and privilege modes.
+//! 2. **Pipeline Control:** Manages latches and shadow buffers for five-stage execution.
+//! 3. **Memory Hierarchy:** Integrates MMU, TLBs, and multi-level cache simulations.
+//! 4. **System Integration:** Interfaces with the system bus, devices, and RAM.
 
 /// Control and Status Register access and management.
 pub mod csr;
@@ -32,8 +35,7 @@ use crate::stats::SimStats;
 /// Main CPU structure containing all processor state and components.
 ///
 /// The CPU orchestrates instruction execution through the five-stage pipeline,
-/// manages memory hierarchy (caches, MMU), handles traps and interrupts,
-/// and tracks performance statistics.
+/// manages memory hierarchy, handles traps, and tracks performance statistics.
 pub struct Cpu {
     /// General Purpose and Floating Point Registers.
     pub regs: RegisterFile,
@@ -102,10 +104,22 @@ pub struct Cpu {
     pub interrupt_inhibit_one_cycle: bool,
 
     /// Raw pointer to the start of simulated RAM.
+    ///
+    /// # Safety Invariants
+    ///
+    /// This pointer must maintain the following invariants at all times:
+    /// - Points to a valid, allocated memory region of size `(ram_end - ram_start)` bytes
+    /// - The memory region remains valid for the entire lifetime of the `Cpu` instance
+    /// - All accesses must verify: `ram_start <= address < ram_end` before dereferencing
+    /// - The pointer is valid for both reads and writes (memory is mutable)
+    /// - Memory is properly aligned for the underlying allocation (even if individual
+    ///   accesses use `read_unaligned`/`write_unaligned`)
+    /// - No other code may free or reallocate this memory while the CPU exists
+    /// - The pointer remains valid across CPU state changes and pipeline operations
     pub ram_ptr: *mut u8,
     /// Physical address where RAM starts.
     pub ram_start: u64,
-    /// Physical address where RAM ends.
+    /// Physical address where RAM ends (exclusive).
     pub ram_end: u64,
 
     /// Shadow buffer for IF/ID pipeline latch to avoid allocation churn.
@@ -116,21 +130,36 @@ pub struct Cpu {
     pub ex_mem_shadow: Vec<ExMemEntry>,
     /// Shadow buffer for MEM/WB pipeline latch.
     pub mem_wb_shadow: Vec<MemWbEntry>,
+
+    /// Ring buffer of (pc, inst) for last N retired instructions (for invalid-PC debug trace).
+    pub pc_trace: Vec<(u64, u32)>,
+    /// Last invalid PC we printed debug for (avoid duplicate dumps).
+    pub last_invalid_pc_debug: Option<u64>,
 }
 
+/// Maximum number of (pc, inst) entries kept for invalid-PC debug trace.
+pub const PC_TRACE_MAX: usize = 32;
+
 unsafe impl Send for Cpu {}
+unsafe impl Sync for Cpu {}
 
 impl Cpu {
     /// Creates a new CPU instance with the specified system and configuration.
     ///
-    /// Initializes all processor components including register files, CSRs,
-    /// caches, MMU, branch predictor, and pipeline latches according to
-    /// the provided configuration.
+    /// # Arguments
+    ///
+    /// * `system` - The SOC system containing the bus and devices.
+    /// * `config` - The simulator configuration parameters.
+    ///
+    /// # Returns
+    ///
+    /// A new `Cpu` instance initialized according to the provided configuration.
     pub fn new(mut system: System, config: &Config) -> Self {
         use crate::core::arch::csr::{
             MISA_DEFAULT_RV64IMAFDC, MISA_EXT_A, MISA_EXT_C, MISA_EXT_D, MISA_EXT_F, MISA_EXT_I,
             MISA_EXT_M, MISA_EXT_S, MISA_EXT_U, MISA_XLEN_64, MSTATUS_DEFAULT_RV64,
         };
+        use crate::isa::abi;
 
         let configured_misa = if let Some(ref override_str) = config.pipeline.misa_override {
             let s = override_str.trim_start_matches("0x");
@@ -162,15 +191,28 @@ impl Cpu {
                 .get_ram_info()
                 .unwrap_or((std::ptr::null_mut(), 0, 0));
 
+        let direct_mode = config.general.direct_mode;
+        let (privilege, regs) = if direct_mode {
+            let sp = config
+                .general
+                .initial_sp
+                .unwrap_or(config.system.ram_base + 0x100_0000);
+            let mut r = RegisterFile::new();
+            r.write(abi::REG_SP, sp);
+            (PrivilegeMode::User, r)
+        } else {
+            (PrivilegeMode::Machine, RegisterFile::new())
+        };
+
         Self {
-            regs: RegisterFile::new(),
+            regs,
             pc: config.general.start_pc,
             trace: config.general.trace_instructions,
             bus: system,
             exit_code: None,
             csrs,
-            privilege: PrivilegeMode::Machine,
-            direct_mode: false,
+            privilege,
+            direct_mode,
             mmio_base: config.system.ram_base,
             if_id: IfId::default(),
             id_ex: IdEx::default(),
@@ -201,10 +243,16 @@ impl Cpu {
             id_ex_shadow: Vec::with_capacity(config.pipeline.width),
             ex_mem_shadow: Vec::with_capacity(config.pipeline.width),
             mem_wb_shadow: Vec::with_capacity(config.pipeline.width),
+            pc_trace: Vec::with_capacity(PC_TRACE_MAX),
+            last_invalid_pc_debug: None,
         }
     }
 
     /// Retrieves the exit code if the simulation has finished.
+    ///
+    /// # Returns
+    ///
+    /// `Some(u64)` containing the exit code if finished, otherwise `None`.
     pub fn take_exit(&mut self) -> Option<u64> {
         self.exit_code.take()
     }

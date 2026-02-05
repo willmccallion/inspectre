@@ -5,6 +5,7 @@
 //! hardware prefetchers. It models cache hits, misses, and write-back
 //! penalties to simulate memory hierarchy latency.
 
+/// Cache replacement policy implementations (FIFO, LRU, MRU, PLRU, Random).
 pub mod policies;
 
 use self::policies::{
@@ -28,14 +29,17 @@ struct CacheLine {
 /// Supports various replacement policies (FIFO, LRU, PLRU, Random, MRU) and prefetchers
 /// (Next-Line, Stride, Stream, Tagged). Models cache hits, misses, and write-back penalties.
 pub struct CacheSim {
+    /// Access latency in cycles (added on hit; miss adds next-level latency).
     pub latency: u64,
+    /// When false, accesses bypass this cache and use next-level latency only.
     pub enabled: bool,
-    pub prefetcher: Option<Box<dyn Prefetcher>>,
+    /// Optional hardware prefetcher (boxed for dynamic dispatch; `Send + Sync` for thread safety).
+    pub prefetcher: Option<Box<dyn Prefetcher + Send + Sync>>,
     lines: Vec<CacheLine>,
     num_sets: usize,
     ways: usize,
     line_bytes: usize,
-    policy: Box<dyn ReplacementPolicy>,
+    policy: Box<dyn ReplacementPolicy + Send + Sync>,
 }
 
 impl CacheSim {
@@ -65,7 +69,7 @@ impl CacheSim {
         let num_lines = safe_size / safe_line;
         let num_sets = num_lines / safe_ways;
 
-        let policy: Box<dyn ReplacementPolicy> = match config.policy {
+        let policy: Box<dyn ReplacementPolicy + Send + Sync> = match config.policy {
             PolicyType::Fifo => Box::new(FifoPolicy::new(num_sets, safe_ways)),
             PolicyType::Random => Box::new(RandomPolicy::new(num_sets, safe_ways)),
             PolicyType::Plru => Box::new(PlruPolicy::new(num_sets, safe_ways)),
@@ -73,7 +77,7 @@ impl CacheSim {
             PolicyType::Mru => Box::new(MruPolicy::new(num_sets, safe_ways)),
         };
 
-        let prefetcher: Option<Box<dyn Prefetcher>> = match config.prefetcher {
+        let prefetcher: Option<Box<dyn Prefetcher + Send + Sync>> = match config.prefetcher {
             PrefetcherType::NextLine => Some(Box::new(NextLinePrefetcher::new(
                 safe_line,
                 config.prefetch_degree,
@@ -115,6 +119,13 @@ impl CacheSim {
     /// # Returns
     ///
     /// `true` if the address is present in the cache, `false` otherwise.
+    ///
+    /// # Panics
+    ///
+    /// This function will not panic. Array indexing is guaranteed safe because:
+    /// - `set_index` is always `< num_sets` (modulo operation)
+    /// - `base_idx = set_index * ways` is always `< lines.len()`
+    /// - `idx = base_idx + i` where `i < ways` ensures `idx < lines.len()`
     pub fn contains(&self, addr: u64) -> bool {
         if !self.enabled {
             return false;

@@ -1,22 +1,22 @@
 //! Pipeline latch structures for inter-stage communication.
 //!
-//! Pipeline latches store instruction state as it flows through the
-//! five pipeline stages. Each latch contains entries for multiple
-//! instructions to support superscalar execution.
+//! This module defines the buffers that connect the five stages of the pipeline. It implements:
+//! 1. **Instruction Flow:** Structures for carrying state between Fetch, Decode, Execute, Memory, and Writeback.
+//! 2. **Superscalar Support:** Multi-entry latches for wide-issue configurations.
+//! 3. **Trap Propagation:** Carrying architectural exceptions and interrupts through the pipeline.
 
 use crate::common::error::Trap;
 use crate::core::pipeline::signals::ControlSignals;
 
 /// Entry in the IF/ID pipeline latch (Fetch to Decode stage).
 ///
-/// Contains instruction information fetched from memory, including
-/// the instruction encoding, program counter, branch prediction
-/// information, and any fetch-time traps.
+/// Contains instruction information fetched from memory, including the raw
+/// encoding and branch prediction metadata.
 #[derive(Clone, Default, Debug)]
 pub struct IfIdEntry {
     /// Program counter of the instruction.
     pub pc: u64,
-    /// 32-bit instruction encoding (expanded from compressed if needed).
+    /// 32-bit instruction encoding.
     pub inst: u32,
     /// Size of the instruction in bytes (2 for compressed, 4 for standard).
     pub inst_size: u64,
@@ -30,9 +30,8 @@ pub struct IfIdEntry {
 
 /// Entry in the ID/EX pipeline latch (Decode to Execute stage).
 ///
-/// Contains decoded instruction information including register indices,
-/// immediate values, register values read from the register file,
-/// control signals, and branch prediction information.
+/// Contains decoded instruction information, including register indices,
+/// immediate values, and control signals.
 #[derive(Clone, Default, Debug)]
 pub struct IdExEntry {
     /// Program counter of the instruction.
@@ -45,7 +44,7 @@ pub struct IdExEntry {
     pub rs1: usize,
     /// Second source register index (rs2).
     pub rs2: usize,
-    /// Third source register index (rs3, for FMA instructions).
+    /// Third source register index (rs3).
     pub rs3: usize,
     /// Destination register index (rd).
     pub rd: usize,
@@ -55,7 +54,7 @@ pub struct IdExEntry {
     pub rv1: u64,
     /// Value read from rs2 register.
     pub rv2: u64,
-    /// Value read from rs3 register (for FMA instructions).
+    /// Value read from rs3 register.
     pub rv3: u64,
     /// Control signals for downstream pipeline stages.
     pub ctrl: ControlSignals,
@@ -69,8 +68,7 @@ pub struct IdExEntry {
 
 /// Entry in the EX/MEM pipeline latch (Execute to Memory stage).
 ///
-/// Contains execution results including ALU output, store data,
-/// and control signals needed for the memory stage.
+/// Contains execution results, including ALU outputs and memory operation parameters.
 #[derive(Clone, Default, Debug)]
 pub struct ExMemEntry {
     /// Program counter of the instruction.
@@ -93,8 +91,7 @@ pub struct ExMemEntry {
 
 /// Entry in the MEM/WB pipeline latch (Memory to Writeback stage).
 ///
-/// Contains memory stage results including loaded data, ALU results,
-/// and control signals needed for register writeback.
+/// Contains memory stage results, including loaded data and final register write values.
 #[derive(Clone, Default, Debug)]
 pub struct MemWbEntry {
     /// Program counter of the instruction.
@@ -117,9 +114,7 @@ pub struct MemWbEntry {
 
 /// IF/ID pipeline latch (Fetch to Decode stage).
 ///
-/// Contains a vector of instructions fetched from memory, ready
-/// to be decoded. Supports multiple instructions per cycle for
-/// superscalar execution.
+/// Supports multiple instructions per cycle for superscalar execution.
 #[derive(Clone, Debug)]
 pub struct IfId {
     /// Vector of fetched instruction entries.
@@ -141,9 +136,7 @@ impl Default for IfId {
 
 /// ID/EX pipeline latch (Decode to Execute stage).
 ///
-/// Contains a vector of decoded instructions with register values
-/// and control signals, ready for execution. Supports multiple
-/// instructions per cycle for superscalar execution.
+/// Supports multiple instructions per cycle for superscalar execution.
 #[derive(Clone, Default, Debug)]
 pub struct IdEx {
     /// Vector of decoded instruction entries.
@@ -152,7 +145,6 @@ pub struct IdEx {
 
 /// EX/MEM pipeline latch (Execute to Memory stage).
 ///
-/// Contains a vector of execution results ready for memory access.
 /// Supports multiple instructions per cycle for superscalar execution.
 #[derive(Clone, Default, Debug)]
 pub struct ExMem {
@@ -162,8 +154,7 @@ pub struct ExMem {
 
 /// MEM/WB pipeline latch (Memory to Writeback stage).
 ///
-/// Contains a vector of memory stage results ready for register
-/// writeback. Supports multiple instructions per cycle for superscalar execution.
+/// Supports multiple instructions per cycle for superscalar execution.
 #[derive(Clone, Default, Debug)]
 pub struct MemWb {
     /// Vector of memory stage result entries.

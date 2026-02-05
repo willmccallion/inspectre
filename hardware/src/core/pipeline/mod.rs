@@ -1,8 +1,12 @@
 //! Instruction pipeline implementation.
 //!
-//! This module contains the five-stage instruction pipeline (fetch, decode,
-//! execute, memory, writeback), pipeline latches for inter-stage communication,
-//! hazard detection and forwarding logic, and control signals.
+//! This module contains the implementation of the five-stage instruction pipeline.
+//! It includes the following components:
+//! 1. **Hazards:** Detection and resolution of data and structural hazards.
+//! 2. **Latches:** Inter-stage buffers for communication between pipeline stages.
+//! 3. **Signals:** Control signals generated during instruction decoding.
+//! 4. **Stages:** Implementation of Fetch, Decode, Execute, Memory, and Writeback stages.
+//! 5. **Traits:** Common interfaces for pipeline components and stages.
 
 /// Pipeline hazard detection and forwarding logic.
 pub mod hazards;

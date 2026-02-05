@@ -1,63 +1,30 @@
-//! RISC-V 64-bit System Simulator Library.
+//! RISC-V system simulator library.
 //!
-//! This crate implements a cycle-accurate simulator for the RISC-V 64-bit architecture
-//! (RV64IMAFDC). It includes a 5-stage pipeline, memory hierarchy (cache/MMU), and
-//! System-on-Chip peripherals.
-//!
-//! # Architecture
-//!
-//! * **Core**: 5-stage in-order pipeline (Fetch, Decode, Execute, Memory, Writeback).
-//! * **Memory**: SV39 Virtual Memory, TLBs, and multi-level set-associative caches.
-//! * **Peripherals**: UART, CLINT, PLIC, VirtIO Block Device.
-//!
-//! # Modules
-//!
-//! * `common`: Shared types, constants, and error handling.
-//! * `config`: Configuration loading and parsing.
-//! * `core`: CPU core implementation.
-//! * `isa`: Instruction Set Architecture definitions.
-//! * `sim`: Simulation harness and loaders.
-//! * `soc`: System-on-Chip component implementations.
-//! * `stats`: Performance statistics collection.
+//! This crate implements a cycle-accurate RISC-V RV64GC simulator with the following:
+//! 1. **Core:** Pipeline (fetch, decode, execute, memory, writeback), GPR/FPR, and CSR state.
+//! 2. **Memory:** MMU, TLB, caches, prefetchers, and configurable memory controllers.
+//! 3. **ISA:** Decoding and execution for RV64I/M/A/F/D/C and privileged operations.
+//! 4. **SoC:** Interconnect, RAM, and MMIO devices (UART, CLINT, PLIC, VirtIO, etc.).
+//! 5. **Simulation:** Loader, configuration, and statistics collection.
 
-/// Shared types, constants, error handling, and register definitions.
-///
-/// Provides fundamental data structures and error types used throughout
-/// the simulator, including register file abstractions and common constants.
+/// Common types and constants (addresses, registers, traps, access types).
 pub mod common;
-
-/// Configuration system for processor, memory, cache, and pipeline settings.
-///
-/// Loads and parses TOML configuration files to customize simulator behavior
-/// for different simulation scenarios and hardware configurations.
+/// Simulator configuration (defaults, enums, hierarchical config structures).
 pub mod config;
-
-/// CPU core implementation including pipeline stages and execution units.
-///
-/// Implements the 5-stage in-order pipeline (Fetch, Decode, Execute, Memory, Writeback),
-/// architectural state management, and trap handling.
+/// CPU core (pipeline, arch, execution, memory, trap).
 pub mod core;
-
-/// Instruction Set Architecture definitions and decoders.
-///
-/// Implements RISC-V RV64IMAFDC instruction decoding, encoding, and ISA-specific
-/// modules for base integer, multiply, atomic, floating-point, and compressed extensions.
+/// Instruction set (decode, instruction, ABI, RV64I/M/A/F/D, RVC, privileged).
 pub mod isa;
-
-/// Simulation harness, binary loaders, and execution orchestration.
-///
-/// Handles loading binaries and kernel images, setting up execution environments,
-/// and coordinating the simulation loop.
+/// Binary loader and kernel setup.
 pub mod sim;
-
-/// System-on-Chip components including memory controllers and peripherals.
-///
-/// Implements the memory hierarchy, bus interconnect, and MMIO devices (UART,
-/// CLINT, PLIC, VirtIO disk) that form the complete system.
+/// System-on-chip (builder, bus, devices, memory, traits).
 pub mod soc;
-
-/// Performance statistics collection and reporting.
-///
-/// Tracks cycle counts, instruction counts, cache statistics, and other
-/// performance metrics during simulation execution.
+/// Simulation statistics collection and reporting.
 pub mod stats;
+
+/// Root configuration type; use `Config::default()` or deserialize from Python/JSON.
+pub use crate::config::Config;
+/// Main CPU type; holds pipeline, caches, MMU, and stats.
+pub use crate::core::Cpu;
+/// Top-level system (bus, memory controller, devices); construct with `System::new`.
+pub use crate::soc::System;

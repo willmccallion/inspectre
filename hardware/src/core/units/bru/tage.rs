@@ -4,8 +4,18 @@
 //! geometrically increasing history lengths. It provides high accuracy by
 //! matching long history patterns while falling back to shorter histories
 //! or the base predictor when necessary.
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `predict()`: O(B) where B is the number of banks (typically 4-6)
+//!   - `update()`: O(B)
+//! - **Space Complexity:** O(T × B) where T is table size per bank
+//! - **Hardware Cost:** High - multiple table lookups, priority selection
+//! - **Best Case:** Complex history-correlated patterns with varying lengths
+//! - **Worst Case:** Random or completely uncorrelated branches (~50% accuracy)
 
-use super::{btb::Btb, ras::Ras, BranchPredictor};
+use super::{BranchPredictor, btb::Btb, ras::Ras};
 use crate::config::TageConfig;
 
 /// An entry in a TAGE bank.

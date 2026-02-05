@@ -1,14 +1,15 @@
 //! RISC-V Floating-Point Register File.
 //!
-//! This module implements the Floating-Point Register (FPR) file, containing
-//! 32 registers (f0-f31) used for floating-point arithmetic. It supports
-//! reading and writing raw 64-bit IEEE 754 values.
+//! This module implements the Floating-Point Register (FPR) file for the RISC-V architecture.
+//! It performs the following:
+//! 1. **Storage:** Maintains 32 floating-point registers (`f0`-`f31`).
+//! 2. **Type Conversion:** Handles conversion between 64-bit IEEE 754 raw bits and internal representation.
+//! 3. **Access Control:** Provides methods for reading and writing double-precision values.
 
 /// Floating-Point Register file.
 ///
-/// Contains 32 floating-point registers (f0-f31) used for floating-point
-/// operations. Registers are stored as 64-bit double-precision values
-/// and can be accessed as raw bits for single-precision operations.
+/// Contains 32 floating-point registers used for arithmetic operations. Registers
+/// are stored as 64-bit double-precision values.
 pub struct Fpr {
     fregs: [f64; 32],
 }
@@ -18,7 +19,7 @@ impl Fpr {
     ///
     /// # Returns
     ///
-    /// A new `Fpr` instance with all 32 registers set to 0.0.
+    /// A new `Fpr` instance with all registers set to `0.0`.
     pub fn new() -> Self {
         Self { fregs: [0.0; 32] }
     }
@@ -27,7 +28,7 @@ impl Fpr {
     ///
     /// # Arguments
     ///
-    /// * `idx` - Register index (0-31)
+    /// * `idx` - Register index (0-31).
     ///
     /// # Returns
     ///
@@ -40,8 +41,8 @@ impl Fpr {
     ///
     /// # Arguments
     ///
-    /// * `idx` - Register index (0-31)
-    /// * `val` - The 64-bit IEEE 754 representation of the floating-point value
+    /// * `idx` - Register index (0-31).
+    /// * `val` - The 64-bit IEEE 754 representation of the floating-point value.
     pub fn write(&mut self, idx: usize, val: u64) {
         self.fregs[idx] = f64::from_bits(val);
     }

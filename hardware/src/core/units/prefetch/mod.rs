@@ -24,7 +24,7 @@ pub use self::tagged::TaggedPrefetcher;
 ///
 /// Prefetchers observe memory access patterns and generate prefetch
 /// requests to reduce cache miss penalties.
-pub trait Prefetcher {
+pub trait Prefetcher: Send + Sync {
     /// Observes a memory access and generates prefetch addresses.
     ///
     /// Called by the cache on each access to allow the prefetcher to

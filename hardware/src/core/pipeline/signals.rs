@@ -1,218 +1,267 @@
 //! Pipeline control signals and operation types.
 //!
-//! This module defines the control signals that flow through the pipeline
-//! to control instruction execution, including ALU operations, memory
-//! operations, CSR operations, and operand source selection.
+//! This module defines the signals that control instruction execution. It performs:
+//! 1. **Operation Classification:** Categorizes ALU, atomic, and CSR operations.
+//! 2. **Operand Selection:** Defines sources for ALU inputs (registers, PC, or immediates).
+//! 3. **Memory Control:** Specifies access widths and sign-extension requirements.
+//! 4. **System Control:** Manages privilege transitions and system-level instructions.
 
 /// ALU operation types for integer and floating-point instructions.
-///
-/// Specifies the operation to be performed by the ALU or FPU unit.
-/// Includes all RISC-V integer operations (I, M extensions) and
-/// floating-point operations (F, D extensions).
 #[derive(Clone, Copy, Debug, Default)]
 pub enum AluOp {
     /// Default value (no operation).
     #[default]
     Add,
-    /// Integer addition.
-    Sub,
+
     /// Integer subtraction.
-    Sll,
+    Sub,
+
     /// Shift left logical.
-    Slt,
+    Sll,
+
     /// Set less than (signed).
-    Sltu,
+    Slt,
+
     /// Set less than unsigned.
-    Xor,
+    Sltu,
+
     /// Bitwise XOR.
-    Srl,
+    Xor,
+
     /// Shift right logical.
-    Sra,
+    Srl,
+
     /// Shift right arithmetic.
-    Or,
+    Sra,
+
     /// Bitwise OR.
-    And,
+    Or,
+
     /// Bitwise AND.
-    Mul,
+    And,
+
     /// Integer multiply (low bits).
-    Mulh,
+    Mul,
+
     /// Integer multiply (high bits, signed × signed).
-    Mulhsu,
+    Mulh,
+
     /// Integer multiply (high bits, signed × unsigned).
-    Mulhu,
+    Mulhsu,
+
     /// Integer multiply (high bits, unsigned × unsigned).
-    Div,
+    Mulhu,
+
     /// Integer divide (signed).
-    Divu,
+    Div,
+
     /// Integer divide (unsigned).
-    Rem,
+    Divu,
+
     /// Integer remainder (signed).
-    Remu,
+    Rem,
+
     /// Integer remainder (unsigned).
-    FAdd,
+    Remu,
+
     /// Floating-point addition.
-    FSub,
+    FAdd,
+
     /// Floating-point subtraction.
-    FMul,
+    FSub,
+
     /// Floating-point multiplication.
-    FDiv,
+    FMul,
+
     /// Floating-point division.
-    FSqrt,
+    FDiv,
+
     /// Floating-point square root.
-    FMin,
+    FSqrt,
+
     /// Floating-point minimum.
-    FMax,
+    FMin,
+
     /// Floating-point maximum.
-    FMAdd,
+    FMax,
+
     /// Floating-point multiply-add (fused).
-    FMSub,
+    FMAdd,
+
     /// Floating-point multiply-subtract (fused).
-    FNMAdd,
+    FMSub,
+
     /// Floating-point negated multiply-add (fused).
-    FNMSub,
+    FNMAdd,
+
     /// Floating-point negated multiply-subtract (fused).
-    FCvtWS,
+    FNMSub,
+
     /// Convert word to single-precision float (signed).
-    FCvtLS,
+    FCvtWS,
+
     /// Convert long to single-precision float (signed).
-    FCvtSW,
+    FCvtLS,
+
     /// Convert single-precision float to word (signed).
-    FCvtSL,
+    FCvtSW,
+
     /// Convert single-precision float to long (signed).
-    FCvtSD,
+    FCvtSL,
+
     /// Convert single-precision to double-precision float.
-    FCvtDS,
+    FCvtSD,
+
     /// Convert double-precision to single-precision float.
-    FSgnJ,
+    FCvtDS,
+
     /// Floating-point sign injection (copy sign).
-    FSgnJN,
+    FSgnJ,
+
     /// Floating-point sign injection (negate sign).
-    FSgnJX,
+    FSgnJN,
+
     /// Floating-point sign injection (XOR sign).
-    FEq,
+    FSgnJX,
+
     /// Floating-point equality comparison.
-    FLt,
+    FEq,
+
     /// Floating-point less-than comparison.
-    FLe,
+    FLt,
+
     /// Floating-point less-than-or-equal comparison.
-    FClass,
+    FLe,
+
     /// Floating-point classify.
+    FClass,
+
     /// Move floating-point register to integer register.
     FMvToX,
+
     /// Move integer register to floating-point register.
     FMvToF,
 }
 
 /// Atomic memory operation types (RISC-V A extension).
-///
-/// Specifies the type of atomic operation to perform on memory,
-/// including load-reserved (LR), store-conditional (SC), and
-/// various atomic read-modify-write operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AtomicOp {
     /// No atomic operation.
     #[default]
     None,
+
     /// Load-reserved (atomic load with reservation).
     Lr,
+
     /// Store-conditional (atomic store if reservation valid).
     Sc,
+
     /// Atomic swap.
     Swap,
+
     /// Atomic add.
     Add,
+
     /// Atomic XOR.
     Xor,
+
     /// Atomic AND.
     And,
+
     /// Atomic OR.
     Or,
+
     /// Atomic minimum (signed).
     Min,
+
     /// Atomic maximum (signed).
     Max,
+
     /// Atomic minimum (unsigned).
     Minu,
+
     /// Atomic maximum (unsigned).
     Maxu,
 }
 
 /// Memory access width for load and store operations.
-///
-/// Specifies the size of data to be loaded from or stored to memory.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum MemWidth {
     /// No memory operation.
     #[default]
     Nop,
+
     /// 8-bit byte access.
     Byte,
+
     /// 16-bit half-word access.
     Half,
+
     /// 32-bit word access.
     Word,
+
     /// 64-bit double-word access.
     Double,
 }
 
 /// Source for ALU operand A.
-///
-/// Selects the source of the first ALU operand from register file,
-/// program counter, or zero.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum OpASrc {
-    /// Use rs1 register value.
+    /// Use `rs1` register value.
     #[default]
     Reg1,
-    /// Use program counter value (for AUIPC, JAL).
+
+    /// Use program counter value.
     Pc,
-    /// Use zero (for LUI).
+
+    /// Use zero.
     Zero,
 }
 
 /// Source for ALU operand B.
-///
-/// Selects the source of the second ALU operand from immediate value,
-/// register file, or zero.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum OpBSrc {
     /// Use sign-extended immediate value.
     #[default]
     Imm,
-    /// Use rs2 register value.
+
+    /// Use `rs2` register value.
     Reg2,
+
     /// Use zero.
     Zero,
 }
 
 /// CSR (Control and Status Register) operation type.
-///
-/// Specifies the type of CSR operation: read-write, read-set, read-clear,
-/// or their immediate variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CsrOp {
     /// No CSR operation.
     #[default]
     None,
-    /// CSR read-write (CSRRW).
+
+    /// CSR read-write (`CSRRW`).
     Rw,
-    /// CSR read-set (CSRRS).
+
+    /// CSR read-set (`CSRRS`).
     Rs,
-    /// CSR read-clear (CSRRC).
+
+    /// CSR read-clear (`CSRRC`).
     Rc,
-    /// CSR read-write immediate (CSRRWI).
+
+    /// CSR read-write immediate (`CSRRWI`).
     Rwi,
-    /// CSR read-set immediate (CSRRSI).
+
+    /// CSR read-set immediate (`CSRRSI`).
     Rsi,
-    /// CSR read-clear immediate (CSRRCI).
+
+    /// CSR read-clear immediate (`CSRRCI`).
     Rci,
 }
 
 /// Control signals for pipeline stage execution.
 ///
-/// Contains all control signals generated during instruction decode
-/// that control execution, memory access, register writes, and
-/// system operations throughout the pipeline stages.
+/// Contains all signals generated during instruction decode that control execution
+/// and memory access throughout the pipeline stages.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ControlSignals {
     /// Enable write to integer destination register.
@@ -225,13 +274,13 @@ pub struct ControlSignals {
     pub mem_write: bool,
     /// Instruction is a conditional branch.
     pub branch: bool,
-    /// Instruction is an unconditional jump (JAL/JALR).
+    /// Instruction is an unconditional jump (`JAL`/`JALR`).
     pub jump: bool,
-    /// Instruction uses 32-bit operands (RV32 mode).
+    /// Instruction uses 32-bit operands.
     pub is_rv32: bool,
-    /// Width of memory access for load/store operations.
+    /// Width of memory access.
     pub width: MemWidth,
-    /// Load should be sign-extended (vs zero-extended).
+    /// Load should be sign-extended.
     pub signed_load: bool,
     /// ALU operation to perform.
     pub alu: AluOp,
@@ -239,24 +288,24 @@ pub struct ControlSignals {
     pub a_src: OpASrc,
     /// Source selection for ALU operand B.
     pub b_src: OpBSrc,
-    /// Instruction is a system instruction (CSR, ECALL, etc.).
+    /// Instruction is a system instruction.
     pub is_system: bool,
     /// CSR address for CSR operations.
     pub csr_addr: u32,
-    /// Instruction is MRET (return from machine mode).
+    /// Instruction is `MRET`.
     pub is_mret: bool,
-    /// Instruction is SRET (return from supervisor mode).
+    /// Instruction is `SRET`.
     pub is_sret: bool,
     /// CSR operation type.
     pub csr_op: CsrOp,
-    /// rs1 is a floating-point register.
+    /// `rs1` is a floating-point register.
     pub rs1_fp: bool,
-    /// rs2 is a floating-point register.
+    /// `rs2` is a floating-point register.
     pub rs2_fp: bool,
-    /// rs3 is a floating-point register (for FMA instructions).
+    /// `rs3` is a floating-point register.
     pub rs3_fp: bool,
     /// Atomic memory operation type.
     pub atomic_op: AtomicOp,
-    /// Instruction is FENCE.I (instruction fence).
+    /// Instruction is `FENCE.I`.
     pub is_fence_i: bool,
 }

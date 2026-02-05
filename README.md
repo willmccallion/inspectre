@@ -1,6 +1,6 @@
 # RISC-V 64-bit System Simulator
 
-This project is a cycle-accurate system simulator for the RISC-V 64-bit architecture (RV64IMAFD). It implements a 5-stage pipelined CPU, a comprehensive memory hierarchy, and a custom microkernel to demonstrate end-to-end execution of user-space applications.
+This project is a cycle-accurate system simulator for the RISC-V 64-bit architecture (RV64IMAFD). It implements a 5-stage pipelined CPU, a comprehensive memory hierarchy, and a custom microkernel to demonstrate end-to-end execution of user-space applications. Linux still fails to completely boot but is close.
 
 ## Technologies Used
 
@@ -41,24 +41,28 @@ This project is a cycle-accurate system simulator for the RISC-V 64-bit architec
 * `software/user/`: User-space applications (Raytracer, Chess, etc.).
 * `scripts/`: Python tools for performance analysis and benchmarking.
 
-## Build Instructions
+## Build and Run
 
-This project requires Rust and the `riscv64-unknown-elf-gcc` toolchain.
+Requires Rust and the `riscv64-unknown-elf-gcc` toolchain.
 
-**Build the System:**
-Compiles the kernel, libc, user apps, creates the disk image, and builds the Rust simulator.
+**Build:** From repo root (builds simulator and `sim` CLI)
 ```bash
 make all
+# or: cargo build --release
 ```
 
-**Run a Simulation:**
-Execute a binary inside the simulator.
+**Run a binary (bare-metal):**
 ```bash
-./sim chess
+./target/release/sim run -f software/bin/benchmarks/qsort.bin
 ```
 
-**Run Analysis:**
-Generate performance reports across different hardware configurations.
+**Run Python scripts (P550 vs M1 comparison, stats via `.query()`):**
 ```bash
-python3 scripts/run_bench.py
+./target/release/sim script scripts/p550/run.py
+./target/release/sim script scripts/tests/compare_p550_m1.py
 ```
+See **scripts/README.md** for script options. Full documentation: **[docs/](docs/README.md)** (architecture, API, getting started).
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE).

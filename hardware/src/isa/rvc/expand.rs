@@ -3,7 +3,7 @@
 //! Provides the `expand` function which converts a 16-bit compressed instruction
 //! into its 32-bit uncompressed equivalent.
 
-use super::constants::{q0, q1, q2, QUADRANT_0, QUADRANT_1, QUADRANT_2};
+use super::constants::{QUADRANT_0, QUADRANT_1, QUADRANT_2, q0, q1, q2};
 use crate::isa::privileged::opcodes as sys_ops;
 use crate::isa::rv64f::opcodes as fp_opcodes;
 use crate::isa::rv64i::{funct3, funct7, opcodes};

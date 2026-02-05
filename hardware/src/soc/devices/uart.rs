@@ -7,7 +7,8 @@
 use crate::soc::devices::Device;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 
 /// Receiver Buffer Register (Read) / Divisor Latch Low (DLAB=1).
@@ -76,8 +77,8 @@ pub struct Uart {
     base_addr: u64,
     /// Queue for received bytes (from stdin).
     rx_queue: VecDeque<u8>,
-    /// Channel receiver for stdin thread.
-    rx_receiver: Receiver<u8>,
+    /// Channel receiver for stdin thread. Wrapped in Mutex for Sync.
+    rx_receiver: Mutex<Receiver<u8>>,
     /// Interrupt Enable Register.
     ier: u8,
     /// Line Control Register.
@@ -92,8 +93,10 @@ pub struct Uart {
     tick_count: u8,
     /// Transmitter Holding Register Empty Interrupt Pending.
     thre_ip: bool,
-    /// Buffer for outgoing bytes (to stdout).
+    /// Buffer for outgoing bytes (to stdout or stderr).
     tx_buffer: Vec<u8>,
+    /// When true, output goes to stderr (for visibility when run from Python).
+    to_stderr: bool,
     /// State machine index for panic detection.
     panic_match_state: usize,
     /// Flag indicating if a kernel panic string was detected.
@@ -108,7 +111,8 @@ impl Uart {
     /// # Arguments
     ///
     /// * `base_addr` - The base physical address of the UART device.
-    pub fn new(base_addr: u64) -> Self {
+    /// * `to_stderr` - When true, write output to stderr instead of stdout (for Python API).
+    pub fn new(base_addr: u64, to_stderr: bool) -> Self {
         let (tx, rx) = channel();
 
         thread::spawn(move || {
@@ -123,7 +127,7 @@ impl Uart {
         Self {
             base_addr,
             rx_queue: VecDeque::new(),
-            rx_receiver: rx,
+            rx_receiver: Mutex::new(rx),
             ier: 0,
             lcr: 0,
             mcr: 0,
@@ -132,6 +136,7 @@ impl Uart {
             tick_count: 0,
             thre_ip: true,
             tx_buffer: Vec::new(),
+            to_stderr,
             panic_match_state: 0,
             panic_detected: false,
         }
@@ -139,8 +144,10 @@ impl Uart {
 
     /// Polls the stdin receiver and populates the RX queue.
     fn check_stdin(&mut self) {
-        while let Ok(byte) = self.rx_receiver.try_recv() {
-            self.rx_queue.push_back(byte);
+        if let Ok(rx) = self.rx_receiver.lock() {
+            while let Ok(byte) = rx.try_recv() {
+                self.rx_queue.push_back(byte);
+            }
         }
     }
 
@@ -158,12 +165,17 @@ impl Uart {
         IIR_NO_INTERRUPT
     }
 
-    /// Flushes the transmit buffer to stdout.
+    /// Flushes the transmit buffer to stdout or stderr.
     fn flush_buffer(&mut self) {
         if !self.tx_buffer.is_empty() {
             let output: String = self.tx_buffer.iter().map(|&b| b as char).collect();
-            print!("{}", output);
-            io::stdout().flush().ok();
+            if self.to_stderr {
+                eprint!("{}", output);
+                io::stderr().flush().ok();
+            } else {
+                print!("{}", output);
+                io::stdout().flush().ok();
+            }
             self.tx_buffer.clear();
         }
     }

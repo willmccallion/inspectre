@@ -1,9 +1,12 @@
 //! Configuration system for the RISC-V simulator.
 //!
-//! Defines all configuration structures and enums used to configure
-//! the processor, memory system, caches, and pipeline. Configuration
-//! is loaded from TOML files and can be customized for different
-//! simulation scenarios.
+//! This module defines all configuration structures and enums used to parameterize
+//! the simulator. It provides:
+//! 1. **Defaults:** Baseline hardware constants (RAM, MMIO, cache, branch predictor).
+//! 2. **Structures:** Hierarchical config for general, system, memory, cache, and pipeline.
+//! 3. **Enums:** Memory controller, replacement policy, prefetcher, and branch predictor types.
+//!
+//! Configuration is supplied via JSON from the Python API (`SimConfig`) or use `Config::default()` for the CLI.
 
 use serde::Deserialize;
 
@@ -261,10 +264,95 @@ pub enum BranchPredictor {
 
 /// Root configuration structure containing all simulator settings.
 ///
-/// This is the top-level configuration structure loaded from TOML files
-/// that specifies all aspects of the simulator including memory, caches,
-/// pipeline, and branch prediction.
-#[derive(Debug, Deserialize)]
+/// Configuration is supplied by the Python API (SimConfig.to_dict() → JSON) or
+/// use Config::default() for the CLI. No TOML files.
+///
+/// # Examples
+///
+/// Creating a default configuration:
+///
+/// ```
+/// use riscv_core::config::Config;
+///
+/// let config = Config::default();
+/// assert_eq!(config.general.trace_instructions, false);
+/// assert_eq!(config.cache.l1_d.size_bytes, 4096);
+/// ```
+///
+/// Deserializing from JSON (typical Python API usage):
+///
+/// ```
+/// use riscv_core::config::{Config, BranchPredictor, Prefetcher};
+///
+/// let json = r#"{
+///     "general": {
+///         "trace_instructions": true,
+///         "start_pc": 2147483648,
+///         "direct_mode": true
+///     },
+///     "system": {
+///         "ram_base": 2147483648,
+///         "ram_size": 134217728,
+///         "kernel_offset": 2097152
+///     },
+///     "memory": {
+///         "controller": "Dram",
+///         "t_cas": 14,
+///         "t_ras": 14,
+///         "t_pre": 14,
+///         "row_miss_latency": 120,
+///         "tlb_size": 32
+///     },
+///     "cache": {
+///         "l1_d": {
+///             "enabled": true,
+///             "size_bytes": 32768,
+///             "line_bytes": 64,
+///             "ways": 4,
+///             "latency": 1,
+///             "policy": "Lru",
+///             "prefetcher": "Stride"
+///         },
+///         "l1_i": {
+///             "enabled": true,
+///             "size_bytes": 32768,
+///             "line_bytes": 64,
+///             "ways": 4,
+///             "latency": 1,
+///             "policy": "Lru",
+///             "prefetcher": "NextLine"
+///         },
+///         "l2": {
+///             "enabled": true,
+///             "size_bytes": 131072,
+///             "line_bytes": 64,
+///             "ways": 8,
+///             "latency": 10,
+///             "policy": "Lru",
+///             "prefetcher": "None"
+///         },
+///         "l3": {
+///             "enabled": false,
+///             "size_bytes": 0,
+///             "line_bytes": 64,
+///             "ways": 1,
+///             "latency": 20,
+///             "policy": "Lru",
+///             "prefetcher": "None"
+///         }
+///     },
+///     "pipeline": {
+///         "branch_predictor": "GShare"
+///     }
+/// }"#;
+///
+/// let config: Config = serde_json::from_str(json).unwrap();
+/// assert_eq!(config.general.trace_instructions, true);
+/// assert_eq!(config.cache.l1_d.size_bytes, 32768);
+/// assert_eq!(config.cache.l1_d.prefetcher, Prefetcher::Stride);
+/// assert_eq!(config.pipeline.branch_predictor, BranchPredictor::GShare);
+/// ```
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     /// General simulation settings
     pub general: GeneralConfig,
@@ -278,11 +366,23 @@ pub struct Config {
     pub pipeline: PipelineConfig,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            general: GeneralConfig::default(),
+            system: SystemConfig::default(),
+            memory: MemoryConfig::default(),
+            cache: CacheHierarchyConfig::default(),
+            pipeline: PipelineConfig::default(),
+        }
+    }
+}
+
 /// General simulation settings and options.
 ///
-/// Contains high-level simulation configuration such as tracing
-/// and initial program counter.
-#[derive(Debug, Deserialize)]
+/// Contains high-level simulation configuration such as tracing,
+/// initial program counter, and direct (bare-metal) execution mode.
+#[derive(Debug, Clone, Deserialize)]
 pub struct GeneralConfig {
     /// Enable instruction tracing to stderr and debug output (hang detection, status updates, mode switches)
     #[serde(default)]
@@ -291,26 +391,36 @@ pub struct GeneralConfig {
     /// Initial PC value (defaults to RAM base)
     #[serde(default = "GeneralConfig::default_start_pc")]
     pub start_pc: u64,
+
+    /// Direct execution mode: bare-metal binary, no kernel. Traps cause exit instead of jumping to MTVEC.
+    /// Default true so user only needs to change this when running a kernel.
+    #[serde(default = "GeneralConfig::default_direct_mode")]
+    pub direct_mode: bool,
+
+    /// Initial stack pointer (only used when direct_mode is true). Defaults to ram_base + 16MiB if not set.
+    #[serde(default)]
+    pub initial_sp: Option<u64>,
 }
 
 impl GeneralConfig {
     /// Returns the default starting program counter.
-    ///
-    /// Initializes execution at the RAM base address, which is the standard
-    /// entry point for bare-metal binaries.
     fn default_start_pc() -> u64 {
         defaults::RAM_BASE
+    }
+
+    /// Default direct mode to true so bare-metal runs work out of the box.
+    fn default_direct_mode() -> bool {
+        true
     }
 }
 
 impl Default for GeneralConfig {
-    /// Creates a default general configuration.
-    ///
-    /// Instruction tracing is disabled and the start PC is set to RAM base.
     fn default() -> Self {
         Self {
             trace_instructions: false,
             start_pc: defaults::RAM_BASE,
+            direct_mode: true,
+            initial_sp: None,
         }
     }
 }
@@ -319,7 +429,7 @@ impl Default for GeneralConfig {
 ///
 /// Defines memory-mapped I/O base addresses, RAM configuration,
 /// and system bus parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SystemConfig {
     /// UART MMIO base address
     #[serde(default = "SystemConfig::default_uart_base")]
@@ -356,6 +466,10 @@ pub struct SystemConfig {
     /// CLINT timer divider (mtime increments every N cycles)
     #[serde(default = "SystemConfig::default_clint_divider")]
     pub clint_divider: u64,
+
+    /// When true, UART output goes to stderr (for visibility when run from Python).
+    #[serde(default)]
+    pub uart_to_stderr: bool,
 }
 
 impl SystemConfig {
@@ -421,6 +535,7 @@ impl Default for SystemConfig {
             bus_width: defaults::BUS_WIDTH,
             bus_latency: defaults::BUS_LATENCY,
             clint_divider: defaults::CLINT_DIVIDER,
+            uart_to_stderr: false,
         }
     }
 }
@@ -429,7 +544,7 @@ impl Default for SystemConfig {
 ///
 /// Specifies RAM size, memory controller type, DRAM timing parameters,
 /// and TLB configuration.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MemoryConfig {
     /// RAM size in bytes
     #[serde(default = "MemoryConfig::default_ram_size")]
@@ -521,6 +636,17 @@ pub struct CacheHierarchyConfig {
     pub l2: CacheConfig,
     /// Unified L3 cache (optional)
     pub l3: CacheConfig,
+}
+
+impl Default for CacheHierarchyConfig {
+    fn default() -> Self {
+        Self {
+            l1_i: CacheConfig::default(),
+            l1_d: CacheConfig::default(),
+            l2: CacheConfig::default(),
+            l3: CacheConfig::default(),
+        }
+    }
 }
 
 /// Individual cache level configuration.

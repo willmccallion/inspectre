@@ -24,6 +24,12 @@ const PLIC_ENABLE_BASE: u64 = 0x002000;
 /// Base offset for PLIC context-specific registers (threshold, claim/complete).
 const PLIC_CONTEXT_BASE: u64 = 0x200000;
 
+/// Number of interrupt contexts (M-mode + S-mode per HART).
+const NUM_CONTEXTS: usize = 2;
+
+/// Number of 32-bit enable words per context (covers 1024 interrupt sources).
+const ENABLE_WORDS_PER_CONTEXT: usize = 32;
+
 /// PLIC device structure.
 pub struct Plic {
     /// Base physical address of the device.
@@ -32,8 +38,8 @@ pub struct Plic {
     priorities: Vec<u32>,
     /// Pending interrupt bits (bitmap).
     pending: Vec<u32>,
-    /// Interrupt enable bits per context.
-    enables: Vec<u32>,
+    /// Interrupt enable bits per context: enables[ctx][word].
+    enables: Vec<Vec<u32>>,
     /// Priority thresholds per context.
     thresholds: Vec<u32>,
     /// Claim/Complete registers per context.
@@ -47,9 +53,9 @@ impl Plic {
             base_addr,
             priorities: vec![0; 1024],
             pending: vec![0; 32],
-            enables: vec![0; 32],
-            thresholds: vec![0; 2],
-            claims: vec![0; 2],
+            enables: vec![vec![0u32; ENABLE_WORDS_PER_CONTEXT]; NUM_CONTEXTS],
+            thresholds: vec![0; NUM_CONTEXTS],
+            claims: vec![0; NUM_CONTEXTS],
         }
     }
 
@@ -92,19 +98,23 @@ impl Plic {
 
     /// Determines if a context has any pending interrupt above its threshold.
     fn has_qualified_irq(&self, ctx: usize) -> bool {
-        let pending = self.pending[0];
-        let enable = self.enables[ctx];
-        let active = pending & enable;
-
-        if active == 0 {
-            return false;
-        }
-
         let threshold = self.thresholds[ctx];
-        for i in 1..32 {
-            if (active & (1 << i)) != 0 {
-                if self.priorities[i] > threshold {
-                    return true;
+        let num_words = std::cmp::min(self.pending.len(), self.enables[ctx].len());
+
+        for word in 0..num_words {
+            let active = self.pending[word] & self.enables[ctx][word];
+            if active == 0 {
+                continue;
+            }
+            for bit in 0..32 {
+                let irq_id = word * 32 + bit;
+                if irq_id == 0 {
+                    continue; // IRQ 0 is reserved
+                }
+                if (active & (1 << bit)) != 0 && irq_id < self.priorities.len() {
+                    if self.priorities[irq_id] > threshold {
+                        return true;
+                    }
                 }
             }
         }
@@ -113,20 +123,28 @@ impl Plic {
 
     /// Calculates the ID of the highest priority pending interrupt for a context.
     fn calc_max_id(&self, ctx: usize) -> u32 {
-        let pending = self.pending[0];
-        let enable = self.enables[ctx];
-        let active = pending & enable;
         let threshold = self.thresholds[ctx];
+        let num_words = std::cmp::min(self.pending.len(), self.enables[ctx].len());
 
         let mut max_prio = 0;
         let mut max_id = 0;
 
-        for i in 1..32 {
-            if (active & (1 << i)) != 0 {
-                let prio = self.priorities[i];
-                if prio > max_prio && prio > threshold {
-                    max_prio = prio;
-                    max_id = i as u32;
+        for word in 0..num_words {
+            let active = self.pending[word] & self.enables[ctx][word];
+            if active == 0 {
+                continue;
+            }
+            for bit in 0..32 {
+                let irq_id = word * 32 + bit;
+                if irq_id == 0 {
+                    continue;
+                }
+                if (active & (1 << bit)) != 0 && irq_id < self.priorities.len() {
+                    let prio = self.priorities[irq_id];
+                    if prio > max_prio && prio > threshold {
+                        max_prio = prio;
+                        max_id = irq_id as u32;
+                    }
                 }
             }
         }
@@ -148,6 +166,7 @@ impl Device for Plic {
     ///
     /// Handles reads from Priority, Pending, Enable, Threshold, and Claim registers.
     fn read_u32(&mut self, offset: u64) -> u32 {
+        #[allow(clippy::absurd_extreme_comparisons)]
         if offset >= PLIC_PRIORITY_BASE && offset < PLIC_PENDING_BASE {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
             if idx < self.priorities.len() {
@@ -159,9 +178,11 @@ impl Device for Plic {
                 return self.pending[idx];
             }
         } else if offset >= PLIC_ENABLE_BASE && offset < PLIC_CONTEXT_BASE {
-            let ctx = (offset - PLIC_ENABLE_BASE) as usize / 0x80;
-            if ctx < 2 {
-                return self.enables[ctx];
+            let rel = (offset - PLIC_ENABLE_BASE) as usize;
+            let ctx = rel / 0x80;
+            let word_idx = (rel % 0x80) / 4;
+            if ctx < NUM_CONTEXTS && word_idx < ENABLE_WORDS_PER_CONTEXT {
+                return self.enables[ctx][word_idx];
             }
         } else if offset >= PLIC_CONTEXT_BASE {
             let ctx = (offset - PLIC_CONTEXT_BASE) as usize / 0x1000;
@@ -188,15 +209,18 @@ impl Device for Plic {
     ///
     /// Handles writes to Priority, Enable, Threshold, and Complete (Claim) registers.
     fn write_u32(&mut self, offset: u64, val: u32) {
+        #[allow(clippy::absurd_extreme_comparisons)]
         if offset >= PLIC_PRIORITY_BASE && offset < PLIC_PENDING_BASE {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
             if idx < self.priorities.len() {
                 self.priorities[idx] = val;
             }
         } else if offset >= PLIC_ENABLE_BASE && offset < PLIC_CONTEXT_BASE {
-            let ctx = (offset - PLIC_ENABLE_BASE) as usize / 0x80;
-            if ctx < 2 {
-                self.enables[ctx] = val;
+            let rel = (offset - PLIC_ENABLE_BASE) as usize;
+            let ctx = rel / 0x80;
+            let word_idx = (rel % 0x80) / 4;
+            if ctx < NUM_CONTEXTS && word_idx < ENABLE_WORDS_PER_CONTEXT {
+                self.enables[ctx][word_idx] = val;
             }
         } else if offset >= PLIC_CONTEXT_BASE {
             let ctx = (offset - PLIC_CONTEXT_BASE) as usize / 0x1000;

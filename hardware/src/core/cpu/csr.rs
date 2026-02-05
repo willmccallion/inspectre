@@ -1,7 +1,10 @@
 //! CSR Access Logic.
 //!
-//! This module implements the `csr_read` and `csr_write` methods for the `Cpu` struct,
-//! handling side effects of CSR operations (e.g., TLB flushing, interrupt enabling).
+//! This module implements the Control and Status Register (CSR) access mechanisms for the CPU.
+//! It performs the following:
+//! 1. **Read Operations:** Retrieves CSR values while handling architectural side effects.
+//! 2. **Write Operations:** Updates CSR state and triggers necessary system updates (e.g., TLB flushes).
+//! 3. **Side Effect Management:** Handles interrupt inhibition and status bit synchronization.
 
 use super::Cpu;
 use crate::common::Trap;
@@ -9,6 +12,14 @@ use crate::core::arch::csr;
 
 impl Cpu {
     /// Reads a value from a Control and Status Register (CSR).
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - The 12-bit address of the CSR to read.
+    ///
+    /// # Returns
+    ///
+    /// The current 64-bit value of the specified CSR.
     pub(crate) fn csr_read(&self, addr: u32) -> u64 {
         match addr {
             csr::MVENDORID => 0,
@@ -44,6 +55,11 @@ impl Cpu {
     }
 
     /// Writes a value to a Control and Status Register (CSR).
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - The 12-bit address of the CSR to write.
+    /// * `val` - The 64-bit value to write to the register.
     pub fn csr_write(&mut self, addr: u32, val: u64) {
         match addr {
             csr::CSR_SIM_PANIC => {

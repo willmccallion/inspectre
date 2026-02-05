@@ -4,7 +4,7 @@
 //! It utilizes a BTB for unconditional jumps and a RAS for function returns, but
 //! assumes all conditional branches will fall through.
 
-use super::{btb::Btb, ras::Ras, BranchPredictor};
+use super::{BranchPredictor, btb::Btb, ras::Ras};
 
 /// Static Branch Predictor structure.
 pub struct StaticPredictor {

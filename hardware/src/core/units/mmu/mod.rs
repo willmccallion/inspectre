@@ -5,6 +5,9 @@
 //! paging scheme and includes Translation Lookaside Buffers (TLBs) for
 //! caching translations.
 
+/// Physical Memory Protection (PMP).
+pub mod pmp;
+
 /// Page table walker implementation for SV39 virtual memory.
 pub mod ptw;
 
@@ -64,6 +67,30 @@ impl Mmu {
     ///
     /// A `TranslationResult` containing the physical address, cycle count,
     /// and any trap that occurred during translation.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use hardware::core::units::mmu::Mmu;
+    /// use hardware::common::{VirtAddr, AccessType};
+    /// use hardware::core::arch::mode::PrivilegeMode;
+    ///
+    /// let mut mmu = Mmu::new(32);
+    ///
+    /// // In machine mode, addresses pass through without translation
+    /// let result = mmu.translate(
+    ///     VirtAddr::new(0x80000000),
+    ///     AccessType::Fetch,
+    ///     PrivilegeMode::Machine,
+    ///     &csrs,
+    ///     &mut bus,
+    /// );
+    /// assert_eq!(result.paddr.val(), 0x80000000);
+    /// assert!(result.trap.is_none());
+    ///
+    /// // In supervisor mode with paging enabled, TLB is consulted
+    /// // and page table walk is performed on TLB miss
+    /// ```
     pub fn translate(
         &mut self,
         vaddr: VirtAddr,

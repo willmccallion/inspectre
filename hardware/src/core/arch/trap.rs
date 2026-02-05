@@ -1,14 +1,16 @@
 //! Trap Handling Utilities.
 //!
-//! This module provides helper functions for mapping hardware interrupt
-//! pending bits (from the MIP register) to high-level `Trap` enum variants.
+//! This module provides helper functions for managing processor traps. It performs
+//! the following:
+//! 1. **Interrupt Mapping:** Converts hardware interrupt pending bits into high-level trap types.
+//! 2. **Standardization:** Ensures consistent trap representation across the simulator.
 
 use crate::common::error::Trap;
 
 /// Trap handler utility functions.
 ///
-/// Provides helper functions for converting between interrupt
-/// representations and trap types.
+/// Provides a unified interface for converting low-level interrupt signals into
+/// architectural trap variants.
 pub struct TrapHandler;
 
 impl TrapHandler {
@@ -16,12 +18,12 @@ impl TrapHandler {
     ///
     /// # Arguments
     ///
-    /// * `bit` - The interrupt pending bit from the MIP register
+    /// * `bit` - The interrupt pending bit from the `MIP` register.
     ///
     /// # Returns
     ///
-    /// The `Trap` variant corresponding to the interrupt type, or
-    /// `MachineTimerInterrupt` as a default for unrecognized bits.
+    /// The `Trap` variant corresponding to the interrupt type. Defaults to
+    /// `MachineTimerInterrupt` for unrecognized bits.
     pub fn irq_to_trap(bit: u64) -> Trap {
         use crate::core::arch::csr;
         match bit {
@@ -30,7 +32,9 @@ impl TrapHandler {
             csr::MIP_MSIP => Trap::MachineSoftwareInterrupt,
             csr::MIP_STIP => Trap::SupervisorTimerInterrupt,
             csr::MIP_MTIP => Trap::MachineTimerInterrupt,
-            csr::MIP_SEIP | csr::MIP_MEIP => Trap::ExternalInterrupt,
+            csr::MIP_UEIP => Trap::UserExternalInterrupt,
+            csr::MIP_SEIP => Trap::SupervisorExternalInterrupt,
+            csr::MIP_MEIP => Trap::MachineExternalInterrupt,
             _ => Trap::MachineTimerInterrupt,
         }
     }

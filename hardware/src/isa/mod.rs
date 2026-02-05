@@ -19,6 +19,9 @@ pub mod abi;
 /// Instruction decoding logic for all RISC-V instruction formats.
 pub mod decode;
 
+/// Instruction disassembler for debug tracing and diagnostics.
+pub mod disasm;
+
 /// Instruction encoding structures and bit extraction utilities.
 pub mod instruction;
 

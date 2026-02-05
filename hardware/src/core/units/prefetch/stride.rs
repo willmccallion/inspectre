@@ -6,6 +6,16 @@
 //!
 //! Prefetching is triggered only when a stable stride pattern is established
 //! (confidence threshold is met).
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `update()`: O(1)
+//!   - `get_prefetch_candidates()`: O(D) where D is the prefetch degree
+//! - **Space Complexity:** O(T) where T is the table size (typically 64-256 entries)
+//! - **Hardware Cost:** Moderate - small table, simple arithmetic
+//! - **Best Case:** Regular strided patterns (array traversals, matrix operations)
+//! - **Worst Case:** Irregular or random access patterns (linked lists, hash tables)
 
 use super::Prefetcher;
 

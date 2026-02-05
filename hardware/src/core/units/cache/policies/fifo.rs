@@ -3,6 +3,16 @@
 //! This policy evicts the oldest cache line in a set, regardless of how recently
 //! it was accessed. It operates as a circular buffer (Round-Robin) for each set.
 //! When a replacement is needed, the pointer advances to the next way.
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `update()`: O(1)
+//!   - `get_victim()`: O(1)
+//! - **Space Complexity:** O(S) where S is the number of sets
+//! - **Hardware Cost:** Minimal - single counter per set
+//! - **Best Case:** Streaming accesses where all lines have equal importance
+//! - **Worst Case:** Workloads with strong temporal locality (may evict frequently-used lines)
 
 use super::ReplacementPolicy;
 

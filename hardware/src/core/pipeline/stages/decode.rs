@@ -1,17 +1,17 @@
 //! Instruction Decode (ID) Stage.
 //!
 //! This module implements the second stage of the pipeline. It performs the following:
-//! 1.  **Decoding:** Converts raw 32-bit instruction bits into control signals using the ISA decoder.
-//! 2.  **Hazard Detection:** Checks for intra-bundle dependencies (in superscalar configurations).
-//! 3.  **Register Read:** Reads source operands (rs1, rs2, rs3) from the Register File.
-//! 4.  **Control Generation:** Generates ALU, Memory, and CSR control signals for the Execute stage.
+//! 1. **Decoding:** Converts raw 32-bit instruction bits into control signals using the ISA decoder.
+//! 2. **Hazard Detection:** Checks for intra-bundle dependencies (in superscalar configurations).
+//! 3. **Register Read:** Reads source operands (rs1, rs2, rs3) from the Register File.
+//! 4. **Control Generation:** Generates ALU, Memory, and CSR control signals for the Execute stage.
 
 use crate::common::error::Trap;
+use crate::core::Cpu;
 use crate::core::pipeline::latches::IdExEntry;
 use crate::core::pipeline::signals::{
     AluOp, AtomicOp, ControlSignals, CsrOp, MemWidth, OpASrc, OpBSrc,
 };
-use crate::core::Cpu;
 use crate::isa::decode::decode as instruction_decode;
 use crate::isa::instruction::{Decoded, InstructionBits};
 use crate::isa::privileged::opcodes as sys_ops;
@@ -28,21 +28,33 @@ use crate::isa::rv64m::{funct3 as m_funct3, opcodes as m_opcodes};
 const INSTRUCTION_NOP: u32 = 0x0000_0013;
 
 /// Zero instruction encoding (invalid instruction used as NOP).
+///
+/// Treated as a no-op when decoded; used to pad or flush the pipeline.
 const INSTRUCTION_ZERO: u32 = 0;
 
 /// Bit 5 of funct7 field indicating alternate encoding (e.g., SUB vs ADD).
+///
+/// When set, selects the alternate R-type operation (e.g., SRA instead of SRL).
 const FUNCT7_ALT_BIT: u32 = 0x20;
 
 /// Floating-point width encoding for 32-bit word operations.
+///
+/// Used in FP load/store `funct3` to select single-precision width.
 const FP_WIDTH_WORD: u32 = 0x2;
 
 /// Floating-point width encoding for 64-bit double operations.
+///
+/// Used in FP load/store `funct3` to select double-precision width.
 const FP_WIDTH_DOUBLE: u32 = 0x3;
 
 /// Floating-point format encoding for single-precision (32-bit).
+///
+/// Used in FP op `funct7` format field to select 32-bit operands.
 const FP_FMT_SINGLE: u32 = 0;
 
 /// Floating-point format encoding for double-precision (64-bit).
+///
+/// Used in FP op `funct7` format field to select 64-bit operands.
 const FP_FMT_DOUBLE: u32 = 1;
 
 /// Executes the instruction decode stage.

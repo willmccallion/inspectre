@@ -1,7 +1,10 @@
 //! Global System Constants.
 //!
-//! Defines system-wide constants for memory layout, page sizes, instruction formats,
-//! and interrupt bitmasks.
+//! This module defines system-wide constants used across the simulator. It includes:
+//! 1. **Memory Constants:** Page sizes, masks, and shifts for memory management.
+//! 2. **Instruction Constants:** Opcode masks and field shifts for instruction decoding.
+//! 3. **Delegation Constants:** Bit positions for interrupt delegation.
+//! 4. **Simulation Constants:** Thresholds and intervals for simulation control.
 
 /// Page size in bytes (4KB).
 pub const PAGE_SIZE: u64 = 4096;
@@ -42,22 +45,22 @@ pub const RS1_MASK: u32 = 0x1F;
 /// Bit position shift for the first source register (rs1) field.
 pub const RS1_SHIFT: u32 = 15;
 
-/// Bit position for machine external interrupt delegation in mideleg.
+/// Bit position for machine external interrupt delegation in `mideleg`.
 pub const DELEG_MEIP_BIT: u64 = 11;
 
-/// Bit position for machine software interrupt delegation in mideleg.
+/// Bit position for machine software interrupt delegation in `mideleg`.
 pub const DELEG_MSIP_BIT: u64 = 3;
 
-/// Bit position for machine timer interrupt delegation in mideleg.
+/// Bit position for machine timer interrupt delegation in `mideleg`.
 pub const DELEG_MTIP_BIT: u64 = 7;
 
-/// Bit position for supervisor external interrupt delegation in mideleg.
+/// Bit position for supervisor external interrupt delegation in `mideleg`.
 pub const DELEG_SEIP_BIT: u64 = 9;
 
-/// Bit position for supervisor software interrupt delegation in mideleg.
+/// Bit position for supervisor software interrupt delegation in `mideleg`.
 pub const DELEG_SSIP_BIT: u64 = 1;
 
-/// Bit position for supervisor timer interrupt delegation in mideleg.
+/// Bit position for supervisor timer interrupt delegation in `mideleg`.
 pub const DELEG_STIP_BIT: u64 = 5;
 
 /// Bit mask indicating that a trap cause represents an interrupt.

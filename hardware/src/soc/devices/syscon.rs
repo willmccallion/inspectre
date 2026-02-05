@@ -12,8 +12,8 @@
 //!   * `0x3333`: Failure/Panic
 
 use crate::soc::devices::Device;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// SysCon device structure.
 pub struct SysCon {

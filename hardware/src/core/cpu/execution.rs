@@ -1,8 +1,10 @@
 //! Main Execution Loop.
 //!
-//! This module implements the `tick` method, which advances the CPU state
-//! by one clock cycle. It coordinates the pipeline stages, handles interrupts,
-//! and manages stall cycles.
+//! This module implements the core execution cycle of the CPU. It performs the following:
+//! 1. **Pipeline Coordination:** Orchestrates the movement of instructions through the five-stage pipeline.
+//! 2. **Interrupt Handling:** Monitors and processes timer, external, and software interrupts.
+//! 3. **Timing Management:** Updates simulation cycles and handles multi-cycle operation stalls.
+//! 4. **Observability:** Provides tracing and pipeline visualization for debugging.
 
 use super::Cpu;
 use crate::common::constants::{
@@ -20,9 +22,12 @@ use crate::isa::abi;
 impl Cpu {
     /// Advances the CPU state by one clock cycle.
     ///
-    /// Executes all pipeline stages, handles interrupts, updates timers,
-    /// and manages stall cycles. Returns `Ok(())` on success or an error
-    /// string on failure.
+    /// This function executes all pipeline stages, handles pending interrupts, updates
+    /// timers, and manages stall cycles.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success or an error string on failure.
     pub fn tick(&mut self) -> Result<(), String> {
         if let Some(code) = self.bus.check_exit() {
             self.exit_code = Some(code);
@@ -35,6 +40,7 @@ impl Cpu {
             return Ok(());
         }
 
+        #[allow(clippy::absurd_extreme_comparisons)]
         if self.pc >= DEBUG_PC_START && self.pc <= DEBUG_PC_END {
             self.trace = true;
         }
@@ -133,17 +139,19 @@ impl Cpu {
         self.wb_latch = self.mem_wb.clone();
         mem_stage(self);
 
-        let is_load_use_hazard = hazards::need_stall_load_use(&self.id_ex, &self.if_id);
+        if !self.wfi_waiting {
+            let is_load_use_hazard = hazards::need_stall_load_use(&self.id_ex, &self.if_id);
 
-        execute_stage(self);
+            execute_stage(self);
 
-        if is_load_use_hazard {
-            self.stats.stalls_data += 1;
-        } else {
-            decode_stage(self);
+            if is_load_use_hazard {
+                self.stats.stalls_data += 1;
+            } else {
+                decode_stage(self);
 
-            if self.if_id.entries.is_empty() {
-                fetch_stage(self);
+                if self.if_id.entries.is_empty() {
+                    fetch_stage(self);
+                }
             }
         }
 

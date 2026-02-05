@@ -1,32 +1,32 @@
 //! Memory Access Types.
 //!
-//! This module defines the classification of memory accesses used throughout
-//! the simulator. These types are used by the Memory Management Unit (MMU)
-//! and Physical Memory Protection (PMP) logic to validate permissions
-//! and handle page faults correctly.
+//! This module defines the classification of memory accesses used throughout the simulator.
+//! These types are used for the following:
+//! 1. **Permission Validation:** Checking Read/Write/Execute (RWX) permissions in the MMU and PMP.
+//! 2. **Fault Generation:** Determining the correct page fault or access fault trap type.
+//! 3. **Statistics Tracking:** Categorizing memory operations for performance analysis.
 
 /// Type of memory access operation.
 ///
-/// Used to distinguish between instruction fetches, data reads,
-/// and data writes for proper memory access handling and permission
-/// checking in the memory management unit.
+/// Used to distinguish between instruction fetches, data loads, and data stores
+/// for proper memory management and permission enforcement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccessType {
     /// Instruction fetch access.
     ///
-    /// Used when fetching instructions from memory for execution.
-    /// Requires Execute (X) permission in the page table.
+    /// Occurs when fetching instructions from memory for the pipeline's Fetch stage.
+    /// Requires Execute (X) permission.
     Fetch,
 
     /// Data read access.
     ///
-    /// Used when loading data from memory into registers.
-    /// Requires Read (R) permission in the page table.
+    /// Occurs during load instructions when reading data from memory into registers.
+    /// Requires Read (R) permission.
     Read,
 
     /// Data write access.
     ///
-    /// Used when storing data from registers to memory.
-    /// Requires Write (W) permission in the page table.
+    /// Occurs during store instructions when writing data from registers to memory.
+    /// Requires Write (W) permission.
     Write,
 }

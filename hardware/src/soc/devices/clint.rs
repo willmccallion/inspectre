@@ -117,12 +117,12 @@ impl Device for Clint {
             MTIMECMP_OFFSET => {
                 self.mtimecmp = (self.mtimecmp & 0xFFFF_FFFF_0000_0000) | (val as u64)
             }
-            val if val == MTIMECMP_OFFSET + 4 => {
-                self.mtimecmp = (self.mtimecmp & 0x0000_0000_FFFF_FFFF) | (val << 32)
+            o if o == MTIMECMP_OFFSET + 4 => {
+                self.mtimecmp = (self.mtimecmp & 0x0000_0000_FFFF_FFFF) | ((val as u64) << 32)
             }
             MTIME_OFFSET => self.mtime = (self.mtime & 0xFFFF_FFFF_0000_0000) | (val as u64),
-            val if val == MTIME_OFFSET + 4 => {
-                self.mtime = (self.mtime & 0x0000_0000_FFFF_FFFF) | (val << 32)
+            o if o == MTIME_OFFSET + 4 => {
+                self.mtime = (self.mtime & 0x0000_0000_FFFF_FFFF) | ((val as u64) << 32)
             }
             _ => {}
         }

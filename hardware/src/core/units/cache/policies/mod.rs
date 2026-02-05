@@ -34,7 +34,7 @@ pub use random::RandomPolicy;
 /// Trait for cache replacement policies.
 ///
 /// Defines the interface for updating usage state and selecting victim lines.
-pub trait ReplacementPolicy {
+pub trait ReplacementPolicy: Send + Sync {
     /// Updates the policy state when a line is accessed.
     ///
     /// # Arguments

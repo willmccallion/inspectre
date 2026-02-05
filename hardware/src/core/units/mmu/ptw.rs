@@ -5,7 +5,7 @@
 //! to translate virtual addresses to physical addresses.
 
 use crate::common::{
-    AccessType, PhysAddr, TranslationResult, Trap, VirtAddr, PAGE_SHIFT, VPN_MASK,
+    AccessType, PAGE_SHIFT, PhysAddr, TranslationResult, Trap, VPN_MASK, VirtAddr,
 };
 use crate::core::arch::csr::{Csrs, SATP_PPN_MASK};
 use crate::core::arch::mode::PrivilegeMode;
@@ -159,9 +159,6 @@ pub fn page_table_walk(
         let pte = PageTableEntry::new(raw_pte);
 
         if !pte.is_valid() {
-            if let Some(res) = check_direct_map_optimization(mmu, vaddr, access, cycles) {
-                return res;
-            }
             return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
         }
 
@@ -170,10 +167,6 @@ pub fn page_table_walk(
                 return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
             }
             ppn = pte.ppn();
-
-            if (ppn >> 32) == 0xFFF {
-                ppn &= 0xFFFFF;
-            }
             continue;
         }
 
@@ -195,10 +188,7 @@ pub fn page_table_walk(
             cycles += PTE_UPDATE_CYCLES;
         }
 
-        let mut final_ppn = new_pte.ppn();
-        if (final_ppn >> 32) == 0xFFF {
-            final_ppn &= 0xFFFFF;
-        }
+        let final_ppn = new_pte.ppn();
 
         let offset_mask = (1u64 << vpn_shift) - 1;
         let final_paddr = (final_ppn << PAGE_SHIFT) | (vaddr.val() & offset_mask);
@@ -289,40 +279,4 @@ fn page_fault(addr: u64, access: AccessType) -> Trap {
         AccessType::Read => Trap::LoadPageFault(addr),
         AccessType::Write => Trap::StorePageFault(addr),
     }
-}
-
-/// Checks for direct-mapping optimizations used in simulation.
-///
-/// This bypasses the page table walk for specific physical memory regions
-/// (like the kernel load address) to speed up simulation boot times.
-fn check_direct_map_optimization(
-    mmu: &mut Mmu,
-    vaddr: VirtAddr,
-    access: AccessType,
-    cycles: u64,
-) -> Option<TranslationResult> {
-    let v = vaddr.val();
-    let pa = if v >= 0x80000000 && v < 0x80200000 {
-        Some(v)
-    } else if v >= 0xffffffd800000000 && v < 0xffffffd810000000 {
-        Some((v - 0xffffffd800000000) + 0x80000000)
-    } else {
-        None
-    };
-
-    if let Some(phys) = pa {
-        let fake_ppn = (phys >> 12) & SATP_PPN_MASK;
-        let fake_pte = (fake_ppn << 10) | 0xcf;
-
-        let specific_4kb_ppn = phys >> 12;
-        let vpn = (v >> 12) & VPN_MASK;
-
-        if access == AccessType::Fetch {
-            mmu.itlb.insert(vpn, specific_4kb_ppn, fake_pte);
-        } else {
-            mmu.dtlb.insert(vpn, specific_4kb_ppn, fake_pte);
-        }
-        return Some(TranslationResult::success(PhysAddr::new(phys), cycles));
-    }
-    None
 }

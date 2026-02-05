@@ -1,18 +1,26 @@
 //! Trap Handling Logic.
 //!
-//! This module implements the `trap` method for the `Cpu` struct, which
-//! handles synchronous exceptions and asynchronous interrupts, including
-//! delegation to Supervisor mode.
+//! This module implements the trap and exception handling logic for the CPU. It performs
+//! the following:
+//! 1. **Trap Dispatch:** Identifies the trap cause and determines the appropriate handler mode.
+//! 2. **Delegation:** Handles the delegation of traps from Machine mode to Supervisor mode.
+//! 3. **Context Saving:** Updates CSRs (`mepc`, `mcause`, `mtval`, etc.) and modifies privilege state.
+//! 4. **Return Handling:** Implements `MRET` and `SRET` instructions for returning from trap handlers.
 
 use super::Cpu;
-use crate::common::constants::CAUSE_INTERRUPT_BIT;
 use crate::common::Trap;
+use crate::common::constants::CAUSE_INTERRUPT_BIT;
 use crate::core::arch::csr;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::isa::privileged::cause::{exception, interrupt};
 
 impl Cpu {
     /// Handles a trap (exception or interrupt).
+    ///
+    /// # Arguments
+    ///
+    /// * `cause` - The type of trap that occurred.
+    /// * `epc` - The Exception Program Counter (PC where the trap occurred).
     pub fn trap(&mut self, cause: Trap, epc: u64) {
         self.load_reservation = None;
 
@@ -84,8 +92,12 @@ impl Cpu {
                 (true, interrupt::SUPERVISOR_TIMER & !CAUSE_INTERRUPT_BIT)
             }
             Trap::MachineTimerInterrupt => (true, interrupt::MACHINE_TIMER & !CAUSE_INTERRUPT_BIT),
-            Trap::ExternalInterrupt => {
+            Trap::UserExternalInterrupt => (true, interrupt::USER_EXTERNAL & !CAUSE_INTERRUPT_BIT),
+            Trap::SupervisorExternalInterrupt => {
                 (true, interrupt::SUPERVISOR_EXTERNAL & !CAUSE_INTERRUPT_BIT)
+            }
+            Trap::MachineExternalInterrupt => {
+                (true, interrupt::MACHINE_EXTERNAL & !CAUSE_INTERRUPT_BIT)
             }
             Trap::RequestedTrap(c) => (false, c),
             Trap::DoubleFault(_) => (false, exception::HARDWARE_ERROR),
@@ -172,16 +184,29 @@ impl Cpu {
                 code
             };
 
+            // Implementation Note: Kernel Relocation for SEPC
+            //
+            // When the MMU is enabled (SATP mode != Bare), the kernel is typically linked
+            // at a high virtual address (0xffffffff80000000) but loaded at a physical address
+            // (0x80200000). During early boot, before paging is fully initialized, PC values
+            // may be physical addresses.
+            //
+            // If a trap occurs during this transition (EPC points to physical kernel address),
+            // we need to adjust SEPC to the corresponding virtual address so that SRET returns
+            // to the correct location in the virtual address space.
+            //
+            // This adjustment applies when:
+            // 1. MMU is enabled (SATP mode != 0)
+            // 2. EPC is in kernel physical range [0x80200000, 0x82200000)
+            // 3. EPC is below the kernel virtual base (not already relocated)
+            //
+            // The relocation offset is: KERNEL_VIRT_BASE - KERNEL_PHYS_BASE
+            // This matches the linker script offset for typical RISC-V kernels.
             let mut sepc_value = epc;
             let mmu_enabled = (self.csrs.satp >> 60) != 0;
             if mmu_enabled {
-                /// Physical base address where kernel is loaded (2 MiB offset from RAM base).
                 const KERNEL_PHYS_BASE: u64 = 0x80200000;
-
-                /// Virtual base address where kernel expects to be mapped.
                 const KERNEL_VIRT_BASE: u64 = 0xffffffff80000000;
-
-                /// Offset to convert between kernel physical and virtual addresses.
                 const RELOC_OFFSET: u64 = KERNEL_VIRT_BASE.wrapping_sub(KERNEL_PHYS_BASE);
 
                 if epc >= KERNEL_PHYS_BASE
@@ -273,7 +298,7 @@ impl Cpu {
         self.mem_wb = Default::default();
     }
 
-    /// Executes the MRET instruction (Return from Machine Mode).
+    /// Executes the `MRET` instruction (Return from Machine Mode).
     pub(crate) fn do_mret(&mut self) {
         self.pc = self.csrs.mepc & !1;
         let mstatus = self.csrs.mstatus;
@@ -295,18 +320,13 @@ impl Cpu {
         self.id_ex = Default::default();
     }
 
-    /// Executes the SRET instruction (Return from Supervisor Mode).
+    /// Executes the `SRET` instruction (Return from Supervisor Mode).
     pub(crate) fn do_sret(&mut self) {
         let mut sepc = self.csrs.sepc & !1;
         let mmu_enabled = (self.csrs.satp >> 60) != 0;
         if mmu_enabled {
-            /// Physical base address where kernel is loaded (2 MiB offset from RAM base).
             const KERNEL_PHYS_BASE: u64 = 0x80200000;
-
-            /// Virtual base address where kernel expects to be mapped.
             const KERNEL_VIRT_BASE: u64 = 0xffffffff80000000;
-
-            /// Offset to convert between kernel physical and virtual addresses.
             const RELOC_OFFSET: u64 = KERNEL_VIRT_BASE.wrapping_sub(KERNEL_PHYS_BASE);
 
             if sepc >= KERNEL_PHYS_BASE

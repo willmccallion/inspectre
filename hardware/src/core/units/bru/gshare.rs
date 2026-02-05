@@ -3,8 +3,18 @@
 //! GShare correlates global branch history with the program counter using an XOR
 //! hash. This allows the predictor to distinguish the same branch instruction
 //! in different execution contexts.
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `predict()`: O(1)
+//!   - `update()`: O(1)
+//! - **Space Complexity:** O(2^N) where N is the history length (12 bits = 4KB for 2-bit counters)
+//! - **Hardware Cost:** Moderate - single PHT lookup, XOR, and counter update
+//! - **Best Case:** Correlated branches where outcome depends on recent history
+//! - **Worst Case:** Uncorrelated branches or history length too short/long for pattern
 
-use super::{btb::Btb, ras::Ras, BranchPredictor};
+use super::{BranchPredictor, btb::Btb, ras::Ras};
 
 /// Size of the Pattern History Table (2^12 entries).
 const TABLE_BITS: usize = 12;

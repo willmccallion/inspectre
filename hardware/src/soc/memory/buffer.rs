@@ -24,6 +24,16 @@ unsafe impl Sync for DramBuffer {}
 
 impl DramBuffer {
     /// Creates a new DRAM buffer of the specified size.
+    ///
+    /// On Unix, uses `mmap` for lazy allocation; on other platforms, allocates a `Vec`.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Size of the buffer in bytes.
+    ///
+    /// # Returns
+    ///
+    /// A new `DramBuffer`; panics if `mmap` fails on Unix.
     pub fn new(size: usize) -> Self {
         #[cfg(unix)]
         {

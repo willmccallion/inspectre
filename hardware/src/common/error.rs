@@ -1,9 +1,9 @@
 //! Trap and Translation Result definitions.
 //!
-//! This module defines the `Trap` enum, which represents all RISC-V synchronous
-//! exceptions and asynchronous interrupts. It also defines the `TranslationResult`
-//! struct used by the MMU to report the outcome of virtual-to-physical address
-//! translation.
+//! This module defines the error handling and trap mechanisms for the simulator. It provides:
+//! 1. **Trap Representation:** Encompassing all synchronous exceptions and asynchronous interrupts.
+//! 2. **Translation Results:** Reporting the outcome of virtual-to-physical address translation.
+//! 3. **Error Handling:** Integrating with standard Rust error traits for system-level reporting.
 
 use std::fmt;
 
@@ -11,9 +11,8 @@ use super::addr::PhysAddr;
 
 /// RISC-V trap types representing exceptions and interrupts.
 ///
-/// Traps are events that cause the processor to transfer control
-/// to a trap handler. This enum covers all standard RISC-V exceptions
-/// and interrupts as defined in the RISC-V Privileged Specification.
+/// Traps cause the processor to transfer control to a predefined trap handler.
+/// This enum covers all standard traps defined in the RISC-V Privileged Specification.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Trap {
     /// Instruction address misaligned exception.
@@ -24,8 +23,8 @@ pub enum Trap {
 
     /// Instruction access fault exception.
     ///
-    /// Raised when an instruction fetch violates memory protection or
-    /// accesses invalid memory. The associated value is the faulting address.
+    /// Raised when an instruction fetch violates memory protection or accesses
+    /// invalid memory. The associated value is the faulting address.
     InstructionAccessFault(u64),
 
     /// Illegal instruction exception.
@@ -36,8 +35,8 @@ pub enum Trap {
 
     /// Breakpoint exception.
     ///
-    /// Raised when a breakpoint instruction is executed or a hardware
-    /// breakpoint is hit. The associated value is the program counter.
+    /// Raised when a breakpoint instruction is executed or a hardware breakpoint
+    /// is hit. The associated value is the program counter.
     Breakpoint(u64),
 
     /// Load address misaligned exception.
@@ -48,8 +47,8 @@ pub enum Trap {
 
     /// Load access fault exception.
     ///
-    /// Raised when a load instruction violates memory protection or
-    /// accesses invalid memory. The associated value is the faulting address.
+    /// Raised when a load instruction violates memory protection or accesses
+    /// invalid memory. The associated value is the faulting address.
     LoadAccessFault(u64),
 
     /// Store address misaligned exception.
@@ -60,23 +59,23 @@ pub enum Trap {
 
     /// Store access fault exception.
     ///
-    /// Raised when a store instruction violates memory protection or
-    /// accesses invalid memory. The associated value is the faulting address.
+    /// Raised when a store instruction violates memory protection or accesses
+    /// invalid memory. The associated value is the faulting address.
     StoreAccessFault(u64),
 
     /// Environment call from user mode.
     ///
-    /// Raised when an ECALL instruction is executed in user mode.
+    /// Raised when an `ECALL` instruction is executed in user mode.
     EnvironmentCallFromUMode,
 
     /// Environment call from supervisor mode.
     ///
-    /// Raised when an ECALL instruction is executed in supervisor mode.
+    /// Raised when an `ECALL` instruction is executed in supervisor mode.
     EnvironmentCallFromSMode,
 
     /// Environment call from machine mode.
     ///
-    /// Raised when an ECALL instruction is executed in machine mode.
+    /// Raised when an `ECALL` instruction is executed in machine mode.
     EnvironmentCallFromMMode,
 
     /// Instruction page fault exception.
@@ -122,10 +121,20 @@ pub enum Trap {
     /// Timer interrupt intended for supervisor mode.
     SupervisorTimerInterrupt,
 
-    /// External interrupt.
+    /// Machine external interrupt.
     ///
-    /// Interrupt from an external source (e.g., I/O device).
-    ExternalInterrupt,
+    /// External interrupt intended for machine mode.
+    MachineExternalInterrupt,
+
+    /// Supervisor external interrupt.
+    ///
+    /// External interrupt intended for supervisor mode.
+    SupervisorExternalInterrupt,
+
+    /// User external interrupt.
+    ///
+    /// External interrupt intended for user mode.
+    UserExternalInterrupt,
 
     /// Requested trap for debugging or simulation purposes.
     ///
@@ -144,7 +153,7 @@ impl fmt::Display for Trap {
     ///
     /// # Arguments
     ///
-    /// * `f` - The formatter to write to
+    /// * `f` - The formatter to write to.
     ///
     /// # Returns
     ///
@@ -176,7 +185,9 @@ impl fmt::Display for Trap {
             Trap::MachineSoftwareInterrupt => write!(f, "MachineSoftwareInterrupt"),
             Trap::MachineTimerInterrupt => write!(f, "MachineTimerInterrupt"),
             Trap::SupervisorTimerInterrupt => write!(f, "SupervisorTimerInterrupt"),
-            Trap::ExternalInterrupt => write!(f, "ExternalInterrupt"),
+            Trap::MachineExternalInterrupt => write!(f, "MachineExternalInterrupt"),
+            Trap::SupervisorExternalInterrupt => write!(f, "SupervisorExternalInterrupt"),
+            Trap::UserExternalInterrupt => write!(f, "UserExternalInterrupt"),
             Trap::RequestedTrap(code) => write!(f, "RequestedTrap({})", code),
             Trap::DoubleFault(addr) => write!(f, "DoubleFault({:#x})", addr),
         }
@@ -187,9 +198,8 @@ impl std::error::Error for Trap {}
 
 /// Result of a virtual-to-physical address translation operation.
 ///
-/// Contains the translated physical address, the number of cycles
-/// consumed by the translation, and optionally a trap if the
-/// translation failed.
+/// This structure encapsulates the outcome of an MMU walk, including performance
+/// metrics and any faults that may have occurred.
 pub struct TranslationResult {
     /// The translated physical address, or zero if translation failed.
     pub paddr: PhysAddr,
@@ -204,8 +214,8 @@ impl TranslationResult {
     ///
     /// # Arguments
     ///
-    /// * `paddr` - The successfully translated physical address
-    /// * `cycles` - Number of cycles consumed by the translation
+    /// * `paddr` - The successfully translated physical address.
+    /// * `cycles` - Number of cycles consumed by the translation.
     ///
     /// # Returns
     ///
@@ -223,8 +233,8 @@ impl TranslationResult {
     ///
     /// # Arguments
     ///
-    /// * `trap` - The trap that occurred during translation
-    /// * `cycles` - Number of cycles consumed before the fault
+    /// * `trap` - The trap that occurred during translation.
+    /// * `cycles` - Number of cycles consumed before the fault.
     ///
     /// # Returns
     ///

@@ -1,13 +1,15 @@
 //! RISC-V General-Purpose Register File.
 //!
-//! This module implements the General-Purpose Register (GPR) file, containing
-//! 32 registers (x0-x31). It enforces the architectural invariant that
-//! register x0 is always hardwired to zero.
+//! This module implements the General-Purpose Register (GPR) file for the RISC-V architecture.
+//! It performs the following:
+//! 1. **Storage:** Maintains 32 integer registers (`x0`-`x31`).
+//! 2. **Invariant Enforcement:** Ensures that register `x0` is hardwired to zero.
+//! 3. **Debugging:** Provides utilities for dumping the complete register state.
 
 /// General-Purpose Register file.
 ///
-/// Contains 32 general-purpose registers (x0-x31) used for integer
-/// operations. Register x0 is hardwired to zero and cannot be modified.
+/// Contains 32 general-purpose registers used for integer operations. Register `x0`
+/// is hardwired to zero and cannot be modified.
 pub struct Gpr {
     regs: [u64; 32],
 }
@@ -17,7 +19,7 @@ impl Gpr {
     ///
     /// # Returns
     ///
-    /// A new `Gpr` instance with all 32 registers set to 0.
+    /// A new `Gpr` instance with all registers set to 0.
     pub fn new() -> Self {
         Self { regs: [0; 32] }
     }
@@ -26,30 +28,21 @@ impl Gpr {
     ///
     /// # Arguments
     ///
-    /// * `idx` - Register index (0-31)
+    /// * `idx` - Register index (0-31).
     ///
     /// # Returns
     ///
-    /// The 64-bit value stored in the specified register.
-    /// Register x0 (index 0) always returns 0 regardless of storage.
+    /// The 64-bit value stored in the specified register. Register `x0` always returns 0.
     pub fn read(&self, idx: usize) -> u64 {
-        if idx == 0 {
-            0
-        } else {
-            self.regs[idx]
-        }
+        if idx == 0 { 0 } else { self.regs[idx] }
     }
 
     /// Writes a value to a general-purpose register.
     ///
     /// # Arguments
     ///
-    /// * `idx` - Register index (0-31)
-    /// * `val` - The 64-bit value to write
-    ///
-    /// # Note
-    ///
-    /// Writes to register x0 (index 0) are silently ignored as x0 is hardwired to zero.
+    /// * `idx` - Register index (0-31).
+    /// * `val` - The 64-bit value to write.
     pub fn write(&mut self, idx: usize, val: u64) {
         if idx != 0 {
             self.regs[idx] = val;
@@ -58,8 +51,7 @@ impl Gpr {
 
     /// Dumps the contents of all general-purpose registers to stdout.
     ///
-    /// Displays registers in pairs (two per line) with hexadecimal formatting.
-    /// Useful for debugging and tracing register state during simulation.
+    /// Displays registers in pairs with hexadecimal formatting for debugging purposes.
     pub fn dump(&self) {
         for i in (0..32).step_by(2) {
             println!(

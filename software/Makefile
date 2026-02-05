@@ -131,10 +131,10 @@ bin/benchmarks/%.bin: $(BENCH_DIR)/complete_prog/%.c $(CRT0_OBJ) $(STDIO_OBJ) $(
 	@$(LD) -T $(LINKER_SCR) $(CRT0_OBJ) $(STDIO_OBJ) $(STDLIB_OBJ) $(BUILD_DIR)/benchmarks/$*.o -o $(BUILD_DIR)/benchmarks/$*.elf
 	@$(OBJCOPY) -O binary $(BUILD_DIR)/benchmarks/$*.elf $@
 
-# --- Linux ---
+# --- Linux (download Buildroot + build via scripts/setup/boot_linux.py) ---
 linux:
-	@echo "[Software] Building Linux..."
-	@cd $(LINUX_DIR) && ./build.sh
+	@echo "[Software] Building Linux (download + build in $(LINUX_DIR))..."
+	@cd .. && python3 scripts/setup/boot_linux.py --no-boot
 
 # --- Disk Image ---
 disk: $(KERN_BIN) $(USER_C_BINS) $(USER_S_BINS) $(BENCH_BINS)

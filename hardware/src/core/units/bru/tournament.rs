@@ -4,7 +4,7 @@
 //! between a Global predictor (GShare-like) and a Local predictor (PAg/PAp).
 //! This allows the predictor to adapt to different types of branch behaviors.
 
-use super::{btb::Btb, ras::Ras, BranchPredictor};
+use super::{BranchPredictor, btb::Btb, ras::Ras};
 use crate::config::TournamentConfig;
 
 /// Tournament Predictor structure.

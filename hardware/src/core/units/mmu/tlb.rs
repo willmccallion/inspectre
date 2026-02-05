@@ -59,10 +59,19 @@ impl Tlb {
     /// # Returns
     ///
     /// `Some((ppn, r, w, x, u))` if found, otherwise `None`.
+    ///
+    /// # Panics
+    ///
+    /// This function will not panic. The unsafe array access is guaranteed safe because:
+    /// - `idx = vpn & self.mask` where `mask = size - 1` (size is power of 2)
+    /// - This ensures `idx` is always `< size` and within bounds of `entries`
     #[inline(always)]
     pub fn lookup(&self, vpn: u64) -> Option<(u64, bool, bool, bool, bool)> {
         let idx = (vpn as usize) & self.mask;
 
+        // SAFETY: idx is guaranteed to be < entries.len() by the mask operation above.
+        // The mask is constructed as (size - 1) where size is the length of entries,
+        // ensuring idx is always a valid index.
         let entry = unsafe { self.entries.get_unchecked(idx) };
 
         if entry.valid && entry.vpn == vpn {

@@ -1,41 +1,39 @@
 //! RISC-V Privilege Modes.
 //!
-//! This module defines the privilege levels supported by the processor:
-//! User (U), Supervisor (S), and Machine (M). It provides utilities for
-//! converting between numeric representations and the `PrivilegeMode` enum.
+//! This module defines the privilege levels supported by the RISC-V architecture.
+//! It implements the following:
+//! 1. **Mode Classification:** Definitions for User (U), Supervisor (S), and Machine (M) modes.
+//! 2. **Serialization:** Conversion between numeric representations and enum variants.
+//! 3. **Observability:** Human-readable naming and display formatting for privilege states.
 
 /// RISC-V privilege mode levels.
 ///
-/// RISC-V defines three privilege modes that control access to system
-/// resources and instructions. Machine mode is the highest privilege
-/// level and is required for all implementations.
+/// RISC-V defines three privilege modes that control access to system resources
+/// and instructions. Machine mode is the highest privilege level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PrivilegeMode {
     /// User mode (U-mode).
     ///
-    /// Lowest privilege level for application code. Limited access to
-    /// system resources and CSRs.
+    /// Lowest privilege level for application code.
     User = 0,
 
     /// Supervisor mode (S-mode).
     ///
-    /// Intermediate privilege level for operating system kernel code.
-    /// Provides access to supervisor-level CSRs and memory management.
+    /// Intermediate privilege level for operating system kernels.
     Supervisor = 1,
 
     /// Machine mode (M-mode).
     ///
-    /// Highest privilege level for firmware and hypervisor code.
-    /// Full access to all system resources and CSRs.
+    /// Highest privilege level for firmware and low-level system control.
     Machine = 3,
 }
 
 impl PrivilegeMode {
-    /// Converts a u8 value to a privilege mode.
+    /// Converts a `u8` value to a privilege mode.
     ///
     /// # Arguments
     ///
-    /// * `val` - The numeric privilege mode value (0, 1, or 3)
+    /// * `val` - The numeric privilege mode value (0, 1, or 3).
     ///
     /// # Returns
     ///
@@ -49,7 +47,7 @@ impl PrivilegeMode {
         }
     }
 
-    /// Converts a privilege mode to its u8 representation.
+    /// Converts a privilege mode to its `u8` representation.
     ///
     /// # Returns
     ///
@@ -77,7 +75,7 @@ impl std::fmt::Display for PrivilegeMode {
     ///
     /// # Arguments
     ///
-    /// * `f` - The formatter to write to
+    /// * `f` - The formatter to write to.
     ///
     /// # Returns
     ///

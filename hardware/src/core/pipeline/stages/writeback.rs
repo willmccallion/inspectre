@@ -8,11 +8,12 @@
 use crate::common::constants::{
     DELEG_MEIP_BIT, DELEG_MSIP_BIT, DELEG_MTIP_BIT, DELEG_SEIP_BIT, DELEG_SSIP_BIT, DELEG_STIP_BIT,
 };
+use crate::core::Cpu;
 use crate::core::arch::csr;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::arch::trap::TrapHandler;
+use crate::core::cpu::PC_TRACE_MAX;
 use crate::core::pipeline::signals::AluOp;
-use crate::core::Cpu;
 
 /// Executes the writeback stage of the pipeline.
 ///
@@ -34,12 +35,15 @@ use crate::core::Cpu;
 pub fn wb_stage(cpu: &mut Cpu) {
     let mut trap_event: Option<(crate::common::error::Trap, u64)> = None;
 
-    if !cpu.mem_wb.entries.is_empty() {
+    if !cpu.mem_wb.entries.is_empty() || cpu.wfi_waiting {
         if cpu.interrupt_inhibit_one_cycle {
             cpu.interrupt_inhibit_one_cycle = false;
         } else {
-            let first_entry = &cpu.mem_wb.entries[0];
-            let interrupt_pc = first_entry.pc;
+            let interrupt_pc = if !cpu.mem_wb.entries.is_empty() {
+                cpu.mem_wb.entries[0].pc
+            } else {
+                0
+            };
 
             let mip = cpu.csrs.mip;
             let mie = cpu.csrs.mie;
@@ -98,6 +102,16 @@ pub fn wb_stage(cpu: &mut Cpu) {
                     );
                 }
                 trap_event = Some((interrupt_trap, epc));
+            } else if cpu.wfi_waiting {
+                // WFI Wakeup Logic (without trap)
+                // If global interrupts are disabled, WFI can still wake up if a locally enabled
+                // interrupt becomes pending. Execution resumes at the next instruction.
+                let pending = cpu.csrs.mip;
+                let enabled = cpu.csrs.mie;
+                if (pending & enabled) != 0 {
+                    cpu.wfi_waiting = false;
+                    cpu.pc = cpu.wfi_pc;
+                }
             }
         }
     }
@@ -122,6 +136,11 @@ pub fn wb_stage(cpu: &mut Cpu) {
 
         if cpu.trace {
             eprintln!("WB  pc={:#x}", wb.pc);
+        }
+
+        cpu.pc_trace.push((wb.pc, wb.inst));
+        if cpu.pc_trace.len() > PC_TRACE_MAX {
+            cpu.pc_trace.remove(0);
         }
 
         if wb.inst != 0 && wb.inst != 0x13 {

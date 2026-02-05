@@ -6,6 +6,16 @@
 //! Each bit in the tree represents a decision node pointing away from the most
 //! recently used subtree. To find a victim, the tree is traversed following the
 //! arrows (bits) to a leaf node.
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `update()`: O(1)
+//!   - `get_victim()`: O(1)
+//! - **Space Complexity:** O(S × W) bits where S is sets, W is ways (much less than LRU)
+//! - **Hardware Cost:** Low - simple bit operations
+//! - **Best Case:** Similar to LRU for most access patterns
+//! - **Worst Case:** Pathological cases can cause premature eviction of useful lines
 
 use super::ReplacementPolicy;
 

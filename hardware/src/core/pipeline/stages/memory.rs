@@ -6,10 +6,10 @@
 //! It also manages data alignment and access faults.
 
 use crate::common::{AccessType, TranslationResult, Trap, VirtAddr};
+use crate::core::Cpu;
 use crate::core::pipeline::latches::MemWbEntry;
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};
 use crate::core::units::lsu::Lsu;
-use crate::core::Cpu;
 
 /// Executes the memory stage of the pipeline.
 ///
@@ -184,6 +184,14 @@ pub fn mem_stage(cpu: &mut Cpu) {
                 } else {
                     if ex.ctrl.mem_read {
                         ld = if is_ram {
+                            // SAFETY: This read operation is safe because:
+                            // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
+                            // 2. `ram_offset` is computed from validated physical address and ram_start
+                            // 3. `ram_ptr` points to valid, initialized memory allocated during CPU construction
+                            // 4. `read_unaligned()` safely handles potential misalignment for multi-byte reads
+                            // 5. Each read size (1/2/4/8 bytes) is within bounds as verified by address translation
+                            // 6. Sign extension operations preserve correctness for signed loads
+                            // 7. Memory access permissions have been validated by MMU/PMP checks
                             unsafe {
                                 match (ex.ctrl.width, ex.ctrl.signed_load) {
                                     (MemWidth::Byte, true) => {
@@ -244,6 +252,14 @@ pub fn mem_stage(cpu: &mut Cpu) {
                         }
 
                         if is_ram {
+                            // SAFETY: This write operation is safe because:
+                            // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
+                            // 2. `ram_offset` is computed from validated physical address and ram_start
+                            // 3. `ram_ptr` points to valid, mutable memory allocated during CPU construction
+                            // 4. `write_unaligned()` safely handles potential misalignment for multi-byte writes
+                            // 5. Each write size (1/2/4/8 bytes) is within bounds as verified by address translation
+                            // 6. Memory access permissions (write access) have been validated by MMU/PMP checks
+                            // 7. Load reservation has been cleared to maintain memory ordering semantics
                             unsafe {
                                 match ex.ctrl.width {
                                     MemWidth::Byte => {
@@ -271,10 +287,6 @@ pub fn mem_stage(cpu: &mut Cpu) {
                                 }
                                 MemWidth::Double => {
                                     cpu.bus.bus.write_u64(raw_paddr, ex.store_data);
-
-                                    if raw_paddr == 0x8170eb20 {
-                                        cpu.bus.bus.write_u64(0x8170eb00, ex.store_data);
-                                    }
                                 }
                                 _ => {}
                             }

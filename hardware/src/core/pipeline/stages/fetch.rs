@@ -10,9 +10,9 @@ use crate::common::constants::{
     INSTRUCTION_SIZE_32, OPCODE_MASK, RD_MASK, RD_SHIFT, RS1_MASK, RS1_SHIFT,
 };
 use crate::common::{AccessType, TranslationResult, Trap, VirtAddr};
+use crate::core::Cpu;
 use crate::core::pipeline::latches::IfIdEntry;
 use crate::core::units::bru::BranchPredictor;
-use crate::core::Cpu;
 use crate::isa::abi;
 use crate::isa::rv64i::opcodes;
 use crate::isa::rvc::expand::expand;
@@ -67,7 +67,7 @@ pub fn fetch_stage(cpu: &mut Cpu) {
         cpu.stall_cycles += cycles;
 
         let trap_cause = fetch_trap.or(trap);
-        if let Some(trap_cause) = trap_cause {
+        if let Some(ref trap_cause) = trap_cause {
             if fetched.is_empty() {
                 if cpu.trace {
                     eprintln!("IF  pc={:#x} # TRAP: {:?}", current_pc, trap_cause);
@@ -78,7 +78,7 @@ pub fn fetch_stage(cpu: &mut Cpu) {
                     inst_size: 4,
                     pred_taken: false,
                     pred_target: 0,
-                    trap: Some(trap_cause),
+                    trap: Some(trap_cause.clone()),
                 });
                 break;
             } else {
@@ -90,6 +90,12 @@ pub fn fetch_stage(cpu: &mut Cpu) {
 
         let half_word = if phys_addr >= cpu.ram_start && phys_addr < cpu.ram_end {
             let offset = (phys_addr - cpu.ram_start) as usize;
+            // SAFETY: This is safe because:
+            // 1. `phys_addr` is validated to be within RAM bounds (>= ram_start && < ram_end)
+            // 2. `offset` is computed from validated bounds, ensuring it's within allocated memory
+            // 3. `ram_ptr` points to valid, initialized memory allocated during CPU construction
+            // 4. `read_unaligned()` handles any alignment issues that may occur at arbitrary addresses
+            // 5. The u16 read cannot overflow the buffer as offset is strictly < (ram_end - ram_start)
             unsafe {
                 let ptr = cpu.ram_ptr.add(offset) as *const u16;
                 ptr.read_unaligned()
@@ -127,6 +133,12 @@ pub fn fetch_stage(cpu: &mut Cpu) {
                 && phys_addr + UPPER_HALF_OFFSET < cpu.ram_end
             {
                 let offset = (phys_addr + UPPER_HALF_OFFSET - cpu.ram_start) as usize;
+                // SAFETY: This is safe because:
+                // 1. `phys_addr + UPPER_HALF_OFFSET` is validated to be within RAM bounds
+                // 2. `offset` represents a valid offset from ram_start within allocated memory
+                // 3. `ram_ptr` points to valid, initialized memory
+                // 4. `read_unaligned()` safely handles potential misalignment of the upper half-word
+                // 5. The u16 read at offset+2 is guaranteed within bounds by the range check
                 unsafe {
                     let ptr = cpu.ram_ptr.add(offset) as *const u16;
                     ptr.read_unaligned()

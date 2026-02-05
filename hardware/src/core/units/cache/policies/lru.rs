@@ -4,6 +4,16 @@
 //! It maintains a usage stack for each set. When a line is accessed, it is moved
 //! to the top (Most Recently Used position). The bottom of the stack represents
 //! the Least Recently Used line.
+//!
+//! # Performance
+//!
+//! - **Time Complexity:**
+//!   - `update()`: O(W) where W is the number of ways (associativity)
+//!   - `get_victim()`: O(1)
+//! - **Space Complexity:** O(S × W) where S is the number of sets
+//! - **Hardware Cost:** High - requires priority encoding and shifting
+//! - **Best Case:** Sequential/streaming accesses with good temporal locality
+//! - **Worst Case:** Scanning patterns larger than cache capacity (thrashing)
 
 use super::ReplacementPolicy;
 

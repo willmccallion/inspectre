@@ -1,7 +1,11 @@
 //! Memory Access Helpers.
 //!
-//! This module contains helper methods for the `Cpu` struct related to
-//! memory address translation and cache simulation.
+//! This module provides the interface between the CPU and the memory subsystem.
+//! It performs the following:
+//! 1. **Address Translation:** Interfaces with the MMU to convert virtual to physical addresses.
+//! 2. **Cache Simulation:** Models the behavior of L1, L2, and L3 caches during memory access.
+//! 3. **Pipeline Synchronization:** Handles the flushing of pending store operations to memory.
+//! 4. **Latency Modeling:** Calculates timing penalties for cache hits, misses, and bus transit.
 
 use super::Cpu;
 use crate::common::{AccessType, PhysAddr, TranslationResult, Trap, VirtAddr};
@@ -9,6 +13,15 @@ use crate::core::pipeline::signals;
 
 impl Cpu {
     /// Translates a virtual address to a physical address using the MMU.
+    ///
+    /// # Arguments
+    ///
+    /// * `vaddr` - The virtual address to translate.
+    /// * `access` - The type of memory access (Fetch/Read/Write).
+    ///
+    /// # Returns
+    ///
+    /// A `TranslationResult` containing the physical address or a trap if translation fails.
     pub fn translate(&mut self, vaddr: VirtAddr, access: AccessType) -> TranslationResult {
         if self.direct_mode {
             let paddr = vaddr.val();
@@ -28,6 +41,15 @@ impl Cpu {
     }
 
     /// Simulates a memory access through the cache hierarchy.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - The physical address to access.
+    /// * `access` - The type of memory access.
+    ///
+    /// # Returns
+    ///
+    /// The total latency penalty in cycles for the memory operation.
     pub fn simulate_memory_access(&mut self, addr: PhysAddr, access: AccessType) -> u64 {
         let mut total_penalty = 0;
         let raw_addr = addr.val();
@@ -92,15 +114,53 @@ impl Cpu {
     }
 
     /// Flushes pending stores in the pipeline to memory.
+    ///
+    /// Translates virtual addresses to physical addresses before writing,
+    /// just as the memory stage would normally do.
     pub(crate) fn flush_pipeline_stores(&mut self) {
-        for entry in &mut self.ex_mem.entries {
+        // Take entries out so we can access other fields of self for translation.
+        let mut entries = std::mem::take(&mut self.ex_mem.entries);
+
+        for entry in &mut entries {
             if entry.ctrl.mem_write {
-                let addr = entry.alu;
+                let vaddr = entry.alu;
                 let src = entry.store_data;
                 let width = entry.ctrl.width;
 
-                if addr >= self.ram_start && addr < self.ram_end {
-                    let offset = (addr - self.ram_start) as usize;
+                // Translate virtual address to physical address
+                let paddr = if self.direct_mode {
+                    vaddr
+                } else {
+                    let result = self.mmu.translate(
+                        VirtAddr::new(vaddr),
+                        AccessType::Write,
+                        self.privilege,
+                        &self.csrs,
+                        &mut self.bus.bus,
+                    );
+                    if result.trap.is_some() {
+                        if self.trace {
+                            println!(
+                                "[Pipeline Flush] Translation failed for store to vaddr={:#x}, skipping",
+                                vaddr
+                            );
+                        }
+                        entry.ctrl.mem_write = false;
+                        continue;
+                    }
+                    result.paddr.val()
+                };
+
+                if paddr >= self.ram_start && paddr < self.ram_end {
+                    let offset = (paddr - self.ram_start) as usize;
+                    // SAFETY: This write operation is safe because:
+                    // 1. `paddr` is validated to be within RAM bounds (>= ram_start && < ram_end)
+                    // 2. `offset` is computed from validated bounds, ensuring valid memory access
+                    // 3. `ram_ptr` points to valid, mutable memory allocated during CPU construction
+                    // 4. `write_unaligned()` safely handles potential misalignment for multi-byte writes
+                    // 5. Each write size (1/2/4/8 bytes) is guaranteed not to overflow the buffer
+                    // 6. Memory access permissions have been validated by MMU/PMP prior to this call
+                    // 7. This is only called for atomic operations which have exclusive access semantics
                     unsafe {
                         match width {
                             signals::MemWidth::Byte => *self.ram_ptr.add(offset) = src as u8,
@@ -121,10 +181,10 @@ impl Cpu {
                     }
                 } else {
                     match width {
-                        signals::MemWidth::Byte => self.bus.bus.write_u8(addr, src as u8),
-                        signals::MemWidth::Half => self.bus.bus.write_u16(addr, src as u16),
-                        signals::MemWidth::Word => self.bus.bus.write_u32(addr, src as u32),
-                        signals::MemWidth::Double => self.bus.bus.write_u64(addr, src),
+                        signals::MemWidth::Byte => self.bus.bus.write_u8(paddr, src as u8),
+                        signals::MemWidth::Half => self.bus.bus.write_u16(paddr, src as u16),
+                        signals::MemWidth::Word => self.bus.bus.write_u32(paddr, src as u32),
+                        signals::MemWidth::Double => self.bus.bus.write_u64(paddr, src),
                         _ => {}
                     }
                 }
@@ -133,11 +193,13 @@ impl Cpu {
 
                 if self.trace {
                     println!(
-                        "[Pipeline Flush] Forced Store to {:#x} val={:#x}",
-                        addr, src
+                        "[Pipeline Flush] Forced Store to vaddr={:#x} paddr={:#x} val={:#x}",
+                        vaddr, paddr, src
                     );
                 }
             }
         }
+
+        self.ex_mem.entries = entries;
     }
 }

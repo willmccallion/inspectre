@@ -1,13 +1,14 @@
 //! Physical System Memory (DRAM).
 //!
-//! This module implements the main system memory device. It acts as a large
-//! contiguous byte array accessible via the `Device` trait for memory-mapped
-//! I/O operations.
+//! This module implements the main system memory device. It provides:
+//! 1. **Buffer:** Backing storage (e.g., `DramBuffer`) for RAM contents.
+//! 2. **Memory:** Device implementation that maps the buffer at a physical base address.
+//! 3. **Controller:** Latency modeling (simple or DRAM row-buffer) for timing simulation.
 
-/// DRAM buffer implementation using mmap or Vec.
+/// DRAM buffer implementation (e.g., mmap or `Vec`) for raw byte storage.
 pub mod buffer;
 
-/// DRAM memory controller with row buffer modeling.
+/// Memory controller implementations for access latency modeling.
 pub mod controller;
 
 use self::buffer::DramBuffer;

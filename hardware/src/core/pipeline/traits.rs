@@ -1,13 +1,13 @@
 //! Pipeline Stage and Latch Interfaces.
 //!
-//! Defines the common behaviors required for pipeline stages and the latches
-//! that connect them. This allows for generic handling of pipeline flushes,
-//! stalls, and state transitions.
+//! This module defines the common traits for pipeline components. It provides:
+//! 1. **Pipeline Stage Interface:** Standardizes the `tick` operation for all stages.
+//! 2. **Pipeline Latch Interface:** Provides methods for flushing and status checking.
 
 /// Represents a stage in the instruction pipeline.
 ///
 /// A stage is responsible for processing a specific part of the instruction
-/// lifecycle (Fetch, Decode, Execute, Memory, Writeback).
+/// lifecycle (Fetch, Decode, Execute, Memory, or Writeback).
 pub trait PipelineStage {
     /// Executes one cycle of the pipeline stage.
     ///
@@ -19,14 +19,12 @@ pub trait PipelineStage {
 
 /// Represents a pipeline latch (inter-stage buffer).
 ///
-/// Latches hold the state of instructions as they move between stages.
-/// They must support flushing (clearing contents on traps/mispredictions)
-/// and checking for emptiness.
+/// Latches hold the state of instructions as they move between stages. They support
+/// flushing and status checks.
 pub trait PipelineLatch {
     /// Clears all entries in the latch.
     ///
-    /// Typically called when a branch misprediction or trap occurs, requiring
-    /// the pipeline to be flushed.
+    /// Typically called when a branch misprediction or trap occurs.
     fn flush(&mut self);
 
     /// Checks if the latch is empty.
