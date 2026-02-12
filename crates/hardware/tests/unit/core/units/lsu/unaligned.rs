@@ -1,6 +1,7 @@
 //! Unaligned memory access Unit Tests.
 //!
-//! Verifies alignment checks, trap generation, split loads, and split stores.
+//! Verifies alignment checks, trap generation, split loads, split stores,
+//! cache line crossing detection, and latency calculations.
 
 use riscv_core::common::error::Trap;
 use riscv_core::core::units::lsu::unaligned;
@@ -183,4 +184,112 @@ fn split_store_then_load_round_trip() {
     unaligned::split_store(3, 8, val, |addr, v| mem[addr as usize] = v);
     let loaded = unaligned::split_load(3, 8, |addr| mem[addr as usize]);
     assert_eq!(loaded, val);
+}
+
+// ══════════════════════════════════════════════════════════
+// 5. Cache line crossing detection
+// ══════════════════════════════════════════════════════════
+
+#[test]
+fn aligned_access_no_cache_line_crossing() {
+    // Aligned access at start of cache line should never cross
+    assert!(!unaligned::crosses_cache_line(0, 8, 64));
+    assert!(!unaligned::crosses_cache_line(0, 4, 64));
+    assert!(!unaligned::crosses_cache_line(0, 2, 64));
+    assert!(!unaligned::crosses_cache_line(0, 1, 64));
+}
+
+#[test]
+fn unaligned_access_within_cache_line() {
+    // Unaligned access: addr=1, size=2, within first cache line (0-63)
+    assert!(!unaligned::crosses_cache_line(1, 2, 64));
+    // Unaligned access: addr=62, size=2, within first cache line
+    assert!(!unaligned::crosses_cache_line(62, 2, 64));
+}
+
+#[test]
+fn unaligned_access_crossing_cache_line() {
+    // Unaligned access crossing cache line boundary: 63+2 = 65 > 64
+    assert!(unaligned::crosses_cache_line(63, 2, 64));
+    // Unaligned access crossing cache line: 62+4 = 66 > 64
+    assert!(unaligned::crosses_cache_line(62, 4, 64));
+}
+
+#[test]
+fn cache_line_crossing_at_boundary() {
+    // Access starting exactly at boundary (addr=64, aligned) should not cross
+    assert!(!unaligned::crosses_cache_line(64, 8, 64));
+    // Access starting at 63, size 2 crosses boundary
+    assert!(unaligned::crosses_cache_line(63, 2, 64));
+    // Access at 65, size 2, crosses to next line
+    assert!(!unaligned::crosses_cache_line(65, 1, 64));
+}
+
+#[test]
+fn zero_size_access_no_crossing() {
+    // Zero-size access never crosses
+    assert!(!unaligned::crosses_cache_line(63, 0, 64));
+}
+
+#[test]
+fn different_cache_line_sizes() {
+    // With cache line size 32:
+    assert!(!unaligned::crosses_cache_line(30, 2, 32));
+    assert!(unaligned::crosses_cache_line(31, 2, 32));
+
+    // With cache line size 128:
+    assert!(!unaligned::crosses_cache_line(126, 2, 128));
+    assert!(unaligned::crosses_cache_line(127, 2, 128));
+}
+
+// ══════════════════════════════════════════════════════════
+// 6. Latency calculation for unaligned accesses
+// ══════════════════════════════════════════════════════════
+
+#[test]
+fn aligned_access_zero_latency() {
+    // Aligned accesses should have 0 latency penalty
+    assert_eq!(unaligned::calculate_unaligned_latency(0, 8, 64), 0);
+    assert_eq!(unaligned::calculate_unaligned_latency(8, 8, 64), 0);
+    assert_eq!(unaligned::calculate_unaligned_latency(0, 4, 64), 0);
+}
+
+#[test]
+fn byte_access_zero_latency() {
+    // Byte accesses are always aligned, so 0 penalty
+    assert_eq!(unaligned::calculate_unaligned_latency(0, 1, 64), 0);
+    assert_eq!(unaligned::calculate_unaligned_latency(63, 1, 64), 0);
+}
+
+#[test]
+fn unaligned_within_cache_line_one_cycle_penalty() {
+    // Unaligned access within cache line: 1 cycle penalty
+    assert_eq!(unaligned::calculate_unaligned_latency(1, 2, 64), 1);
+    assert_eq!(unaligned::calculate_unaligned_latency(3, 4, 64), 1);
+    assert_eq!(unaligned::calculate_unaligned_latency(61, 2, 64), 1);
+}
+
+#[test]
+fn unaligned_crossing_cache_line_two_cycle_penalty() {
+    // Unaligned access crossing cache line: 2 cycle penalty
+    assert_eq!(unaligned::calculate_unaligned_latency(63, 2, 64), 2);
+    assert_eq!(unaligned::calculate_unaligned_latency(62, 4, 64), 2);
+}
+
+#[test]
+fn latency_penalty_progression() {
+    // Half-word at address 1 (unaligned, no crossing)
+    assert_eq!(unaligned::calculate_unaligned_latency(1, 2, 64), 1);
+    // Half-word at address 63 (unaligned, crosses boundary)
+    assert_eq!(unaligned::calculate_unaligned_latency(63, 2, 64), 2);
+
+    // Word at address 1 (unaligned, no crossing)
+    assert_eq!(unaligned::calculate_unaligned_latency(1, 4, 64), 1);
+    // Word at address 61 (unaligned, crosses boundary)
+    assert_eq!(unaligned::calculate_unaligned_latency(61, 4, 64), 2);
+}
+
+#[test]
+fn zero_size_access_zero_latency() {
+    assert_eq!(unaligned::calculate_unaligned_latency(1, 0, 64), 0);
 }

@@ -5,11 +5,11 @@
 //! translation via the MMU, and executes Atomic Memory Operations (AMOs).
 //! It also manages data alignment and access faults.
 
-use crate::common::{AccessType, TranslationResult, Trap, VirtAddr};
+use crate::common::{AccessType, TranslationResult, VirtAddr};
 use crate::core::Cpu;
 use crate::core::pipeline::latches::MemWbEntry;
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};
-use crate::core::units::lsu::Lsu;
+use crate::core::units::lsu::{Lsu, unaligned};
 
 /// Executes the memory stage of the pipeline.
 ///
@@ -50,25 +50,19 @@ pub fn mem_stage(cpu: &mut Cpu) {
         }
 
         if ex.ctrl.mem_read || ex.ctrl.mem_write {
-            let align_mask = match ex.ctrl.width {
-                MemWidth::Byte => 0,
-                MemWidth::Half => 1,
-                MemWidth::Word => 3,
-                MemWidth::Double => 7,
-                _ => 0,
-            };
+            let size = unaligned::width_to_bytes(ex.ctrl.width);
 
-            if (ex.alu & align_mask) != 0 {
-                let potential_trap = if ex.ctrl.mem_read {
-                    Trap::LoadAddressMisaligned(ex.alu)
-                } else {
-                    Trap::StoreAddressMisaligned(ex.alu)
-                };
+            // Check for alignment and apply latency penalty for unaligned accesses
+            if !unaligned::is_aligned(ex.alu, size) {
+                // Hardware handles unaligned access by splitting into multiple byte accesses
+                // Apply latency penalty based on cache line crossing
+                let latency_penalty = unaligned::calculate_unaligned_latency(ex.alu, size, 64);
+                cpu.stall_cycles += latency_penalty;
 
                 if cpu.trace {
                     eprintln!(
-                        "MEM pc={:#x} # WARNING: Ignored {:?}",
-                        ex.pc, potential_trap
+                        "MEM pc={:#x} # UNALIGNED addr={:#x} size={} penalty={}",
+                        ex.pc, ex.alu, size, latency_penalty
                     );
                 }
             }
