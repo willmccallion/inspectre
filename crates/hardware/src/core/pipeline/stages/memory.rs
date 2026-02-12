@@ -128,10 +128,10 @@ pub fn mem_stage(cpu: &mut Cpu) {
                                 MemWidth::Double => cpu.bus.bus.read_u64(raw_paddr),
                                 _ => 0,
                             };
-                            cpu.load_reservation = Some(raw_paddr);
+                            cpu.set_reservation(raw_paddr);
                         }
                         AtomicOp::Sc => {
-                            if cpu.load_reservation == Some(raw_paddr) {
+                            if cpu.check_reservation(raw_paddr) {
                                 match ex.ctrl.width {
                                     MemWidth::Word => {
                                         cpu.bus.bus.write_u32(raw_paddr, ex.store_data as u32)
@@ -145,7 +145,7 @@ pub fn mem_stage(cpu: &mut Cpu) {
                             } else {
                                 ld = 1;
                             }
-                            cpu.load_reservation = None;
+                            cpu.clear_reservation();
                         }
                         _ => {
                             let old_val = match ex.ctrl.width {
@@ -170,8 +170,8 @@ pub fn mem_stage(cpu: &mut Cpu) {
                             }
 
                             ld = old_val;
-                            if cpu.load_reservation == Some(raw_paddr) {
-                                cpu.load_reservation = None;
+                            if cpu.check_reservation(raw_paddr) {
+                                cpu.clear_reservation();
                             }
                         }
                     }
@@ -241,8 +241,8 @@ pub fn mem_stage(cpu: &mut Cpu) {
                             ld |= 0xFFFF_FFFF_0000_0000;
                         }
                     } else if ex.ctrl.mem_write {
-                        if cpu.load_reservation == Some(raw_paddr) {
-                            cpu.load_reservation = None;
+                        if cpu.check_reservation(raw_paddr) {
+                            cpu.clear_reservation();
                         }
 
                         if is_ram {

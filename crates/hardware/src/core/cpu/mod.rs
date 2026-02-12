@@ -146,6 +146,37 @@ unsafe impl Send for Cpu {}
 unsafe impl Sync for Cpu {}
 
 impl Cpu {
+    /// Cache line size for reservation granularity (64 bytes)
+    const RESERVATION_GRANULE: u64 = 64;
+
+    /// Aligns an address to the reservation granule (cache line boundary)
+    #[inline]
+    fn align_reservation_address(addr: u64) -> u64 {
+        addr & !(Self::RESERVATION_GRANULE - 1)
+    }
+
+    /// Sets a load reservation at the given address (cache-line aligned)
+    #[inline]
+    pub(crate) fn set_reservation(&mut self, addr: u64) {
+        self.load_reservation = Some(Self::align_reservation_address(addr));
+    }
+
+    /// Checks if a reservation exists for the given address
+    #[inline]
+    pub(crate) fn check_reservation(&self, addr: u64) -> bool {
+        if let Some(reserved_addr) = self.load_reservation {
+            reserved_addr == Self::align_reservation_address(addr)
+        } else {
+            false
+        }
+    }
+
+    /// Clears the load reservation
+    #[inline]
+    pub(crate) fn clear_reservation(&mut self) {
+        self.load_reservation = None;
+    }
+
     /// Creates a new CPU instance with the specified system and configuration.
     ///
     /// # Arguments

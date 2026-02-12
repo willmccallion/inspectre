@@ -300,6 +300,7 @@ impl Cpu {
 
     /// Executes the `MRET` instruction (Return from Machine Mode).
     pub(crate) fn do_mret(&mut self) {
+        self.clear_reservation(); // MRET invalidates reservations
         self.pc = self.csrs.mepc & !1;
         let mstatus = self.csrs.mstatus;
         let mpp = (mstatus >> csr::MSTATUS_MPP_SHIFT) & csr::MSTATUS_MPP_MASK;
@@ -325,6 +326,7 @@ impl Cpu {
 
     /// Executes the `SRET` instruction (Return from Supervisor Mode).
     pub(crate) fn do_sret(&mut self) {
+        self.clear_reservation(); // SRET invalidates reservations
         let mut sepc = self.csrs.sepc & !1;
         let mmu_enabled = (self.csrs.satp >> 60) != 0;
         if mmu_enabled {

@@ -135,6 +135,7 @@ impl Cpu {
                 };
 
                 self.csrs.satp = new_val;
+                self.clear_reservation(); // SATP write invalidates reservations
                 self.flush_pipeline_stores();
                 self.l1_d_cache.flush();
 

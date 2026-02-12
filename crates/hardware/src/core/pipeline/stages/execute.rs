@@ -215,6 +215,7 @@ pub fn execute_stage(cpu: &mut Cpu) {
                     eprintln!("EX  SFENCE.VMA - Flushing TLBs");
                 }
 
+                cpu.clear_reservation(); // SFENCE.VMA invalidates reservations
                 cpu.flush_pipeline_stores();
 
                 for entry in &mut ex_results {
