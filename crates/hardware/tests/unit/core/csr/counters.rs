@@ -9,7 +9,7 @@
 //! - Counters handle maximum `u64` values.
 //! - Counters wrap around correctly on overflow.
 
-use riscv_core::core::arch::csr::Csrs;
+use inspectre::core::arch::csr::Csrs;
 
 /// Tests basic increment functionality for cycle and instruction counters.
 #[test]
@@ -29,9 +29,11 @@ fn counters_increment() {
 /// Verifies that counters can store the maximum possible 64-bit value.
 #[test]
 fn counters_large_values() {
-    let mut csrs = Csrs::default();
-    csrs.cycle = u64::MAX;
-    csrs.instret = u64::MAX;
+    let csrs = Csrs {
+        cycle: u64::MAX,
+        instret: u64::MAX,
+        ..Default::default()
+    };
     assert_eq!(csrs.cycle, u64::MAX);
     assert_eq!(csrs.instret, u64::MAX);
 }

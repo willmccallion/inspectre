@@ -267,7 +267,7 @@ pub fn decode_stage(cpu: &mut Cpu) {
                     };
                 }
                 f_opcodes::OP_FP => {
-                    let fmt = (d.funct7 >> 0) & 0x3;
+                    let fmt = d.funct7 & 0x3;
                     c.is_rv32 = fmt == FP_FMT_SINGLE;
                     let is_double = fmt == FP_FMT_DOUBLE;
 
@@ -357,7 +357,7 @@ pub fn decode_stage(cpu: &mut Cpu) {
                     c.rs3_fp = true;
                     c.fp_reg_write = true;
                     c.b_src = OpBSrc::Reg2;
-                    let fmt = (d.funct7 >> 0) & 0x3;
+                    let fmt = d.funct7 & 0x3;
                     c.is_rv32 = fmt == FP_FMT_SINGLE;
 
                     c.alu = match d.opcode {
@@ -423,21 +423,15 @@ pub fn decode_stage(cpu: &mut Cpu) {
         };
 
         let mut hazard = false;
-        if d.rs1 != 0 || ctrl.rs1_fp {
-            if bundle_writes.contains(&(d.rs1, ctrl.rs1_fp)) {
-                hazard = true;
-            }
+        if (d.rs1 != 0 || ctrl.rs1_fp) && bundle_writes.contains(&(d.rs1, ctrl.rs1_fp)) {
+            hazard = true;
         }
-        if d.rs2 != 0 || ctrl.rs2_fp {
-            if bundle_writes.contains(&(d.rs2, ctrl.rs2_fp)) {
-                hazard = true;
-            }
+        if (d.rs2 != 0 || ctrl.rs2_fp) && bundle_writes.contains(&(d.rs2, ctrl.rs2_fp)) {
+            hazard = true;
         }
         let rs3_idx = inst.rs3();
-        if ctrl.rs3_fp {
-            if bundle_writes.contains(&(rs3_idx, true)) {
-                hazard = true;
-            }
+        if ctrl.rs3_fp && bundle_writes.contains(&(rs3_idx, true)) {
+            hazard = true;
         }
 
         if hazard {

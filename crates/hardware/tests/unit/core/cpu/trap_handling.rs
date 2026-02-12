@@ -3,14 +3,14 @@
 //! This module contains unit tests for trap and exception handling,
 //! including trap dispatch and context saving.
 
-use riscv_core::common::Trap;
-use riscv_core::config::Config;
-use riscv_core::core::Cpu;
-use riscv_core::core::arch::mode::PrivilegeMode;
+use inspectre::common::Trap;
+use inspectre::config::Config;
+use inspectre::core::Cpu;
+use inspectre::core::arch::mode::PrivilegeMode;
 
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let system = riscv_core::soc::System::new(&config, "");
+    let system = inspectre::soc::System::new(&config, "");
     let mut cpu = Cpu::new(system, &config);
     cpu.direct_mode = false;
     cpu
@@ -148,7 +148,7 @@ fn test_trap_double_fault_detection() {
     let mut cpu = create_test_cpu();
     cpu.privilege = PrivilegeMode::Machine;
     let handler_pc = 0x8000_0000;
-    cpu.csrs.mtvec = handler_pc | 0;
+    cpu.csrs.mtvec = handler_pc;
 
     // Simulate a trap at the handler PC (double fault)
     cpu.trap(Trap::IllegalInstruction(0), handler_pc);
@@ -402,7 +402,7 @@ fn test_trap_direct_mode_no_offset() {
     let mut cpu = create_test_cpu();
     cpu.privilege = PrivilegeMode::Machine;
     let base = 0x8000_0000;
-    cpu.csrs.mtvec = base | 0; // Direct mode (bit 0 = 0)
+    cpu.csrs.mtvec = base; // Direct mode (bit 0 = 0)
 
     cpu.trap(Trap::MachineTimerInterrupt, cpu.pc);
 
@@ -679,4 +679,4 @@ fn test_trap_updates_sepc_on_delegation() {
     assert_eq!(cpu.csrs.sepc, trap_pc);
 }
 
-use riscv_core::common::constants::CAUSE_INTERRUPT_BIT;
+use inspectre::common::constants::CAUSE_INTERRUPT_BIT;

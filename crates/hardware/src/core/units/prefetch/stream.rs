@@ -90,12 +90,10 @@ impl Prefetcher for StreamPrefetcher {
                 self.direction = current_dir;
                 self.confidence = 1;
             }
+        } else if self.confidence > 0 {
+            self.confidence -= 1;
         } else {
-            if self.confidence > 0 {
-                self.confidence -= 1;
-            } else {
-                self.direction = Direction::None;
-            }
+            self.direction = Direction::None;
         }
 
         if self.confidence >= 2 {

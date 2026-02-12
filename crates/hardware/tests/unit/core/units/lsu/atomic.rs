@@ -12,8 +12,8 @@
 //!
 //! Reference: RISC-V ISA Spec Volume I, Chapter 8 (A Extension).
 
-use riscv_core::core::pipeline::signals::{AtomicOp, MemWidth};
-use riscv_core::core::units::lsu::atomic::atomic_alu;
+use inspectre::core::pipeline::signals::{AtomicOp, MemWidth};
+use inspectre::core::units::lsu::atomic::atomic_alu;
 
 // ─── Constants ───────────────────────────────────────────
 

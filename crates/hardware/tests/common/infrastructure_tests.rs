@@ -3,8 +3,8 @@ use super::builder::pipeline_state::{ExMemBuilder, IdExBuilder, IfIdBuilder, Mem
 use super::harness::TestContext;
 use super::mocks::interrupts::MockInterruptController;
 use super::mocks::memory::MockMemory;
-use riscv_core::core::pipeline::signals::ControlSignals;
-use riscv_core::isa::rv64i::opcodes::*;
+use inspectre::core::pipeline::signals::ControlSignals;
+use inspectre::isa::rv64i::opcodes::*;
 
 // ─── InstructionBuilder: R-type encoding ───────────────────────────────────
 
@@ -381,7 +381,7 @@ fn harness_x0_always_zero() {
 
 #[test]
 fn mock_memory_read_write_all_widths() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mut mem = MockMemory::new(1024, 0x0);
     mem.write_u8(0, 0xAB);
@@ -399,7 +399,7 @@ fn mock_memory_read_write_all_widths() {
 
 #[test]
 fn mock_memory_out_of_bounds_reads_zero() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mut mem = MockMemory::new(16, 0x0);
     assert_eq!(mem.read_u32(20), 0, "Out-of-bounds read should return 0");
@@ -409,7 +409,7 @@ fn mock_memory_out_of_bounds_reads_zero() {
 #[test]
 #[should_panic(expected = "Bus Error")]
 fn mock_memory_fault_injection_panics() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mut mem = MockMemory::new(1024, 0x1000);
     mem.inject_fault(0x1010);
@@ -418,7 +418,7 @@ fn mock_memory_fault_injection_panics() {
 
 #[test]
 fn mock_memory_fault_only_affects_target_address() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mut mem = MockMemory::new(1024, 0x1000);
     mem.inject_fault(0x1010);
@@ -429,7 +429,7 @@ fn mock_memory_fault_only_affects_target_address() {
 
 #[test]
 fn mock_memory_address_range() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mem = MockMemory::new(4096, 0x8000_0000);
     let (base, size) = mem.address_range();
@@ -439,7 +439,7 @@ fn mock_memory_address_range() {
 
 #[test]
 fn mock_memory_name() {
-    use riscv_core::soc::devices::Device;
+    use inspectre::soc::devices::Device;
 
     let mem = MockMemory::new(64, 0);
     assert_eq!(mem.name(), "MockMemory");

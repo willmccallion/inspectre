@@ -11,9 +11,9 @@
 //!   8. NOP / zero instruction not counted
 
 use crate::common::harness::TestContext;
-use riscv_core::core::pipeline::latches::MemWbEntry;
-use riscv_core::core::pipeline::signals::{AluOp, ControlSignals, MemWidth};
-use riscv_core::core::pipeline::stages::wb_stage;
+use inspectre::core::pipeline::latches::MemWbEntry;
+use inspectre::core::pipeline::signals::{AluOp, ControlSignals, MemWidth};
+use inspectre::core::pipeline::stages::wb_stage;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -420,7 +420,7 @@ fn pc_trace_updated_on_retire() {
 fn trap_flushes_pipeline_latches() {
     let mut tc = ctx();
     // In direct mode, IllegalInstruction causes exit_code=1
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = MemWbEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -439,7 +439,7 @@ fn trap_flushes_pipeline_latches() {
 #[test]
 fn trap_sets_exit_code_in_direct_mode() {
     let mut tc = ctx();
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = MemWbEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -457,7 +457,7 @@ fn trap_sets_exit_code_in_direct_mode() {
 #[test]
 fn trap_stops_processing_subsequent_entries() {
     let mut tc = ctx();
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let trap_entry = MemWbEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -481,7 +481,7 @@ fn trap_stops_processing_subsequent_entries() {
 fn normal_entry_before_trap_still_retires() {
     let mut tc = ctx();
     let normal = alu_wb(8, 0xCAFE);
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let trap_entry = MemWbEntry {
         pc: PC,
         inst: 0xDEAD,

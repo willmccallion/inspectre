@@ -5,7 +5,7 @@
 //! Machine-mode and Supervisor-mode registers, including specific handling for address
 //! translation (`satp`) and hardware counters.
 
-use riscv_core::core::arch::csr::{self, Csrs};
+use inspectre::core::arch::csr::{self, Csrs};
 
 /// Verifies that all Control and Status Registers (CSRs) are initialized to zero by default.
 #[test]
@@ -112,7 +112,7 @@ fn csr_satp_mode_sv39_preserved() {
 #[test]
 fn csr_satp_mode_bare_preserved() {
     let mut csrs = Csrs::default();
-    let bare_satp = (csr::SATP_MODE_BARE << csr::SATP_MODE_SHIFT) | 0x0;
+    let bare_satp = csr::SATP_MODE_BARE << csr::SATP_MODE_SHIFT;
     csrs.write(csr::SATP, bare_satp);
     let read_back = csrs.read(csr::SATP);
     let mode = (read_back >> csr::SATP_MODE_SHIFT) & csr::SATP_MODE_MASK;

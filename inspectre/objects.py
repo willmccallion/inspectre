@@ -4,7 +4,7 @@ Simulation objects and high-level run API.
 This module provides:
 1. **SimObject:** Base for configurable objects with to_dict() for the Rust backend.
 2. **System:** Top-level system (RAM size/base, trace); instantiate() creates the Rust PySystem.
-3. **P550Cpu:** CPU wrapper with config and branch predictor; create() builds PyCpu, load_kernel() for OS boot.
+3. **Cpu:** CPU wrapper; pass any SimConfig to define the machine model.
 4. **simulate:** Run CPU until exit with optional stats printing and section filter.
 5. **run_with_progress:** Run in chunks with cycle progress (e.g., for kernel boot).
 6. **Simulator:** Fluent API (config/kernel/disk/binary/run) for script-based runs.
@@ -18,7 +18,7 @@ import os
 import sys
 from typing import Any, Dict, Optional
 
-import riscv_emulator
+from ._core import PySystem, PyCpu
 
 from .config import SimConfig, config_to_dict
 
@@ -165,12 +165,12 @@ class System(SimObject):
                 },
             }
 
-        self.rust_system = riscv_emulator.PySystem(config_dict, disk_image)
+        self.rust_system = PySystem(config_dict, disk_image)
         return self.rust_system
 
 
-class P550Cpu(SimObject):
-    """CPU wrapper; pass config= from your script (e.g. scripts/p550/config.py) to define the machine."""
+class Cpu(SimObject):
+    """CPU wrapper; pass any SimConfig to define the machine model."""
 
     def __init__(
         self,
@@ -190,7 +190,7 @@ class P550Cpu(SimObject):
     def create(self):
         """Build the Rust PyCpu from the current system and config; returns the Rust CPU."""
         config_dict = self._get_config_dict()
-        self.rust_cpu = riscv_emulator.PyCpu(self.system.rust_system, config_dict)
+        self.rust_cpu = PyCpu(self.system.rust_system, config_dict)
         return self.rust_cpu
 
     def _get_config_dict(self):
@@ -283,6 +283,11 @@ class Simulator:
         self._config_obj = None
         self._is_kernel_mode = False
 
+    def with_config(self, config: SimConfig) -> Simulator:
+        """Set the machine configuration directly from a SimConfig object."""
+        self._config_obj = config
+        return self
+
     def config(self, path: str) -> Simulator:
         """Load configuration from a Python file (looks for function named like the file or get_config/config)."""
         if not os.path.exists(path):
@@ -363,7 +368,7 @@ class Simulator:
         sys_obj = System(ram_size=ram_size)
         sys_obj.instantiate(disk_image=self._disk_path, config=self._config_obj)
 
-        cpu_obj = P550Cpu(sys_obj, config=self._config_obj)
+        cpu_obj = Cpu(sys_obj, config=self._config_obj)
         rust_cpu = cpu_obj.create()
 
         if self._is_kernel_mode:

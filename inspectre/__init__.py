@@ -1,33 +1,41 @@
 """
-RISC-V simulator Python API.
+Inspectre simulator Python API.
 
 This package provides a Python-first interface to the cycle-accurate RISC-V simulator. It provides:
 1. **Configuration:** `SimConfig` and `config_to_dict` for building machine models (cache, BP, pipeline).
-2. **Execution:** `System`, `P550Cpu`, `simulate`, and `Simulator` for running binaries and scripts.
+2. **Execution:** `System`, `Cpu`, `simulate`, and `Simulator` for running binaries and scripts.
 3. **Experiments:** `Environment`, `ExperimentResult`, and `run_experiment` for reproducible sweeps.
 4. **Statistics:** `StatsObject` for performance metrics and sectioned output.
-5. **Rust bindings:** `PySystem`, `CPU` (PyCpu), and `Memory` from the riscv_emulator extension.
+5. **Rust bindings:** `PySystem`, `CPU` (PyCpu), and `Memory` from the inspectre extension.
 """
 
-import riscv_emulator
+from importlib.metadata import version as _metadata_version
+
+from . import _core
 from .config import SimConfig, config_to_dict
-from .objects import System, P550Cpu, simulate, get_default_config, Simulator
+from .objects import System, Cpu, simulate, get_default_config, Simulator
 from .experiment import Environment, ExperimentResult, run_experiment
 from .stats import StatsObject
 
-PySystem = riscv_emulator.PySystem
-CPU = riscv_emulator.PyCpu
-Memory = riscv_emulator.PyMemory
+PySystem = _core.PySystem
+CPU = _core.PyCpu
+Memory = _core.PyMemory
 
-import sys
+__version__ = _metadata_version("inspectre-sim")
 
-sys.modules[f"{__name__}._core"] = riscv_emulator
+
+def version() -> str:
+    """Return the installed inspectre version string."""
+    return __version__
+
 
 __all__ = [
+    "__version__",
+    "version",
     "SimConfig",
     "config_to_dict",
     "System",
-    "P550Cpu",
+    "Cpu",
     "simulate",
     "get_default_config",
     "Environment",
@@ -37,4 +45,5 @@ __all__ = [
     "PySystem",
     "CPU",
     "Memory",
+    "Simulator",
 ]

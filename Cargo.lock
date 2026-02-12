@@ -369,6 +369,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "inspectre"
+version = "0.9.6"
+dependencies = [
+ "env_logger",
+ "libc",
+ "log",
+ "mockall",
+ "pretty_assertions",
+ "proptest",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "which",
+]
+
+[[package]]
+name = "inspectre-bindings"
+version = "0.9.6"
+dependencies = [
+ "inspectre",
+ "pyo3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "inspectre-cli"
+version = "0.9.6"
+dependencies = [
+ "clap",
+ "inspectre",
+ "inspectre-bindings",
+ "pyo3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -755,46 +794,6 @@ name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
-
-[[package]]
-name = "riscv-bindings"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "riscv-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "riscv-core"
-version = "3.0.0"
-dependencies = [
- "clap",
- "env_logger",
- "libc",
- "log",
- "mockall",
- "pretty_assertions",
- "proptest",
- "rstest",
- "serde",
- "serde_json",
- "tempfile",
- "which",
-]
-
-[[package]]
-name = "riscv-sim"
-version = "0.1.0"
-dependencies = [
- "clap",
- "pyo3",
- "riscv-bindings",
- "riscv-core",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "rstest"

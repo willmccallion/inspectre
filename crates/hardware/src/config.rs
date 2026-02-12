@@ -272,7 +272,7 @@ pub enum BranchPredictor {
 /// Creating a default configuration:
 ///
 /// ```
-/// use riscv_core::config::Config;
+/// use inspectre::config::Config;
 ///
 /// let config = Config::default();
 /// assert_eq!(config.general.trace_instructions, false);
@@ -282,7 +282,7 @@ pub enum BranchPredictor {
 /// Deserializing from JSON (typical Python API usage):
 ///
 /// ```
-/// use riscv_core::config::{Config, BranchPredictor, Prefetcher};
+/// use inspectre::config::{Config, BranchPredictor, Prefetcher};
 ///
 /// let json = r#"{
 ///     "general": {
@@ -352,7 +352,7 @@ pub enum BranchPredictor {
 /// assert_eq!(config.cache.l1_d.prefetcher, Prefetcher::Stride);
 /// assert_eq!(config.pipeline.branch_predictor, BranchPredictor::GShare);
 /// ```
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Config {
     /// General simulation settings
     pub general: GeneralConfig,
@@ -364,18 +364,6 @@ pub struct Config {
     pub cache: CacheHierarchyConfig,
     /// Pipeline and branch predictor configuration
     pub pipeline: PipelineConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            system: SystemConfig::default(),
-            memory: MemoryConfig::default(),
-            cache: CacheHierarchyConfig::default(),
-            pipeline: PipelineConfig::default(),
-        }
-    }
 }
 
 /// General simulation settings and options.
@@ -626,7 +614,7 @@ impl Default for MemoryConfig {
 }
 
 /// Cache hierarchy configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct CacheHierarchyConfig {
     /// L1 instruction cache
     pub l1_i: CacheConfig,
@@ -636,17 +624,6 @@ pub struct CacheHierarchyConfig {
     pub l2: CacheConfig,
     /// Unified L3 cache (optional)
     pub l3: CacheConfig,
-}
-
-impl Default for CacheHierarchyConfig {
-    fn default() -> Self {
-        Self {
-            l1_i: CacheConfig::default(),
-            l1_d: CacheConfig::default(),
-            l2: CacheConfig::default(),
-            l3: CacheConfig::default(),
-        }
-    }
 }
 
 /// Individual cache level configuration.

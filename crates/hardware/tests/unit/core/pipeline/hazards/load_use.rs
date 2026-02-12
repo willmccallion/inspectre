@@ -4,9 +4,9 @@
 //! is required because an instruction in Decode depends on data being
 //! loaded by an instruction in Execute.
 
-use riscv_core::core::pipeline::hazards::need_stall_load_use;
-use riscv_core::core::pipeline::latches::{IdEx, IdExEntry, IfId, IfIdEntry};
-use riscv_core::core::pipeline::signals::ControlSignals;
+use inspectre::core::pipeline::hazards::need_stall_load_use;
+use inspectre::core::pipeline::latches::{IdEx, IdExEntry, IfId, IfIdEntry};
+use inspectre::core::pipeline::signals::ControlSignals;
 
 /// Helper: encode a minimal instruction with given rs1 and rs2 fields.
 fn encode_inst(rs1: u32, rs2: u32) -> u32 {

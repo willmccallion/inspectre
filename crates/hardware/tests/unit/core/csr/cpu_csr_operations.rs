@@ -4,14 +4,14 @@
 //! including side effects like TLB flushes, interrupt inhibition, and
 //! synchronization between MSTATUS and SSTATUS.
 
-use riscv_core::config::Config;
-use riscv_core::core::Cpu;
-use riscv_core::core::arch::csr;
+use inspectre::config::Config;
+use inspectre::core::Cpu;
+use inspectre::core::arch::csr;
 
 /// Helper function to create a test CPU instance.
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let system = riscv_core::soc::System::new(&config, "");
+    let system = inspectre::soc::System::new(&config, "");
     Cpu::new(system, &config)
 }
 
@@ -291,7 +291,7 @@ fn test_csr_satp_bare_mode() {
     let mut cpu = create_test_cpu();
 
     // Bare mode (mode=0)
-    let satp_value = (0u64 << 60) | 0x12345;
+    let satp_value = 0x12345;
     cpu.csr_write(csr::SATP, satp_value);
     assert_eq!(cpu.csr_read(csr::SATP), satp_value);
 }

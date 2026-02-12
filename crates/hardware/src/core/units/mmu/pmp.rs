@@ -106,6 +106,12 @@ pub struct Pmp {
     entries: Vec<PmpEntry>,
 }
 
+impl Default for Pmp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pmp {
     /// Creates a new PMP unit with all entries disabled.
     pub fn new() -> Self {

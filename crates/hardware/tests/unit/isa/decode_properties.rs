@@ -14,8 +14,8 @@
 //! - J-type:  OP_JAL
 //! - R4-type: OP_FMADD, OP_FMSUB, OP_FNMADD, OP_FNMSUB
 
-use riscv_core::isa::decode::decode;
-use riscv_core::isa::instruction::InstructionBits;
+use inspectre::isa::decode::decode;
+use inspectre::isa::instruction::InstructionBits;
 
 // ──────────────────────────────────────────────────────────
 // Encoding helpers (construct raw 32-bit instructions)
@@ -102,18 +102,18 @@ fn r4_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, rs2: u32, rs3: u32, fmt:
 // Import opcode/funct constants
 // ──────────────────────────────────────────────────────────
 
-use riscv_core::isa::privileged::opcodes as sys_op;
-use riscv_core::isa::rv64a::funct5 as a_f5;
-use riscv_core::isa::rv64a::opcodes as a_op;
-use riscv_core::isa::rv64d::funct7 as d_f7;
-use riscv_core::isa::rv64f::funct3 as f_f3;
-use riscv_core::isa::rv64f::funct7 as f_f7;
-use riscv_core::isa::rv64f::opcodes as f_op;
-use riscv_core::isa::rv64i::funct3 as i_f3;
-use riscv_core::isa::rv64i::funct7 as i_f7;
-use riscv_core::isa::rv64i::opcodes as i_op;
-use riscv_core::isa::rv64m::funct3 as m_f3;
-use riscv_core::isa::rv64m::opcodes as m_op;
+use inspectre::isa::privileged::opcodes as sys_op;
+use inspectre::isa::rv64a::funct5 as a_f5;
+use inspectre::isa::rv64a::opcodes as a_op;
+use inspectre::isa::rv64d::funct7 as d_f7;
+use inspectre::isa::rv64f::funct3 as f_f3;
+use inspectre::isa::rv64f::funct7 as f_f7;
+use inspectre::isa::rv64f::opcodes as f_op;
+use inspectre::isa::rv64i::funct3 as i_f3;
+use inspectre::isa::rv64i::funct7 as i_f7;
+use inspectre::isa::rv64i::opcodes as i_op;
+use inspectre::isa::rv64m::funct3 as m_f3;
+use inspectre::isa::rv64m::opcodes as m_op;
 
 // ══════════════════════════════════════════════════════════
 // 1. InstructionBits trait — field extraction
@@ -121,7 +121,7 @@ use riscv_core::isa::rv64m::opcodes as m_op;
 
 #[test]
 fn field_extraction_opcode() {
-    let inst: u32 = 0b1010101_00000_00000_000_00000_0110011; // OP_REG = 0x33
+    let inst: u32 = 0b1010_1010_0000_0000_0000_0000_0011_0011; // OP_REG = 0x33
     assert_eq!(inst.opcode(), i_op::OP_REG);
 }
 

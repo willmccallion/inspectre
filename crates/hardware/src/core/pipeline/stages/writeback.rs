@@ -248,7 +248,7 @@ pub fn wb_stage(cpu: &mut Cpu) {
         let exit_code_before = cpu.exit_code.is_some();
         cpu.trap(trap, pc);
 
-        if cpu.trace && !cpu.exit_code.is_some() {
+        if cpu.trace && cpu.exit_code.is_none() {
             eprintln!("WB  * TRAP HANDLED, new PC={:#x}", cpu.pc);
         } else if cpu.trace && cpu.exit_code.is_some() && !exit_code_before {
             eprintln!("WB  * TRAP CAUSED EXIT (direct mode)");

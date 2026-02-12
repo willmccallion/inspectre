@@ -17,19 +17,7 @@ from .config import SimConfig, config_to_dict
 from .objects import get_default_config
 from .stats import StatsObject
 
-try:
-    from . import PySystem, CPU
-except ImportError:
-    from riscv_emulator import PySystem
-
-    CPU = None
-    for _ in (0,):
-        try:
-            CPU = __import__("riscv_emulator").PyCpu
-        except Exception:
-            pass
-    if CPU is None:
-        raise ImportError("riscv_emulator.PyCpu not available")
+from ._core import PySystem, PyCpu as CPU
 
 
 @dataclass

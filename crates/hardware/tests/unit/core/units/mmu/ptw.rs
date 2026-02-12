@@ -9,11 +9,11 @@
 //! - Bare mode bypass
 
 use crate::common::harness::TestContext;
-use riscv_core::common::{AccessType, Trap, VirtAddr};
-use riscv_core::core::arch::csr::{self, Csrs};
-use riscv_core::core::arch::mode::PrivilegeMode;
-use riscv_core::core::units::mmu::Mmu;
-use riscv_core::soc::interconnect::Bus;
+use inspectre::common::{AccessType, Trap, VirtAddr};
+use inspectre::core::arch::csr::{self, Csrs};
+use inspectre::core::arch::mode::PrivilegeMode;
+use inspectre::core::units::mmu::Mmu;
+use inspectre::soc::interconnect::Bus;
 
 // ══════════════════════════════════════════════════════════
 // Helpers

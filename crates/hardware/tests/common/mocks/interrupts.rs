@@ -8,6 +8,12 @@ pub struct MockInterruptController {
     threshold: u32,
 }
 
+impl Default for MockInterruptController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockInterruptController {
     pub fn new() -> Self {
         Self {

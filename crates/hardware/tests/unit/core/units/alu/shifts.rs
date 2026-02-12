@@ -13,8 +13,8 @@
 //!
 //! Reference: RISC-V ISA Specification, Volume I, Chapter 2.4.
 
-use riscv_core::core::pipeline::signals::AluOp;
-use riscv_core::core::units::alu::Alu;
+use inspectre::core::pipeline::signals::AluOp;
+use inspectre::core::units::alu::Alu;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

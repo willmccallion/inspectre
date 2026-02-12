@@ -2,7 +2,7 @@
 
 How to configure the simulator from Python: config schema, parameters, and mapping to Rust.
 
-**Source:** `python/riscv_sim/config.py`, `python/riscv_sim/core/params.py`.
+**Source:** `inspectre/config.py`, `inspectre/core/params.py`.
 
 ---
 
@@ -51,7 +51,7 @@ Configuration is **Python-first**: the library provides a **`SimConfig`** root o
 Machine scripts return a `SimConfig` (or a function that returns one). For example, `scripts/p550/config.py`:
 
 ```python
-from riscv_sim import SimConfig, TageConfig
+from inspectre import SimConfig, TageConfig
 
 def p550_config(branch_predictor="TAGE"):
     c = SimConfig.default()

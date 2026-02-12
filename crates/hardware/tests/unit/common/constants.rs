@@ -3,7 +3,7 @@
 //! This module verifies that global constants are defined with correct values
 //! and maintain expected mathematical relationships.
 
-use riscv_core::common::constants::*;
+use inspectre::common::constants::*;
 
 #[test]
 fn test_page_size_is_4kb() {

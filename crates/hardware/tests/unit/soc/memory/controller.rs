@@ -3,7 +3,7 @@
 //! Verifies SimpleController (fixed latency) and DramController
 //! (row-buffer-aware latency with CAS/RAS/precharge).
 
-use riscv_core::soc::memory::controller::{DramController, MemoryController, SimpleController};
+use inspectre::soc::memory::controller::{DramController, MemoryController, SimpleController};
 
 // ══════════════════════════════════════════════════════════
 // 1. SimpleController

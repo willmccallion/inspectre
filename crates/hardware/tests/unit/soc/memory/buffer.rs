@@ -3,7 +3,7 @@
 //! Verifies allocation, read/write at byte and slice level,
 //! indexing, and boundary checks.
 
-use riscv_core::soc::memory::buffer::DramBuffer;
+use inspectre::soc::memory::buffer::DramBuffer;
 
 // ══════════════════════════════════════════════════════════
 // 1. Allocation and size

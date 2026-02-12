@@ -121,11 +121,7 @@ pub fn expand(inst: u16) -> u32 {
             q1::C_LI => {
                 let imm = sign_extend((((inst >> 2) & 0x1F) | ((inst >> 12) & 1) << 5) as u32, 6);
                 let rd = ((inst >> 7) & 0x1F) as u32;
-                ((imm & 0xFFF) << 20)
-                    | (0 << 15)
-                    | (funct3::ADD_SUB << 12)
-                    | (rd << 7)
-                    | opcodes::OP_IMM
+                ((imm & 0xFFF) << 20) | (funct3::ADD_SUB << 12) | (rd << 7) | opcodes::OP_IMM
             }
             q1::C_LUI_ADDI16SP => {
                 let rd = ((inst >> 7) & 0x1F) as u32;
@@ -254,12 +250,7 @@ pub fn expand(inst: u16) -> u32 {
                 let imm10_1 = (offset >> 1) & 0x3FF;
                 let imm11 = (offset >> 11) & 1;
                 let imm19_12 = (offset >> 12) & 0xFF;
-                (imm20 << 31)
-                    | (imm19_12 << 12)
-                    | (imm11 << 20)
-                    | (imm10_1 << 21)
-                    | (0 << 7)
-                    | opcodes::OP_JAL
+                (imm20 << 31) | (imm19_12 << 12) | (imm11 << 20) | (imm10_1 << 21) | opcodes::OP_JAL
             }
             q1::C_BEQZ => {
                 let offset = sign_extend(
@@ -277,7 +268,6 @@ pub fn expand(inst: u16) -> u32 {
                 let imm11 = (offset >> 11) & 1;
                 (imm12 << 31)
                     | (imm10_5 << 25)
-                    | (0 << 20)
                     | (rs1 << 15)
                     | (funct3::BEQ << 12)
                     | (imm4_1 << 8)
@@ -300,7 +290,6 @@ pub fn expand(inst: u16) -> u32 {
                 let imm11 = (offset >> 11) & 1;
                 (imm12 << 31)
                     | (imm10_5 << 25)
-                    | (0 << 20)
                     | (rs1 << 15)
                     | (funct3::BNE << 12)
                     | (imm4_1 << 8)
@@ -358,26 +347,20 @@ pub fn expand(inst: u16) -> u32 {
                         }
                         (rs1 << 15) | (funct3::ADD_SUB << 12) | opcodes::OP_JALR
                     } else {
-                        (rs2 << 20)
-                            | (0 << 15)
-                            | (funct3::ADD_SUB << 12)
-                            | (rs1 << 7)
-                            | opcodes::OP_REG
+                        (rs2 << 20) | (funct3::ADD_SUB << 12) | (rs1 << 7) | opcodes::OP_REG
+                    }
+                } else if rs2 == 0 {
+                    if rs1 == 0 {
+                        sys_ops::EBREAK
+                    } else {
+                        (rs1 << 15) | (funct3::ADD_SUB << 12) | (1 << 7) | opcodes::OP_JALR
                     }
                 } else {
-                    if rs2 == 0 {
-                        if rs1 == 0 {
-                            sys_ops::EBREAK
-                        } else {
-                            (rs1 << 15) | (funct3::ADD_SUB << 12) | (1 << 7) | opcodes::OP_JALR
-                        }
-                    } else {
-                        (rs2 << 20)
-                            | (rs1 << 15)
-                            | (funct3::ADD_SUB << 12)
-                            | (rs1 << 7)
-                            | opcodes::OP_REG
-                    }
+                    (rs2 << 20)
+                        | (rs1 << 15)
+                        | (funct3::ADD_SUB << 12)
+                        | (rs1 << 7)
+                        | opcodes::OP_REG
                 }
             }
             q2::C_FSDSP => {

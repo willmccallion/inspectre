@@ -1,7 +1,7 @@
 //! PLIC claim/complete flow tests.
 
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::devices::plic::Plic;
+use inspectre::soc::devices::Device;
+use inspectre::soc::devices::plic::Plic;
 
 #[test]
 fn plic_claim_with_no_pending_returns_zero() {

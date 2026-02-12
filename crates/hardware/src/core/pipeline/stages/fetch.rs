@@ -130,26 +130,38 @@ pub fn fetch_stage(cpu: &mut Cpu) {
             /// Bit shift to combine upper and lower half-words into full instruction.
             const UPPER_HALF_SHIFT: u32 = 16;
 
-            let upper_half = if phys_addr + UPPER_HALF_OFFSET >= cpu.ram_start
-                && phys_addr + UPPER_HALF_OFFSET < cpu.ram_end
-            {
-                let offset = (phys_addr + UPPER_HALF_OFFSET - cpu.ram_start) as usize;
-                // SAFETY: This is safe because:
-                // 1. `phys_addr + UPPER_HALF_OFFSET` is validated to be within RAM bounds
-                // 2. `offset` represents a valid offset from ram_start within allocated memory
-                // 3. `ram_ptr` points to valid, initialized memory
-                // 4. `read_unaligned()` safely handles potential misalignment of the upper half-word
-                // 5. The u16 read at offset+2 is guaranteed within bounds by the range check
-                unsafe {
-                    let ptr = cpu.ram_ptr.add(offset) as *const u16;
-                    ptr.read_unaligned()
-                }
+            // When a 32-bit instruction spans a page boundary (PC at offset
+            // 0xFFE), the upper half-word lives on a different virtual page
+            // which may map to a non-contiguous physical address.  We must
+            // translate the upper half's VA independently in that case.
+            let upper_va = current_pc.wrapping_add(UPPER_HALF_OFFSET);
+            let crosses_page = (current_pc >> 12) != (upper_va >> 12);
+
+            let (upper_phys, upper_fault) = if crosses_page {
+                let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch);
+                cpu.stall_cycles += result.cycles;
+                (result.paddr.val(), result.trap)
             } else {
-                cpu.bus.bus.read_u16(phys_addr + UPPER_HALF_OFFSET)
+                (phys_addr + UPPER_HALF_OFFSET, None)
             };
 
-            let full_inst = (upper_half as u32) << UPPER_HALF_SHIFT | (half_word as u32);
-            (full_inst, INSTRUCTION_SIZE_32, None)
+            if let Some(t) = upper_fault {
+                (0, INSTRUCTION_SIZE_32, Some(t))
+            } else {
+                let upper_half = if upper_phys >= cpu.ram_start && upper_phys < cpu.ram_end {
+                    let offset = (upper_phys - cpu.ram_start) as usize;
+                    // SAFETY: upper_phys is validated to be within RAM bounds.
+                    unsafe {
+                        let ptr = cpu.ram_ptr.add(offset) as *const u16;
+                        ptr.read_unaligned()
+                    }
+                } else {
+                    cpu.bus.bus.read_u16(upper_phys)
+                };
+
+                let full_inst = (upper_half as u32) << UPPER_HALF_SHIFT | (half_word as u32);
+                (full_inst, INSTRUCTION_SIZE_32, None)
+            }
         };
 
         if let Some(t) = inst_trap {
@@ -159,7 +171,7 @@ pub fn fetch_stage(cpu: &mut Cpu) {
             fetched.push(IfIdEntry {
                 pc: current_pc,
                 inst: 0,
-                inst_size: step as u64,
+                inst_size: step,
                 pred_taken: false,
                 pred_target: 0,
                 trap: Some(t),
@@ -188,13 +200,11 @@ pub fn fetch_stage(cpu: &mut Cpu) {
 
         if opcode == opcodes::OP_BRANCH {
             let (taken, target) = cpu.branch_predictor.predict_branch(current_pc);
-            if taken {
-                if let Some(tgt) = target {
-                    next_pc_calc = tgt;
-                    pred_taken = true;
-                    pred_target = tgt;
-                    stop_fetch = true;
-                }
+            if taken && let Some(tgt) = target {
+                next_pc_calc = tgt;
+                pred_taken = true;
+                pred_target = tgt;
+                stop_fetch = true;
             }
         } else if opcode == opcodes::OP_JAL {
             if let Some(tgt) = cpu.branch_predictor.predict_btb(current_pc) {
@@ -221,7 +231,7 @@ pub fn fetch_stage(cpu: &mut Cpu) {
         fetched.push(IfIdEntry {
             pc: current_pc,
             inst,
-            inst_size: step as u64,
+            inst_size: step,
             pred_taken,
             pred_target,
             trap: None,

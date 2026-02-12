@@ -1,13 +1,19 @@
 use crate::common::mocks::memory::{MockMemory, MockMemoryController};
-use riscv_core::config::Config;
-use riscv_core::core::Cpu;
-use riscv_core::soc::System;
-use riscv_core::soc::interconnect::Bus;
+use inspectre::config::Config;
+use inspectre::core::Cpu;
+use inspectre::soc::System;
+use inspectre::soc::interconnect::Bus;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 pub struct TestContext {
     pub cpu: Cpu,
+}
+
+impl Default for TestContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestContext {

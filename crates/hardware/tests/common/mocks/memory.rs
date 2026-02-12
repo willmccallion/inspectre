@@ -1,6 +1,6 @@
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::memory::Memory;
-use riscv_core::soc::memory::controller::MemoryController;
+use inspectre::soc::devices::Device;
+use inspectre::soc::memory::Memory;
+use inspectre::soc::memory::controller::MemoryController;
 use std::sync::{Arc, Mutex};
 
 pub struct MockMemoryController {

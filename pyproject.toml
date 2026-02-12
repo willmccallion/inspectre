@@ -3,17 +3,29 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "riscv_emulator"
-version = "0.1.0"
-description = "High-performance RISC-V System Emulator"
-requires-python = ">=3.8"
+name = "inspectre-sim"
+version = "0.9.6"
+description = "High-performance RISC-V cycle-accurate system simulator"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT OR Apache-2.0" }
+license-files = ["LICENSE-APACHE", "LICENSE-MIT"]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Emulators",
+    "Intended Audience :: Science/Research",
 ]
 
+[project.scripts]
+inspectre = "inspectre.__main__:main"
+
 [tool.maturin]
-manifest-path = "bindings/Cargo.toml"
+manifest-path = "crates/bindings/Cargo.toml"
 features = ["extension"]
-module-name = "riscv_emulator"
+module-name = "inspectre._core"
+include = ["LICENSE-APACHE", "LICENSE-MIT"]

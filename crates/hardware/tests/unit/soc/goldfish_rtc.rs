@@ -2,8 +2,8 @@
 //!
 //! Verifies basic device identification for the Goldfish real-time clock.
 
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::devices::goldfish_rtc::GoldfishRtc;
+use inspectre::soc::devices::Device;
+use inspectre::soc::devices::goldfish_rtc::GoldfishRtc;
 
 #[test]
 fn goldfish_rtc_name() {

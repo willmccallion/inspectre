@@ -76,8 +76,8 @@ impl Fpu {
     /// # Examples
     ///
     /// ```
-    /// use riscv_core::core::units::fpu::Fpu;
-    /// use riscv_core::core::pipeline::signals::AluOp;
+    /// use inspectre::core::units::fpu::Fpu;
+    /// use inspectre::core::pipeline::signals::AluOp;
     ///
     /// // Single-precision addition with NaN boxing
     /// let a = Fpu::box_f32(2.5_f32);
@@ -358,9 +358,9 @@ impl Fpu {
                 // If the cast already rounded towards zero, use it.
                 // Otherwise adjust: if exact > 0 and trunc > exact, go down;
                 // if exact < 0 and trunc < exact, go up.
-                if exact > 0.0 && (trunc as f64) > exact {
-                    f32::from_bits(trunc.to_bits() - 1)
-                } else if exact < 0.0 && (trunc as f64) < exact {
+                if (exact > 0.0 && (trunc as f64) > exact)
+                    || (exact < 0.0 && (trunc as f64) < exact)
+                {
                     f32::from_bits(trunc.to_bits() - 1)
                 } else {
                     trunc
@@ -371,7 +371,7 @@ impl Fpu {
                 let rounded = exact as f32;
                 if (rounded as f64) > exact {
                     // Need to go one ulp lower
-                    if rounded > 0.0 || rounded == 0.0 {
+                    if rounded >= 0.0 {
                         f32::from_bits(rounded.to_bits().wrapping_sub(1))
                     } else {
                         f32::from_bits(rounded.to_bits() + 1) // More negative

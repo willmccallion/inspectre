@@ -36,12 +36,12 @@ A cycle-accurate system simulator for the RISC-V 64-bit architecture (RV64IMAFD)
 ## Project Structure
 
 ```
-riscv-system/
+inspectre/
 ├── crates/              # Rust workspace
 │   ├── hardware/        # CPU simulator core
 │   ├── bindings/        # Python bindings (PyO3)
-│   └── cli/             # CLI tool (sim)
-├── riscv_sim/           # Python package for scripting
+│   └── cli/             # CLI tool (inspectre)
+├── inspectre/           # Python package for scripting
 ├── software/            # System software
 │   ├── libc/            # Custom C standard library
 │   └── linux/           # Linux boot configuration
@@ -54,39 +54,52 @@ riscv-system/
 └── docs/                # Documentation
 ```
 
-## Build and Run
+## Installation
+
+**CLI tool** (via Cargo):
+```bash
+cargo install inspectre-cli
+```
+
+**Python bindings** (via pip):
+```bash
+pip install inspectre-sim
+```
+
+## Build from Source
 
 **Requirements:**
 - Rust toolchain (1.70+)
 - `riscv64-unknown-elf-gcc` cross-compiler
-- Python 3.8+ (for scripting)
+- Python 3.10+ with maturin (for Python bindings)
 
 ### Quick Start
 
 **Build everything:**
 ```bash
-make all
+make build
 ```
 
 **Run a benchmark:**
 ```bash
-./target/release/sim run -f software/bin/benchmarks/qsort.bin
+inspectre -f software/bin/benchmarks/qsort.bin
 ```
 
-**Run Python analysis scripts:**
+**Run a Python script:**
 ```bash
-./target/release/sim script scripts/benchmarks/tests/smoke_test.py
+inspectre --script scripts/benchmarks/tests/smoke_test.py
 ```
 
 ### Available Make Targets
 
 ```bash
 make help           # Show all available targets
-make simulator      # Build Rust simulator only
-make software       # Build libc and examples
+make simulator      # Build Rust simulator only (release)
+make python         # Build and install Python bindings (editable)
+make software       # Build libc and example programs
 make test           # Run Rust tests
-make clippy         # Run linter
-make run-example    # Quick test (quicksort)
+make lint           # Format check + clippy
+make run-example    # Quick test (quicksort benchmark)
 make clean          # Remove all build artifacts
 ```
 
@@ -95,20 +108,17 @@ make clean          # Remove all build artifacts
 The simulator supports Python scripting for hardware configuration and performance analysis:
 
 ```python
-from riscv_sim import *
+from inspectre import SimConfig, Simulator
 
-# Configure system
-cpu = O3CPU()
-cpu.branch_predictor = TournamentBP()
-system = System(cpu)
+# Configure a machine model
+config = SimConfig.default()
+config.pipeline.width = 4
+config.pipeline.branch_predictor = "TAGE"
+config.cache.l1_i.enabled = True
+config.cache.l1_i.size_bytes = 65536
 
-# Run simulation
-system.run("software/bin/benchmarks/qsort.bin")
-
-# Query statistics
-stats = system.query()
-print(f"IPC: {stats['ipc']}")
-print(f"Branch accuracy: {stats['branch_predictor.accuracy']}")
+# Run a binary
+Simulator().with_config(config).binary("software/bin/benchmarks/qsort.bin").run()
 ```
 
 See **[docs/](docs/README.md)** for full API documentation and architecture details.
@@ -131,4 +141,11 @@ make run-linux      # Attempt to boot Linux
 
 ## License
 
-This project is licensed under the MIT License — see [LICENSE](LICENSE).
+Licensed under either of the following, at your option:
+
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project shall be dual-licensed as above, without any
+additional terms or conditions.

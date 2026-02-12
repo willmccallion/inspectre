@@ -2,8 +2,8 @@
 //!
 //! Tests for the Platform-Level Interrupt Controller device.
 
-use riscv_core::config::Config;
-use riscv_core::soc::System;
+use inspectre::config::Config;
+use inspectre::soc::System;
 
 #[test]
 fn test_plic_name() {

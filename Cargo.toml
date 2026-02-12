@@ -6,7 +6,33 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.9.6"
+edition = "2024"
+authors = ["Will McCallion"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/willmccallion/inspectre"
+homepage = "https://github.com/willmccallion/inspectre"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+pyo3 = { version = "0.23.5" }
+libc = "0.2"
+
 [profile.release]
-lto = "fat"
+opt-level     = 3
+lto           = "fat"
 codegen-units = 1
-panic = "abort"
+panic         = "abort"
+strip         = "debuginfo"
+
+# Dev builds at opt-level 1: the simulator is unusable at opt-level 0.
+# Full debug info and fast incremental compiles are preserved.
+[profile.dev]
+opt-level = 1
+
+# Optimize dependencies even in dev — serde/pyo3 don't need debug codegen.
+[profile.dev.package."*"]
+opt-level = 3

@@ -5,14 +5,15 @@ Usage:
     from p550.config import p550_config
     config = p550_config(branch_predictor="TAGE")
 """
+
 import sys
 import os
 
 _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _repo)
 
-from riscv_sim import SimConfig
-from riscv_sim.config import (
+from inspectre import SimConfig
+from inspectre.config import (
     TageConfig,
     PerceptronConfig,
     TournamentConfig,

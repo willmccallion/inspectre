@@ -44,13 +44,9 @@ pub fn mem_stage(cpu: &mut Cpu) {
         }
 
         // Early exit: if a prior stage already detected a trap, skip all memory processing
-        if ex.trap.is_some() {
+        if let Some(ref trap_ref) = ex.trap {
             if cpu.trace {
-                eprintln!(
-                    "MEM pc={:#x} # TRAP: {:?}",
-                    ex.pc,
-                    ex.trap.as_ref().unwrap()
-                );
+                eprintln!("MEM pc={:#x} # TRAP: {:?}", ex.pc, trap_ref);
             }
             mem_results.push(MemWbEntry {
                 pc: ex.pc,
@@ -126,7 +122,7 @@ pub fn mem_stage(cpu: &mut Cpu) {
                     cpu.stall_cycles += lat;
                 } else if ex.ctrl.mem_write {
                     let addr = paddr.val();
-                    if addr >= 0x10001000 && addr < 0x10002000 {
+                    if (0x10001000..0x10002000).contains(&addr) {
                         cpu.l1_d_cache.flush();
                         cpu.l2_cache.flush();
                         cpu.l3_cache.flush();
@@ -198,115 +194,107 @@ pub fn mem_stage(cpu: &mut Cpu) {
                             }
                         }
                     }
-                } else {
-                    if ex.ctrl.mem_read {
-                        ld = if is_ram {
-                            // SAFETY: This read operation is safe because:
-                            // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
-                            // 2. `ram_offset` is computed from validated physical address and ram_start
-                            // 3. `ram_ptr` points to valid, initialized memory allocated during CPU construction
-                            // 4. `read_unaligned()` safely handles potential misalignment for multi-byte reads
-                            // 5. Each read size (1/2/4/8 bytes) is within bounds as verified by address translation
-                            // 6. Sign extension operations preserve correctness for signed loads
-                            // 7. Memory access permissions have been validated by MMU/PMP checks
-                            unsafe {
-                                match (ex.ctrl.width, ex.ctrl.signed_load) {
-                                    (MemWidth::Byte, true) => {
-                                        (*cpu.ram_ptr.add(ram_offset) as i8) as i64 as u64
-                                    }
-                                    (MemWidth::Half, true) => {
-                                        ((cpu.ram_ptr.add(ram_offset) as *const u16)
-                                            .read_unaligned()
-                                            as i16) as i64
-                                            as u64
-                                    }
-                                    (MemWidth::Word, true) => {
-                                        ((cpu.ram_ptr.add(ram_offset) as *const u32)
-                                            .read_unaligned()
-                                            as i32) as i64
-                                            as u64
-                                    }
-                                    (MemWidth::Byte, false) => *cpu.ram_ptr.add(ram_offset) as u64,
-                                    (MemWidth::Half, false) => {
-                                        (cpu.ram_ptr.add(ram_offset) as *const u16).read_unaligned()
-                                            as u64
-                                    }
-                                    (MemWidth::Word, false) => {
-                                        (cpu.ram_ptr.add(ram_offset) as *const u32).read_unaligned()
-                                            as u64
-                                    }
-                                    (MemWidth::Double, _) => {
-                                        (cpu.ram_ptr.add(ram_offset) as *const u64).read_unaligned()
-                                    }
-                                    _ => 0,
-                                }
-                            }
-                        } else {
+                } else if ex.ctrl.mem_read {
+                    ld = if is_ram {
+                        // SAFETY: This read operation is safe because:
+                        // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
+                        // 2. `ram_offset` is computed from validated physical address and ram_start
+                        // 3. `ram_ptr` points to valid, initialized memory allocated during CPU construction
+                        // 4. `read_unaligned()` safely handles potential misalignment for multi-byte reads
+                        // 5. Each read size (1/2/4/8 bytes) is within bounds as verified by address translation
+                        // 6. Sign extension operations preserve correctness for signed loads
+                        // 7. Memory access permissions have been validated by MMU/PMP checks
+                        unsafe {
                             match (ex.ctrl.width, ex.ctrl.signed_load) {
                                 (MemWidth::Byte, true) => {
-                                    (cpu.bus.bus.read_u8(raw_paddr) as i8) as i64 as u64
+                                    (*cpu.ram_ptr.add(ram_offset) as i8) as i64 as u64
                                 }
                                 (MemWidth::Half, true) => {
-                                    (cpu.bus.bus.read_u16(raw_paddr) as i16) as i64 as u64
+                                    ((cpu.ram_ptr.add(ram_offset) as *const u16).read_unaligned()
+                                        as i16) as i64 as u64
                                 }
                                 (MemWidth::Word, true) => {
-                                    (cpu.bus.bus.read_u32(raw_paddr) as i32) as i64 as u64
+                                    ((cpu.ram_ptr.add(ram_offset) as *const u32).read_unaligned()
+                                        as i32) as i64 as u64
                                 }
-                                (MemWidth::Byte, false) => cpu.bus.bus.read_u8(raw_paddr) as u64,
-                                (MemWidth::Half, false) => cpu.bus.bus.read_u16(raw_paddr) as u64,
-                                (MemWidth::Word, false) => cpu.bus.bus.read_u32(raw_paddr) as u64,
-                                (MemWidth::Double, _) => cpu.bus.bus.read_u64(raw_paddr),
+                                (MemWidth::Byte, false) => *cpu.ram_ptr.add(ram_offset) as u64,
+                                (MemWidth::Half, false) => {
+                                    (cpu.ram_ptr.add(ram_offset) as *const u16).read_unaligned()
+                                        as u64
+                                }
+                                (MemWidth::Word, false) => {
+                                    (cpu.ram_ptr.add(ram_offset) as *const u32).read_unaligned()
+                                        as u64
+                                }
+                                (MemWidth::Double, _) => {
+                                    (cpu.ram_ptr.add(ram_offset) as *const u64).read_unaligned()
+                                }
                                 _ => 0,
                             }
-                        };
-
-                        if ex.ctrl.fp_reg_write && matches!(ex.ctrl.width, MemWidth::Word) {
-                            ld |= 0xFFFF_FFFF_0000_0000;
                         }
-                    } else if ex.ctrl.mem_write {
-                        if cpu.check_reservation(raw_paddr) {
-                            cpu.clear_reservation();
-                        }
-
-                        if is_ram {
-                            // SAFETY: This write operation is safe because:
-                            // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
-                            // 2. `ram_offset` is computed from validated physical address and ram_start
-                            // 3. `ram_ptr` points to valid, mutable memory allocated during CPU construction
-                            // 4. `write_unaligned()` safely handles potential misalignment for multi-byte writes
-                            // 5. Each write size (1/2/4/8 bytes) is within bounds as verified by address translation
-                            // 6. Memory access permissions (write access) have been validated by MMU/PMP checks
-                            // 7. Load reservation has been cleared to maintain memory ordering semantics
-                            unsafe {
-                                match ex.ctrl.width {
-                                    MemWidth::Byte => {
-                                        *cpu.ram_ptr.add(ram_offset) = ex.store_data as u8
-                                    }
-                                    MemWidth::Half => (cpu.ram_ptr.add(ram_offset) as *mut u16)
-                                        .write_unaligned(ex.store_data as u16),
-                                    MemWidth::Word => (cpu.ram_ptr.add(ram_offset) as *mut u32)
-                                        .write_unaligned(ex.store_data as u32),
-                                    MemWidth::Double => (cpu.ram_ptr.add(ram_offset) as *mut u64)
-                                        .write_unaligned(ex.store_data),
-                                    _ => {}
-                                }
+                    } else {
+                        match (ex.ctrl.width, ex.ctrl.signed_load) {
+                            (MemWidth::Byte, true) => {
+                                (cpu.bus.bus.read_u8(raw_paddr) as i8) as i64 as u64
                             }
-                        } else {
+                            (MemWidth::Half, true) => {
+                                (cpu.bus.bus.read_u16(raw_paddr) as i16) as i64 as u64
+                            }
+                            (MemWidth::Word, true) => {
+                                (cpu.bus.bus.read_u32(raw_paddr) as i32) as i64 as u64
+                            }
+                            (MemWidth::Byte, false) => cpu.bus.bus.read_u8(raw_paddr) as u64,
+                            (MemWidth::Half, false) => cpu.bus.bus.read_u16(raw_paddr) as u64,
+                            (MemWidth::Word, false) => cpu.bus.bus.read_u32(raw_paddr) as u64,
+                            (MemWidth::Double, _) => cpu.bus.bus.read_u64(raw_paddr),
+                            _ => 0,
+                        }
+                    };
+
+                    if ex.ctrl.fp_reg_write && matches!(ex.ctrl.width, MemWidth::Word) {
+                        ld |= 0xFFFF_FFFF_0000_0000;
+                    }
+                } else if ex.ctrl.mem_write {
+                    if cpu.check_reservation(raw_paddr) {
+                        cpu.clear_reservation();
+                    }
+
+                    if is_ram {
+                        // SAFETY: This write operation is safe because:
+                        // 1. `is_ram` is true, meaning the address was validated to be within RAM bounds
+                        // 2. `ram_offset` is computed from validated physical address and ram_start
+                        // 3. `ram_ptr` points to valid, mutable memory allocated during CPU construction
+                        // 4. `write_unaligned()` safely handles potential misalignment for multi-byte writes
+                        // 5. Each write size (1/2/4/8 bytes) is within bounds as verified by address translation
+                        // 6. Memory access permissions (write access) have been validated by MMU/PMP checks
+                        // 7. Load reservation has been cleared to maintain memory ordering semantics
+                        unsafe {
                             match ex.ctrl.width {
                                 MemWidth::Byte => {
-                                    cpu.bus.bus.write_u8(raw_paddr, ex.store_data as u8)
+                                    *cpu.ram_ptr.add(ram_offset) = ex.store_data as u8
                                 }
-                                MemWidth::Half => {
-                                    cpu.bus.bus.write_u16(raw_paddr, ex.store_data as u16)
-                                }
-                                MemWidth::Word => {
-                                    cpu.bus.bus.write_u32(raw_paddr, ex.store_data as u32)
-                                }
-                                MemWidth::Double => {
-                                    cpu.bus.bus.write_u64(raw_paddr, ex.store_data);
-                                }
+                                MemWidth::Half => (cpu.ram_ptr.add(ram_offset) as *mut u16)
+                                    .write_unaligned(ex.store_data as u16),
+                                MemWidth::Word => (cpu.ram_ptr.add(ram_offset) as *mut u32)
+                                    .write_unaligned(ex.store_data as u32),
+                                MemWidth::Double => (cpu.ram_ptr.add(ram_offset) as *mut u64)
+                                    .write_unaligned(ex.store_data),
                                 _ => {}
                             }
+                        }
+                    } else {
+                        match ex.ctrl.width {
+                            MemWidth::Byte => cpu.bus.bus.write_u8(raw_paddr, ex.store_data as u8),
+                            MemWidth::Half => {
+                                cpu.bus.bus.write_u16(raw_paddr, ex.store_data as u16)
+                            }
+                            MemWidth::Word => {
+                                cpu.bus.bus.write_u32(raw_paddr, ex.store_data as u32)
+                            }
+                            MemWidth::Double => {
+                                cpu.bus.bus.write_u64(raw_paddr, ex.store_data);
+                            }
+                            _ => {}
                         }
                     }
                 }

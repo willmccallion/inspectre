@@ -6,7 +6,7 @@
 //!
 //! Reference: Phase 3 — Memory Subsystem Verification.
 
-use riscv_core::core::units::cache::policies::{
+use inspectre::core::units::cache::policies::{
     FifoPolicy, LruPolicy, MruPolicy, PlruPolicy, RandomPolicy, ReplacementPolicy,
 };
 

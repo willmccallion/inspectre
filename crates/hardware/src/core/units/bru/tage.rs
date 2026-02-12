@@ -282,9 +282,7 @@ impl BranchPredictor for TagePredictor {
         let loop_entry = &mut self.loops[l_idx];
 
         if loop_entry.tag == l_tag {
-            if loop_entry.age < 255 {
-                loop_entry.age += 1;
-            }
+            loop_entry.age = loop_entry.age.saturating_add(1);
 
             if taken == loop_entry.dir {
                 loop_entry.count += 1;

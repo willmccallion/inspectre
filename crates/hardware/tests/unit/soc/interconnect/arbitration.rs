@@ -3,10 +3,10 @@
 //! Verifies that the bus correctly caches last-device lookups and
 //! handles tick/IRQ propagation.
 
-use riscv_core::soc::devices::clint::Clint;
-use riscv_core::soc::interconnect::Bus;
-use riscv_core::soc::memory::Memory;
-use riscv_core::soc::memory::buffer::DramBuffer;
+use inspectre::soc::devices::clint::Clint;
+use inspectre::soc::interconnect::Bus;
+use inspectre::soc::memory::Memory;
+use inspectre::soc::memory::buffer::DramBuffer;
 use std::sync::Arc;
 
 #[test]

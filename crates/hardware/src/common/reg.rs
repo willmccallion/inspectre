@@ -19,6 +19,12 @@ pub struct RegisterFile {
     fpr: Fpr,
 }
 
+impl Default for RegisterFile {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegisterFile {
     /// Creates a new register file with all registers initialized to zero.
     ///

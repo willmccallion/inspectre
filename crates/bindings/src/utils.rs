@@ -1,6 +1,6 @@
 //! Utility functions exposed to Python.
 //!
-//! Provides version and other helpers for the `riscv_emulator` module.
+//! Provides version and other helpers for the `inspectre` module.
 
 use pyo3::prelude::*;
 

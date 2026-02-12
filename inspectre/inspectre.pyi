@@ -1,4 +1,4 @@
-"""Type hints for riscv_sim; the Rust backend provides PySystem, PyCpu, and related classes."""
+"""Type hints for inspectre; the Rust backend provides PySystem, PyCpu, and related classes."""
 
 from typing import Optional
 

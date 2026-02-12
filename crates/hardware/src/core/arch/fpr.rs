@@ -14,6 +14,12 @@ pub struct Fpr {
     fregs: [f64; 32],
 }
 
+impl Default for Fpr {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Fpr {
     /// Creates a new floating-point register file with all registers initialized to zero.
     ///

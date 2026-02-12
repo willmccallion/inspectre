@@ -1,6 +1,6 @@
+use inspectre::soc::devices::{Device, Plic, Uart};
+use inspectre::soc::memory::Memory;
 use mockall::mock;
-use riscv_core::soc::devices::{Device, Plic, Uart};
-use riscv_core::soc::memory::Memory;
 use std::sync::{Arc, Mutex};
 
 mock! {

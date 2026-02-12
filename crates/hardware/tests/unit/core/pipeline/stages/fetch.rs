@@ -12,8 +12,8 @@
 
 use crate::common::builder::instruction::InstructionBuilder;
 use crate::common::harness::TestContext;
-use riscv_core::core::pipeline::stages::fetch_stage;
-use riscv_core::core::units::bru::BranchPredictor;
+use inspectre::core::pipeline::stages::fetch_stage;
+use inspectre::core::units::bru::BranchPredictor;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -35,7 +35,7 @@ fn write_inst(tc: &mut TestContext, offset: u64, inst: u32) {
 }
 
 /// Fetch one cycle and return the IF/ID entries.
-fn fetch(tc: &mut TestContext) -> Vec<riscv_core::core::pipeline::latches::IfIdEntry> {
+fn fetch(tc: &mut TestContext) -> Vec<inspectre::core::pipeline::latches::IfIdEntry> {
     fetch_stage(&mut tc.cpu);
     tc.cpu.if_id.entries.clone()
 }
@@ -118,7 +118,7 @@ fn misaligned_pc_generates_trap() {
     assert!(
         matches!(
             entries[0].trap,
-            Some(riscv_core::common::error::Trap::InstructionAddressMisaligned(_))
+            Some(inspectre::common::error::Trap::InstructionAddressMisaligned(_))
         ),
         "Trap should be InstructionAddressMisaligned"
     );
@@ -131,7 +131,7 @@ fn misaligned_pc_trap_carries_faulting_address() {
     tc.cpu.pc = fault_addr;
 
     let entries = fetch(&mut tc);
-    if let Some(riscv_core::common::error::Trap::InstructionAddressMisaligned(addr)) =
+    if let Some(inspectre::common::error::Trap::InstructionAddressMisaligned(addr)) =
         &entries[0].trap
     {
         assert_eq!(*addr, fault_addr, "Trap carries the faulting PC");
@@ -187,17 +187,13 @@ fn branch_with_btb_hit_sets_pred_taken() {
     // prediction from the predictor.
     let (predicted_taken, predicted_target) = tc.cpu.branch_predictor.predict_branch(branch_pc);
 
-    if predicted_taken && predicted_target.is_some() {
+    if predicted_taken && let Some(target) = predicted_target {
         assert!(
             entries[0].pred_taken,
             "Branch predicted taken after training"
         );
-        assert_eq!(entries[0].pred_target, predicted_target.unwrap());
-        assert_eq!(
-            tc.cpu.pc,
-            predicted_target.unwrap(),
-            "PC redirected to predicted target"
-        );
+        assert_eq!(entries[0].pred_target, target);
+        assert_eq!(tc.cpu.pc, target, "PC redirected to predicted target");
     } else {
         // Static predictor: never predicts taken
         assert!(!entries[0].pred_taken);
@@ -476,7 +472,7 @@ fn fetch_replaces_previous_if_id() {
     write_inst(&mut tc, 0, nop);
 
     // Pre-populate IF/ID with stale entries
-    tc.cpu.if_id.entries = vec![riscv_core::core::pipeline::latches::IfIdEntry {
+    tc.cpu.if_id.entries = vec![inspectre::core::pipeline::latches::IfIdEntry {
         pc: 0xDEAD,
         inst: 0xBEEF,
         inst_size: 4,

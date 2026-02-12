@@ -50,7 +50,7 @@ BENCH_BINS = \
 	$(patsubst $(BENCH_DIR)/kernels/%.c, bin/benchmarks/%.bin, $(BENCH_KERN_SRCS)) \
 	$(patsubst $(BENCH_DIR)/complete_prog/%.c, bin/benchmarks/%.bin, $(BENCH_PROG_SRCS))
 
-.PHONY: all clean dirs disk linux
+.PHONY: all clean clean-no-linux dirs disk linux
 
 all: dirs disk
 
@@ -124,3 +124,6 @@ disk: $(PROG_C_BINS) $(PROG_S_BINS) $(BENCH_BINS)
 clean:
 	rm -rf build bin *.img
 	rm -rf $(LINUX_DIR)/output $(LINUX_DIR)/buildroot-*
+
+clean-no-linux:
+	rm -rf build bin *.img

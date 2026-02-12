@@ -24,19 +24,17 @@ impl Cpu {
     pub fn trap(&mut self, cause: Trap, epc: u64) {
         self.load_reservation = None;
 
-        if self.direct_mode {
-            if !matches!(cause, Trap::EnvironmentCallFromUMode) {
-                if matches!(cause, Trap::IllegalInstruction(0)) {
-                    self.exit_code = Some(0);
-                    return;
-                }
-                eprintln!(
-                    "\n[!] Fatal trap in direct mode: {:?} at PC {:#x}",
-                    cause, epc
-                );
-                self.exit_code = Some(1);
+        if self.direct_mode && !matches!(cause, Trap::EnvironmentCallFromUMode) {
+            if matches!(cause, Trap::IllegalInstruction(0)) {
+                self.exit_code = Some(0);
                 return;
             }
+            eprintln!(
+                "\n[!] Fatal trap in direct mode: {:?} at PC {:#x}",
+                cause, epc
+            );
+            self.exit_code = Some(1);
+            return;
         }
 
         let is_timer = matches!(
@@ -209,8 +207,7 @@ impl Cpu {
                 const KERNEL_VIRT_BASE: u64 = 0xffffffff80000000;
                 const RELOC_OFFSET: u64 = KERNEL_VIRT_BASE.wrapping_sub(KERNEL_PHYS_BASE);
 
-                if epc >= KERNEL_PHYS_BASE
-                    && epc < KERNEL_PHYS_BASE + 0x2000000
+                if (KERNEL_PHYS_BASE..KERNEL_PHYS_BASE + 0x2000000).contains(&epc)
                     && epc < KERNEL_VIRT_BASE
                 {
                     sepc_value = epc.wrapping_add(RELOC_OFFSET);
@@ -334,8 +331,7 @@ impl Cpu {
             const KERNEL_VIRT_BASE: u64 = 0xffffffff80000000;
             const RELOC_OFFSET: u64 = KERNEL_VIRT_BASE.wrapping_sub(KERNEL_PHYS_BASE);
 
-            if sepc >= KERNEL_PHYS_BASE
-                && sepc < KERNEL_PHYS_BASE + 0x2000000
+            if (KERNEL_PHYS_BASE..KERNEL_PHYS_BASE + 0x2000000).contains(&sepc)
                 && sepc < KERNEL_VIRT_BASE
             {
                 sepc = sepc.wrapping_add(RELOC_OFFSET);

@@ -7,13 +7,13 @@
 //! 4. Edge cases: different privilege modes, interrupt configurations, etc.
 
 use crate::common::harness::TestContext;
-use riscv_core::common::error::Trap;
-use riscv_core::core::arch::csr;
-use riscv_core::core::arch::mode::PrivilegeMode;
-use riscv_core::core::pipeline::latches::IdExEntry;
-use riscv_core::core::pipeline::signals::ControlSignals;
-use riscv_core::core::pipeline::stages::{execute_stage, wb_stage};
-use riscv_core::isa::privileged::opcodes as sys_ops;
+use inspectre::common::error::Trap;
+use inspectre::core::arch::csr;
+use inspectre::core::arch::mode::PrivilegeMode;
+use inspectre::core::pipeline::latches::IdExEntry;
+use inspectre::core::pipeline::signals::ControlSignals;
+use inspectre::core::pipeline::stages::{execute_stage, wb_stage};
+use inspectre::isa::privileged::opcodes as sys_ops;
 
 const PC: u64 = 0x8000_0000;
 const INST_SIZE: u64 = 4;

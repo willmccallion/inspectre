@@ -7,8 +7,8 @@
 //!
 //! Reference: Phase 3 — Memory Subsystem Verification.
 
-use riscv_core::core::units::prefetch::Prefetcher;
-use riscv_core::core::units::prefetch::TaggedPrefetcher;
+use inspectre::core::units::prefetch::Prefetcher;
+use inspectre::core::units::prefetch::TaggedPrefetcher;
 
 // ══════════════════════════════════════════════════════════
 // 1. Miss triggers prefetch

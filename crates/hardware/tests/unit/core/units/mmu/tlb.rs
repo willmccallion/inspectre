@@ -7,7 +7,7 @@
 //! - Capacity and full associativity (or lack thereof - TLB is direct mapped)
 //! - Flushing
 
-use riscv_core::core::units::mmu::tlb::Tlb;
+use inspectre::core::units::mmu::tlb::Tlb;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -60,10 +60,10 @@ fn insert_and_lookup_hit() {
     match tlb.lookup(vpn) {
         Some((found_ppn, r, w, x, u)) => {
             assert_eq!(found_ppn, ppn);
-            assert_eq!(r, true);
-            assert_eq!(w, false);
-            assert_eq!(x, true);
-            assert_eq!(u, false);
+            assert!(r);
+            assert!(!w);
+            assert!(x);
+            assert!(!u);
         }
         None => panic!("Should hit after insert"),
     }

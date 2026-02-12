@@ -1,149 +1,175 @@
-# RISC-V System Simulator - Top-level Makefile
-# Build the simulator (Rust) and example software (C/Assembly)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Inspectre — Build, Test, and Run
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Run from repo root.  make help  for all targets.
+#  Override tools:  CARGO=cargo  MATURIN=maturin  PYTHON=python3
+# ═══════════════════════════════════════════════════════════════════════════════
 
-.PHONY: all help simulator software examples linux clean check test run-example run-linux python
+SHELL           := /bin/bash
+.DEFAULT_GOAL   := help
 
-# Default target - show help
-all: help
+# ── Tools ─────────────────────────────────────────────────────────────────────
+CARGO           ?= cargo
+MATURIN         ?= $(shell [ -f .venv/bin/maturin ] && echo .venv/bin/maturin || echo maturin)
+PYTHON          ?= $(shell [ -f .venv/bin/python3 ] && echo .venv/bin/python3 || echo python3)
 
-# ============================================================================
-# Help Target
-# ============================================================================
+SIM             := ./target/release/inspectre
+
+# ── Colors (only when stdout is a terminal) ───────────────────────────────────
+ifneq ($(TERM),)
+  GREEN  := \033[32m
+  CYAN   := \033[36m
+  BOLD   := \033[1m
+  RESET  := \033[0m
+else
+  GREEN  :=
+  CYAN   :=
+  BOLD   :=
+  RESET  :=
+endif
+
+# ── Phony ─────────────────────────────────────────────────────────────────────
+.PHONY: help build simulator software examples linux python python-wheel
+.PHONY: check test test-coverage clippy fmt fmt-check lint prerelease
+.PHONY: run-example run-linux
+.PHONY: clean clean-rust clean-software
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Help
+# ═══════════════════════════════════════════════════════════════════════════════
+HELP_W := 28
 help:
-	@echo "RISC-V System Simulator - Build Targets"
-	@echo "========================================"
-	@echo ""
-	@echo "Main Targets:"
-	@echo "  help             Show this help message (default)"
-	@echo "  simulator        Build Rust simulator (release binary at target/release/sim)"
-	@echo "  software         Build libc and example programs"
-	@echo "  examples         Alias for 'software'"
-	@echo "  linux            Download and build Linux kernel + rootfs"
-	@echo "  python           Build and install Python bindings (maturin develop)"
-	@echo ""
-	@echo "Development:"
-	@echo "  check            Run cargo check on all Rust crates"
-	@echo "  test             Run Rust tests (cargo test)"
-	@echo "  test-coverage    Run Rust tests coverage (cargo llvm-cov)"
-	@echo "  clippy           Run cargo clippy linter"
-	@echo "  fmt              Format Rust code with cargo fmt"
-	@echo ""
-	@echo "Running:"
-	@echo "  run-example      Build and run quicksort benchmark"
-	@echo "  run-linux        Build and boot Linux (requires linux target first)"
-	@echo ""
-	@echo "Maintenance:"
-	@echo "  clean            Remove all build artifacts"
-	@echo "  clean-rust       Remove Rust build artifacts only"
-	@echo "  clean-software   Remove software build artifacts only"
-	@echo ""
-	@echo "Python:"
-	@echo "  python-dev       Install Python package in development mode"
-	@echo "  python-test      Run Python tests/scripts"
-	@echo ""
+	@printf "\n$(BOLD)Inspectre$(RESET) — RISC-V cycle-accurate simulator\n\n"
+	@printf "  $(CYAN)Build$(RESET)\n"
+	@printf "    %-$(HELP_W)s  Build Rust simulator + Python bindings\n" "make build"
+	@printf "    %-$(HELP_W)s  Build Rust simulator CLI only (release)\n" "make simulator"
+	@printf "    %-$(HELP_W)s  Install Python bindings (editable, maturin)\n" "make python"
+	@printf "    %-$(HELP_W)s  Build distributable Python wheel\n" "make python-wheel"
+	@printf "    %-$(HELP_W)s  Build libc and example RISC-V programs\n" "make software"
+	@printf "    %-$(HELP_W)s  Build Linux kernel + rootfs (Buildroot)\n" "make linux"
+	@printf "\n  $(CYAN)Development$(RESET)\n"
+	@printf "    %-$(HELP_W)s  cargo check (all targets)\n" "make check"
+	@printf "    %-$(HELP_W)s  Run Rust tests\n" "make test"
+	@printf "    %-$(HELP_W)s  Run Rust tests with coverage (llvm-cov)\n" "make test-coverage"
+	@printf "    %-$(HELP_W)s  Run clippy linter\n" "make clippy"
+	@printf "    %-$(HELP_W)s  Format Rust code\n" "make fmt"
+	@printf "    %-$(HELP_W)s  Check formatting without modifying\n" "make fmt-check"
+	@printf "    %-$(HELP_W)s  fmt-check + clippy\n" "make lint"
+	@printf "    %-$(HELP_W)s  Full pre-release check (git+lint+test+versions+build)\n" "make prerelease"
+	@printf "\n  $(CYAN)Run$(RESET)\n"
+	@printf "    %-$(HELP_W)s  Build and run quicksort benchmark\n" "make run-example"
+	@printf "    %-$(HELP_W)s  Boot Linux (requires 'make linux' first)\n" "make run-linux"
+	@printf "\n  $(CYAN)Housekeeping$(RESET)\n"
+	@printf "    %-$(HELP_W)s  Remove all build artifacts\n" "make clean"
+	@printf "    %-$(HELP_W)s  Remove Rust artifacts only\n" "make clean-rust"
+	@printf "    %-$(HELP_W)s  Remove software artifacts only\n" "make clean-software"
+	@printf "\n"
 
-# ============================================================================
-# Build Targets
-# ============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Build
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Build Rust simulator (creates CLI tool at target/release/sim)
+build: simulator python
+
 simulator:
-	@echo "[Simulator] Building Rust simulator (release)..."
-	@cargo build --release
+	@printf "$(GREEN)Building Rust simulator (release)…$(RESET)\n"
+	$(CARGO) build --release
 
-# Build example software (benchmarks and programs)
 software:
-	@echo "[Software] Building libc and examples..."
-	@$(MAKE) -C software
+	@printf "$(GREEN)Building libc and example programs…$(RESET)\n"
+	$(MAKE) -C software
 
 examples: software
 
-# Download and build Linux kernel + rootfs via Buildroot
 linux:
-	@echo "[Linux] Building Linux kernel and rootfs..."
-	@$(MAKE) -C software linux
+	@printf "$(GREEN)Building Linux kernel and rootfs…$(RESET)\n"
+	$(MAKE) -C software linux
 
-# ============================================================================
-# Development Targets
-# ============================================================================
-
-# Check Rust code without building
-check:
-	@echo "[Check] Running cargo check..."
-	@cargo check --workspace --all-targets
-
-# Run Rust tests
-test:
-	@echo "[Test] Running cargo test..."
-	@cargo test --workspace
-
-# Run Rust tests
-test-coverage:
-	@echo "[Test] Running cargo llvm-cov..."
-	@cargo llvm-cov
-
-# Run clippy linter
-clippy:
-	@echo "[Clippy] Running cargo clippy..."
-	@cargo clippy --workspace --all-targets -- -D warnings
-
-# Format Rust code
-fmt:
-	@echo "[Format] Running cargo fmt..."
-	@cargo fmt --all
-
-# ============================================================================
-# Python Development
-# ============================================================================
-
-# Build and install Python bindings with maturin
+# Install Python bindings in editable/dev mode via maturin
 python:
-	@echo "[Python] Building Python bindings with maturin..."
-	@if [ -f .venv/bin/maturin ]; then \
-		.venv/bin/maturin develop --release -m crates/bindings/Cargo.toml; \
-	elif command -v maturin >/dev/null 2>&1; then \
-		maturin develop --release -m crates/bindings/Cargo.toml; \
-	else \
-		echo "Error: maturin not found in .venv/bin/ or PATH"; \
-		echo "Install with: pip install maturin (in your .venv)"; \
-		exit 1; \
+	@printf "$(GREEN)Installing Python bindings (editable)…$(RESET)\n"
+	@if [ ! -d .venv ]; then \
+		printf "$(GREEN)Creating .venv…$(RESET)\n"; \
+		python3 -m venv .venv; \
 	fi
+	@.venv/bin/pip install --quiet maturin
+	.venv/bin/maturin develop --release
 
-# Install Python package in development mode (legacy, use 'python' instead)
-python-dev:
-	@echo "[Python] Installing riscv_sim in development mode..."
-	@pip install -e .
+# Build a distributable wheel (e.g. for PyPI)
+python-wheel:
+	@printf "$(GREEN)Building Python wheel…$(RESET)\n"
+	$(MATURIN) build --release
 
-# Run Python benchmark scripts
-python-test:
-	@echo "[Python] Running benchmark scripts..."
-	@./target/release/sim script scripts/benchmarks/tests/smoke_test.py
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Development
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ============================================================================
-# Running Targets
-# ============================================================================
+check:
+	@printf "$(GREEN)Running cargo check…$(RESET)\n"
+	$(CARGO) check --workspace --all-targets
 
-# Quick test: run quicksort benchmark
+test:
+	@printf "$(GREEN)Running Rust tests…$(RESET)\n"
+	$(CARGO) test --workspace
+
+test-coverage:
+	@printf "$(GREEN)Running cargo llvm-cov…$(RESET)\n"
+	@command -v cargo-llvm-cov >/dev/null 2>&1 || { \
+		printf "$(BOLD)Error: cargo-llvm-cov not installed.$(RESET)\n"; \
+		printf "Install with: $(CYAN)cargo install cargo-llvm-cov$(RESET)\n"; \
+		exit 1; \
+	}
+	$(CARGO) llvm-cov --workspace
+
+clippy:
+	@printf "$(GREEN)Running clippy…$(RESET)\n"
+	$(CARGO) clippy --workspace --all-targets -- -D warnings
+
+fmt:
+	@printf "$(GREEN)Formatting Rust code…$(RESET)\n"
+	$(CARGO) fmt --all
+
+fmt-check:
+	@printf "$(GREEN)Checking Rust formatting…$(RESET)\n"
+	$(CARGO) fmt --all -- --check
+
+lint: fmt-check clippy
+
+prerelease:
+	@tools/prerelease
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Run
+# ═══════════════════════════════════════════════════════════════════════════════
+
 run-example: simulator software
-	@echo "[Run] Running quicksort benchmark..."
-	@./target/release/sim run -f software/bin/benchmarks/qsort.bin
+	@printf "$(GREEN)Running quicksort benchmark…$(RESET)\n"
+	$(SIM) -f software/bin/benchmarks/qsort.bin
 
-# Boot Linux (requires linux target to be built first)
 run-linux: simulator
-	@echo "[Run] Booting Linux..."
-	@./target/release/sim script scripts/setup/boot_linux.py
+	@printf "$(GREEN)Booting Linux…$(RESET)\n"
+	$(SIM) --script scripts/setup/boot_linux.py
 
-# ============================================================================
-# Cleaning
-# ============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Housekeeping
+# ═══════════════════════════════════════════════════════════════════════════════
 
 clean: clean-rust clean-software
-	@echo "[Clean] All build artifacts removed"
+	@printf "$(GREEN)All build artifacts removed.$(RESET)\n"
 
 clean-rust:
-	@echo "[Clean] Removing Rust build artifacts..."
-	@cargo clean
+	@printf "$(GREEN)Removing Rust build artifacts…$(RESET)\n"
+	$(CARGO) clean
 
 clean-software:
-	@echo "[Clean] Removing software build artifacts..."
-	@$(MAKE) -C software clean
+	@printf "$(GREEN)Removing software build artifacts…$(RESET)\n"
+	@if [ -d software/linux/buildroot-2024.08/output ]; then \
+		printf "Remove Linux build output? [y/N] "; \
+		read answer; \
+		case "$$answer" in \
+			[yY]) $(MAKE) -C software clean ;; \
+			*) $(MAKE) -C software clean-no-linux ;; \
+		esac; \
+	else \
+		$(MAKE) -C software clean; \
+	fi

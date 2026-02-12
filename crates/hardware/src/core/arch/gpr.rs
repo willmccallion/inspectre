@@ -14,6 +14,12 @@ pub struct Gpr {
     regs: [u64; 32],
 }
 
+impl Default for Gpr {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Gpr {
     /// Creates a new general-purpose register file with all registers initialized to zero.
     ///

@@ -51,7 +51,7 @@ pub fn register_emulator_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[pymodule]
-fn riscv_emulator(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_emulator_module(m)?;
     Ok(())
 }

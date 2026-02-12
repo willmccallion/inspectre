@@ -2,13 +2,13 @@
 //!
 //! Tests for the main execution loop and pipeline coordination.
 
-use riscv_core::config::Config;
-use riscv_core::core::Cpu;
-use riscv_core::core::arch::mode::PrivilegeMode;
+use inspectre::config::Config;
+use inspectre::core::Cpu;
+use inspectre::core::arch::mode::PrivilegeMode;
 
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let system = riscv_core::soc::System::new(&config, "");
+    let system = inspectre::soc::System::new(&config, "");
     Cpu::new(system, &config)
 }
 

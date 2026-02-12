@@ -4,9 +4,9 @@
 //! later pipeline stages (EX/MEM, MEM/WB fresh, MEM/WB old, intra-bundle)
 //! to resolve Read-After-Write (RAW) data hazards.
 
-use riscv_core::core::pipeline::hazards::forward_rs;
-use riscv_core::core::pipeline::latches::{ExMem, ExMemEntry, IdExEntry, MemWb, MemWbEntry};
-use riscv_core::core::pipeline::signals::ControlSignals;
+use inspectre::core::pipeline::hazards::forward_rs;
+use inspectre::core::pipeline::latches::{ExMem, ExMemEntry, IdExEntry, MemWb, MemWbEntry};
+use inspectre::core::pipeline::signals::ControlSignals;
 
 /// Helper: create an IdExEntry that reads from given integer registers.
 fn consumer(rs1: usize, rs2: usize) -> IdExEntry {
@@ -374,7 +374,7 @@ fn x0_never_forwarded() {
 fn fp_forward_from_ex_mem() {
     let mut id = consumer(1, 2);
     id.ctrl.rs1_fp = true;
-    id.rv1 = 0xDEAD_F0;
+    id.rv1 = 0x00DE_ADF0;
     let mut producer = ex_producer(1, 0xF100);
     producer.ctrl.fp_reg_write = true;
     producer.ctrl.reg_write = false;
@@ -409,7 +409,7 @@ fn fp_and_int_registers_are_separate() {
 fn trap_entries_are_not_forwarded() {
     let id = consumer(5, 6);
     let mut trapped = ex_producer(5, 0xBAD);
-    trapped.trap = Some(riscv_core::common::error::Trap::IllegalInstruction(0));
+    trapped.trap = Some(inspectre::common::error::Trap::IllegalInstruction(0));
     let ex_mem = ExMem {
         entries: vec![trapped],
     };

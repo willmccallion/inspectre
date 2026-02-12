@@ -2,7 +2,7 @@
 
 Python-side simulation and CPU abstractions sitting on top of the Rust core.
 
-**Source:** `python/riscv_sim/` — especially `objects.py`, `cpu/`, `experiment.py`.
+**Source:** `inspectre/` — especially `objects.py`, `cpu/`, `experiment.py`.
 
 ---
 

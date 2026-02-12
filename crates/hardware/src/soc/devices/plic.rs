@@ -111,10 +111,11 @@ impl Plic {
                 if irq_id == 0 {
                     continue; // IRQ 0 is reserved
                 }
-                if (active & (1 << bit)) != 0 && irq_id < self.priorities.len() {
-                    if self.priorities[irq_id] > threshold {
-                        return true;
-                    }
+                if (active & (1 << bit)) != 0
+                    && irq_id < self.priorities.len()
+                    && self.priorities[irq_id] > threshold
+                {
+                    return true;
                 }
             }
         }
@@ -167,17 +168,17 @@ impl Device for Plic {
     /// Handles reads from Priority, Pending, Enable, Threshold, and Claim registers.
     fn read_u32(&mut self, offset: u64) -> u32 {
         #[allow(clippy::absurd_extreme_comparisons)]
-        if offset >= PLIC_PRIORITY_BASE && offset < PLIC_PENDING_BASE {
+        if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
             if idx < self.priorities.len() {
                 return self.priorities[idx];
             }
-        } else if offset >= PLIC_PENDING_BASE && offset < PLIC_ENABLE_BASE {
+        } else if (PLIC_PENDING_BASE..PLIC_ENABLE_BASE).contains(&offset) {
             let idx = (offset - PLIC_PENDING_BASE) as usize / 4;
             if idx < self.pending.len() {
                 return self.pending[idx];
             }
-        } else if offset >= PLIC_ENABLE_BASE && offset < PLIC_CONTEXT_BASE {
+        } else if (PLIC_ENABLE_BASE..PLIC_CONTEXT_BASE).contains(&offset) {
             let rel = (offset - PLIC_ENABLE_BASE) as usize;
             let ctx = rel / 0x80;
             let word_idx = (rel % 0x80) / 4;
@@ -210,12 +211,12 @@ impl Device for Plic {
     /// Handles writes to Priority, Enable, Threshold, and Complete (Claim) registers.
     fn write_u32(&mut self, offset: u64, val: u32) {
         #[allow(clippy::absurd_extreme_comparisons)]
-        if offset >= PLIC_PRIORITY_BASE && offset < PLIC_PENDING_BASE {
+        if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
             if idx < self.priorities.len() {
                 self.priorities[idx] = val;
             }
-        } else if offset >= PLIC_ENABLE_BASE && offset < PLIC_CONTEXT_BASE {
+        } else if (PLIC_ENABLE_BASE..PLIC_CONTEXT_BASE).contains(&offset) {
             let rel = (offset - PLIC_ENABLE_BASE) as usize;
             let ctx = rel / 0x80;
             let word_idx = (rel % 0x80) / 4;

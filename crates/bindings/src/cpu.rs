@@ -6,11 +6,11 @@
 use crate::conversion::py_dict_to_config;
 use crate::stats::PyStats;
 use crate::system::PySystem;
+use inspectre::core::Cpu;
+use inspectre::core::arch::mode::PrivilegeMode;
+use inspectre::sim::loader;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use riscv_core::core::Cpu;
-use riscv_core::core::arch::mode::PrivilegeMode;
-use riscv_core::sim::loader;
 use std::io::Write;
 
 /// Python-exposed CPU: wraps the core `Cpu` for stepping and running from Python.
@@ -84,7 +84,7 @@ impl PyCpu {
     ///
     /// Returns a `PyRuntimeError` if the underlying CPU operation fails.
     pub fn tick(&mut self) -> PyResult<()> {
-        self.inner.tick().map_err(|e| PyRuntimeError::new_err(e))
+        self.inner.tick().map_err(PyRuntimeError::new_err)
     }
 
     /// Returns a snapshot of the current CPU statistics.
@@ -116,17 +116,15 @@ impl PyCpu {
         let start_cycles = self.inner.stats.cycles;
         loop {
             // Check if we've hit the cycle limit (if specified)
-            if let Some(max_cycles) = limit {
-                if self.inner.stats.cycles - start_cycles >= max_cycles {
-                    let _ = std::io::stdout().flush();
-                    return Ok(None);
-                }
+            if let Some(max_cycles) = limit
+                && self.inner.stats.cycles - start_cycles >= max_cycles
+            {
+                let _ = std::io::stdout().flush();
+                return Ok(None);
             }
 
-            if self.inner.stats.cycles % 10000 == 0 {
-                if let Err(e) = py.check_signals() {
-                    return Err(e);
-                }
+            if self.inner.stats.cycles.is_multiple_of(10000) {
+                py.check_signals()?;
                 let _ = std::io::stdout().flush();
             }
 
@@ -219,5 +217,10 @@ impl PyCpu {
     /// Enable or disable instruction tracing.
     pub fn set_trace(&mut self, enabled: bool) {
         self.inner.trace = enabled;
+    }
+
+    /// Return the last N committed (pc, instruction) pairs from the ring buffer.
+    pub fn get_pc_trace(&self) -> Vec<(u64, u32)> {
+        self.inner.pc_trace.clone()
     }
 }

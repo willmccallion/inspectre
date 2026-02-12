@@ -63,12 +63,11 @@ impl System {
 
         let disk_base = config.system.disk_base;
         let mut disk = VirtioBlock::new(disk_base, ram_base, ram_buffer);
-        if !disk_path.is_empty() {
-            if let Ok(disk_data) = fs::read(disk_path) {
-                if !disk_data.is_empty() {
-                    disk.load(disk_data);
-                }
-            }
+        if !disk_path.is_empty()
+            && let Ok(disk_data) = fs::read(disk_path)
+            && !disk_data.is_empty()
+        {
+            disk.load(disk_data);
         }
 
         let syscon_addr = config.system.syscon_base;

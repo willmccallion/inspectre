@@ -3,8 +3,8 @@
 //! Tests for UART data transmission, receive buffer, interrupt handling,
 //! and various register configurations.
 
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::devices::uart::Uart;
+use inspectre::soc::devices::Device;
+use inspectre::soc::devices::uart::Uart;
 
 // ══════════════════════════════════════════════════════════
 // Data Transmission Tests
@@ -214,7 +214,7 @@ fn uart_iir_no_interrupt_pending() {
 #[test]
 fn uart_iir_fifo_enabled() {
     let mut uart = Uart::new(0, true);
-    let iir = uart.read_u8(2);
+    let _iir = uart.read_u8(2);
     // Bits 6-7 should indicate FIFO status
 }
 

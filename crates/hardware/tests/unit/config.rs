@@ -3,7 +3,7 @@
 //! Comprehensive tests for configuration structures, deserialization,
 //! defaults, and validation.
 
-use riscv_core::config::*;
+use inspectre::config::*;
 
 #[test]
 fn test_config_default() {

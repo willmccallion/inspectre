@@ -184,11 +184,7 @@ impl Uart {
     ///
     /// Used to detect fatal errors in the guest OS and terminate simulation.
     fn check_char_for_panic(&mut self, ch: u8) -> bool {
-        let ch_lower = if ch >= b'A' && ch <= b'Z' {
-            ch + 32
-        } else {
-            ch
-        };
+        let ch_lower = if ch.is_ascii_uppercase() { ch + 32 } else { ch };
 
         /// Pattern to detect kernel panic messages in UART output.
         const PATTERN: &[u8] = b"kernel panic";
@@ -200,12 +196,10 @@ impl Uart {
                 self.panic_match_state = 0;
                 return true;
             }
+        } else if ch_lower == b'k' {
+            self.panic_match_state = 1;
         } else {
-            if ch_lower == b'k' {
-                self.panic_match_state = 1;
-            } else {
-                self.panic_match_state = 0;
-            }
+            self.panic_match_state = 0;
         }
         false
     }

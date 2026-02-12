@@ -167,7 +167,7 @@ impl Cpu {
                 );
             }
 
-            if self.stats.cycles % STATUS_UPDATE_INTERVAL == 0 {
+            if self.stats.cycles.is_multiple_of(STATUS_UPDATE_INTERVAL) {
                 let mode_name = match self.privilege {
                     PrivilegeMode::Machine => "M",
                     PrivilegeMode::Supervisor => "S",

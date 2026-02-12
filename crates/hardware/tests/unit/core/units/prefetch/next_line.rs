@@ -5,8 +5,8 @@
 //!
 //! Reference: Phase 3 — Memory Subsystem Verification.
 
-use riscv_core::core::units::prefetch::NextLinePrefetcher;
-use riscv_core::core::units::prefetch::Prefetcher;
+use inspectre::core::units::prefetch::NextLinePrefetcher;
+use inspectre::core::units::prefetch::Prefetcher;
 
 // ══════════════════════════════════════════════════════════
 // 1. Basic operation

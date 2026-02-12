@@ -4,8 +4,8 @@
 //! which provides power management and reset functionality through memory-mapped
 //! registers.
 
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::devices::syscon::SysCon;
+use inspectre::soc::devices::Device;
+use inspectre::soc::devices::syscon::SysCon;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

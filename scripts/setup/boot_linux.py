@@ -208,7 +208,7 @@ def main():
     image_path = os.path.join(out_dir, "Image")
     disk_path = os.path.join(out_dir, "disk.img")
     dtb_path = os.path.join(linux_dir, "system.dtb")
-    sim_bin = os.path.join(root, "target", "release", "sim")
+    sim_bin = os.path.join(root, "target", "release", "inspectre")
 
     ap = argparse.ArgumentParser(
         description="Download Buildroot, build Linux, optionally boot in sim"
@@ -260,27 +260,26 @@ def main():
         print("Run from repo root: cargo build --release  or  make hardware")
         return 1
 
-    sys.path.append(os.path.join(root, "python"))
     try:
-        from riscv_sim import Simulator, SimConfig
+        from inspectre import Simulator, SimConfig
     except ImportError:
         print(
-            "Error: Could not import riscv_sim. Make sure to build the project first."
+            "Error: Could not import inspectre. Run 'make python' to build the bindings."
         )
         return 1
 
     os.chdir(root)
 
     print("[boot_linux] Booting with Simulator (Optimized User Config)...")
-    
+
     # Optimized configuration based on user's previous TOML config
     def optimized_config():
         c = SimConfig.default()
-        
+
         # General
         c.general.trace_instructions = False
         c.general.start_pc = 0x80000000
-        
+
         # System
         c.system.ram_base = 0x80000000
         c.system.uart_base = 0x10000000
@@ -291,13 +290,13 @@ def main():
         c.system.bus_width = 8
         c.system.bus_latency = 1
         c.system.clint_divider = 100  # Reduced from 1000 (too slow) but kept higher than default (10) for stability
-        
+
         # Memory
-        c.memory.ram_size = 256 * 1024 * 1024 # 256MB
+        c.memory.ram_size = 256 * 1024 * 1024  # 256MB
         c.memory.controller = "Simple"
         c.memory.row_miss_latency = 10
         c.memory.tlb_size = 64
-        
+
         # L1 Instruction Cache
         c.cache.l1_i.enabled = True
         c.cache.l1_i.size_bytes = 65536
@@ -307,7 +306,7 @@ def main():
         c.cache.l1_i.latency = 1
         c.cache.l1_i.prefetcher = "NextLine"
         c.cache.l1_i.prefetch_degree = 2
-        
+
         # L1 Data Cache
         c.cache.l1_d.enabled = True
         c.cache.l1_d.size_bytes = 65536
@@ -318,32 +317,32 @@ def main():
         c.cache.l1_d.prefetcher = "Stride"
         c.cache.l1_d.prefetch_table_size = 128
         c.cache.l1_d.prefetch_degree = 2
-        
+
         # L2 Cache
         c.cache.l2.enabled = True
-        c.cache.l2.size_bytes = 1048576 # 1MB
+        c.cache.l2.size_bytes = 1048576  # 1MB
         c.cache.l2.line_bytes = 64
         c.cache.l2.ways = 16
         c.cache.l2.policy = "PLRU"
         c.cache.l2.latency = 8
         c.cache.l2.prefetcher = "NextLine"
         c.cache.l2.prefetch_degree = 1
-        
+
         # L3 Cache
         c.cache.l3.enabled = True
-        c.cache.l3.size_bytes = 8 * 1024 * 1024 # 8MB
+        c.cache.l3.size_bytes = 8 * 1024 * 1024  # 8MB
         c.cache.l3.line_bytes = 64
         c.cache.l3.ways = 16
         c.cache.l3.policy = "PLRU"
         c.cache.l3.latency = 28
         c.cache.l3.prefetcher = "None"
-        
+
         # Pipeline
         c.pipeline.branch_predictor = "TAGE"
         c.pipeline.width = 1
         c.pipeline.btb_size = 4096
         c.pipeline.ras_size = 48
-        
+
         # TAGE
         c.pipeline.tage.num_banks = 4
         c.pipeline.tage.table_size = 2048
@@ -351,16 +350,18 @@ def main():
         c.pipeline.tage.reset_interval = 2000
         c.pipeline.tage.history_lengths = [5, 15, 44, 130]
         c.pipeline.tage.tag_widths = [9, 9, 10, 10]
-        
+
         return c
 
-    sim = Simulator()
-    sim._config_obj = optimized_config()
-    sim.kernel(image_path)
-    sim.disk(disk_path)
+    sim = (
+        Simulator()
+        .with_config(optimized_config())
+        .kernel(image_path)
+        .disk(disk_path)
+        .kernel_mode()
+    )
     if os.path.isfile(dtb_path):
         sim.dtb(dtb_path)
-    sim.kernel_mode()
 
     try:
         return sim.run()

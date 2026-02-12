@@ -12,7 +12,7 @@ _scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _scripts)
 
 from m1.config import m1_config
-from riscv_sim import Environment, run_experiment
+from inspectre import Environment, run_experiment
 
 _root = os.path.dirname(_scripts)
 BINARY = os.path.join("software", "bin", "benchmarks", "qsort.bin")

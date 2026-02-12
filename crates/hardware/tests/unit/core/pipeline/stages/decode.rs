@@ -17,9 +17,9 @@
 
 use crate::common::builder::instruction::InstructionBuilder;
 use crate::common::harness::TestContext;
-use riscv_core::core::pipeline::latches::IfIdEntry;
-use riscv_core::core::pipeline::signals::{AluOp, MemWidth, OpASrc, OpBSrc};
-use riscv_core::core::pipeline::stages::decode_stage;
+use inspectre::core::pipeline::latches::IfIdEntry;
+use inspectre::core::pipeline::signals::{AluOp, MemWidth, OpASrc, OpBSrc};
+use inspectre::core::pipeline::stages::decode_stage;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -32,7 +32,7 @@ fn ctx() -> TestContext {
 
 /// Place a single raw instruction in the IF/ID latch and run decode.
 /// Returns the first IdExEntry produced.
-fn decode_one(tc: &mut TestContext, inst: u32) -> riscv_core::core::pipeline::latches::IdExEntry {
+fn decode_one(tc: &mut TestContext, inst: u32) -> inspectre::core::pipeline::latches::IdExEntry {
     tc.cpu.if_id.entries = vec![IfIdEntry {
         pc: 0x8000_0000,
         inst,
@@ -515,7 +515,7 @@ fn x0_always_reads_zero() {
 #[test]
 fn fetch_trap_propagates_to_id_ex() {
     let mut tc = ctx();
-    let trap = riscv_core::common::error::Trap::InstructionAccessFault(0xBAD);
+    let trap = inspectre::common::error::Trap::InstructionAccessFault(0xBAD);
     tc.cpu.if_id.entries = vec![IfIdEntry {
         pc: 0xBAD,
         inst: 0,
@@ -556,7 +556,7 @@ fn illegal_load_funct3_generates_trap() {
     let mut tc = ctx();
     // OP_LOAD with funct3 = 0b111 is not a valid load variant
     let bad_inst = InstructionBuilder::new()
-        .opcode(riscv_core::isa::rv64i::opcodes::OP_LOAD)
+        .opcode(inspectre::isa::rv64i::opcodes::OP_LOAD)
         .rd(1)
         .rs1(2)
         .funct3(0b111)

@@ -10,7 +10,7 @@ Enum types (`MemoryControllerT`, etc.) use string literals that must match Rust 
 Build your machine model in scripts—see scripts/p550/config.py and scripts/m1/config.py for examples.
 
 Example:
-    from riscv_sim import SimConfig, Environment, run_experiment
+    from inspectre import SimConfig, Environment, run_experiment
 
     config = SimConfig.default()
     config.cache.l1_d.enabled = True

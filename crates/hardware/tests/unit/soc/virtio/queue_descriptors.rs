@@ -3,9 +3,9 @@
 //! Verifies register identification (magic, version, device ID),
 //! status register, queue configuration, and interrupt status.
 
-use riscv_core::soc::devices::Device;
-use riscv_core::soc::devices::virtio_disk::VirtioBlock;
-use riscv_core::soc::memory::buffer::DramBuffer;
+use inspectre::soc::devices::Device;
+use inspectre::soc::devices::virtio_disk::VirtioBlock;
+use inspectre::soc::memory::buffer::DramBuffer;
 use std::sync::Arc;
 
 fn make_virtio() -> VirtioBlock {

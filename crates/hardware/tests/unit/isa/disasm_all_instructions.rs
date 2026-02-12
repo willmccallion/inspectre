@@ -1,7 +1,7 @@
 //! Comprehensive disassembler tests covering all RV64GC instructions.
 //! Tests use flexible assertions to handle format variations.
 
-use riscv_core::isa::disasm::disassemble;
+use inspectre::isa::disasm::disassemble;
 
 // RV64I Base Instructions
 #[test]

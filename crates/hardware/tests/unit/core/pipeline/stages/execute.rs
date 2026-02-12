@@ -15,9 +15,9 @@
 
 use crate::common::builder::instruction::InstructionBuilder;
 use crate::common::harness::TestContext;
-use riscv_core::core::pipeline::latches::{IdExEntry, IfIdEntry};
-use riscv_core::core::pipeline::signals::{AluOp, ControlSignals, MemWidth, OpASrc, OpBSrc};
-use riscv_core::core::pipeline::stages::execute_stage;
+use inspectre::core::pipeline::latches::{IdExEntry, IfIdEntry};
+use inspectre::core::pipeline::signals::{AluOp, ControlSignals, MemWidth, OpASrc, OpBSrc};
+use inspectre::core::pipeline::stages::execute_stage;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -137,7 +137,7 @@ fn jalr_entry(
 fn exec_one(
     tc: &mut TestContext,
     entry: IdExEntry,
-) -> riscv_core::core::pipeline::latches::ExMemEntry {
+) -> inspectre::core::pipeline::latches::ExMemEntry {
     tc.cpu.id_ex.entries = vec![entry];
     execute_stage(&mut tc.cpu);
     assert!(
@@ -700,7 +700,7 @@ fn jalr_mispredict_flushes_pipeline() {
 #[test]
 fn trap_passes_through_without_alu() {
     let mut tc = ctx();
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = IdExEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -719,7 +719,7 @@ fn trap_passes_through_without_alu() {
 fn trap_does_not_modify_cpu_pc() {
     let mut tc = ctx();
     let original_pc = tc.cpu.pc;
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = IdExEntry {
         pc: PC,
         inst: 0xDEAD,

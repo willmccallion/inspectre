@@ -69,7 +69,7 @@ impl Bus {
     ///
     /// Cycles = base latency plus ceiling(bytes / width_bytes) transfers.
     pub fn calculate_transit_time(&self, bytes: usize) -> u64 {
-        let transfers = (bytes as u64 + self.width_bytes - 1) / self.width_bytes;
+        let transfers = (bytes as u64).div_ceil(self.width_bytes);
         self.latency_cycles + transfers
     }
 
@@ -131,10 +131,10 @@ impl Bus {
         for i in 0..self.devices.len() {
             let dev = &mut self.devices[i];
             if dev.tick() {
-                if let Some(id) = dev.get_irq_id() {
-                    if id < 64 {
-                        active_irqs |= 1 << id;
-                    }
+                if let Some(id) = dev.get_irq_id()
+                    && id < 64
+                {
+                    active_irqs |= 1 << id;
                 }
                 if dev.name() == "CLINT" {
                     timer_irq = true;
@@ -158,12 +158,11 @@ impl Bus {
     ///
     /// `true` if kernel panic was detected.
     pub fn check_kernel_panic(&mut self) -> bool {
-        if let Some(idx) = self.uart_idx {
-            if idx < self.devices.len() {
-                if let Some(uart) = self.devices[idx].as_uart_mut() {
-                    return uart.check_kernel_panic();
-                }
-            }
+        if let Some(idx) = self.uart_idx
+            && idx < self.devices.len()
+            && let Some(uart) = self.devices[idx].as_uart_mut()
+        {
+            return uart.check_kernel_panic();
         }
         false
     }
@@ -176,11 +175,11 @@ impl Bus {
     ///
     /// `Some((ptr, base, end))` for RAM, or `None` if no RAM device is registered.
     pub fn get_ram_info(&mut self) -> Option<(*mut u8, u64, u64)> {
-        if let Some(idx) = self.ram_idx {
-            if let Some(mem) = self.devices[idx].as_memory_mut() {
-                let (base, size) = mem.address_range();
-                return Some((mem.as_mut_ptr(), base, base + size));
-            }
+        if let Some(idx) = self.ram_idx
+            && let Some(mem) = self.devices[idx].as_memory_mut()
+        {
+            let (base, size) = mem.address_range();
+            return Some((mem.as_mut_ptr(), base, base + size));
         }
         None
     }

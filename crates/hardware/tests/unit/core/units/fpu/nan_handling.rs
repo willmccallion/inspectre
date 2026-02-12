@@ -1,5 +1,5 @@
-use riscv_core::core::pipeline::signals::AluOp;
-use riscv_core::core::units::fpu::Fpu;
+use inspectre::core::pipeline::signals::AluOp;
+use inspectre::core::units::fpu::Fpu;
 
 #[test]
 fn test_box_f32() {
@@ -28,7 +28,7 @@ fn test_nan_boxing_unboxing() {
     assert_eq!(f32::from_bits(res as u32), 42.0);
 
     // Invalid boxing (upper bits not all 1s)
-    let invalid_boxed = (f_val.to_bits() as u64) | 0x00000000_00000000; // Upper bits are 0
+    let invalid_boxed = f_val.to_bits() as u64; // Upper bits are 0
     let res_invalid = Fpu::execute(AluOp::FAdd, invalid_boxed, zero, 0, true);
 
     // RISC-V: If input is not properly NaN-boxed, it is treated as canonical NaN.

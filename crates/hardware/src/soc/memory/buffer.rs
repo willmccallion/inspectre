@@ -78,6 +78,11 @@ impl DramBuffer {
         self.size
     }
 
+    /// Returns true if the buffer has zero size.
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
     /// Returns a raw pointer to the buffer.
     pub fn as_ptr(&self) -> *const u8 {
         self.ptr

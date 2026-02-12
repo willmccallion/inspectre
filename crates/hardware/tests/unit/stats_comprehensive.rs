@@ -1,6 +1,6 @@
 //! Comprehensive tests for simulation statistics.
 
-use riscv_core::stats::SimStats;
+use inspectre::stats::SimStats;
 
 #[test]
 fn test_stats_default() {
@@ -261,7 +261,7 @@ fn test_stats_invalid_section_name() {
 
 #[test]
 fn test_stats_sections_constant() {
-    use riscv_core::stats::STATS_SECTIONS;
+    use inspectre::stats::STATS_SECTIONS;
 
     assert!(STATS_SECTIONS.contains(&"summary"));
     assert!(STATS_SECTIONS.contains(&"core"));

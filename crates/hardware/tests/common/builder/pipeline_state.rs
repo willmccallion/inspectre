@@ -1,7 +1,13 @@
-use riscv_core::core::pipeline::latches::{ExMemEntry, IdExEntry, IfIdEntry, MemWbEntry};
-use riscv_core::core::pipeline::signals::ControlSignals;
+use inspectre::core::pipeline::latches::{ExMemEntry, IdExEntry, IfIdEntry, MemWbEntry};
+use inspectre::core::pipeline::signals::ControlSignals;
 
 pub struct IfIdBuilder(IfIdEntry);
+
+impl Default for IfIdBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl IfIdBuilder {
     pub fn new() -> Self {
@@ -30,6 +36,12 @@ impl IfIdBuilder {
 }
 
 pub struct IdExBuilder(IdExEntry);
+
+impl Default for IdExBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl IdExBuilder {
     pub fn new() -> Self {
@@ -80,6 +92,12 @@ impl IdExBuilder {
 
 pub struct ExMemBuilder(ExMemEntry);
 
+impl Default for ExMemBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExMemBuilder {
     pub fn new() -> Self {
         Self(ExMemEntry::default())
@@ -116,6 +134,12 @@ impl ExMemBuilder {
 }
 
 pub struct MemWbBuilder(MemWbEntry);
+
+impl Default for MemWbBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MemWbBuilder {
     pub fn new() -> Self {

@@ -177,7 +177,7 @@ pub fn page_table_walk(
             }
         }
 
-        if let Err(_) = check_permissions(&pte, access, privilege, csrs) {
+        if check_permissions(&pte, access, privilege, csrs).is_err() {
             return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
         }
 

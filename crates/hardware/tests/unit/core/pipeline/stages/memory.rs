@@ -11,9 +11,9 @@
 //!   8. FP load NaN-boxing — single-precision FP loads set upper 32 bits
 
 use crate::common::harness::TestContext;
-use riscv_core::core::pipeline::latches::ExMemEntry;
-use riscv_core::core::pipeline::signals::{AtomicOp, ControlSignals, MemWidth};
-use riscv_core::core::pipeline::stages::mem_stage;
+use inspectre::core::pipeline::latches::ExMemEntry;
+use inspectre::core::pipeline::signals::{AtomicOp, ControlSignals, MemWidth};
+use inspectre::core::pipeline::stages::mem_stage;
 
 // ══════════════════════════════════════════════════════════
 // Helpers
@@ -118,7 +118,7 @@ fn atomic_entry(
 fn mem_one(
     tc: &mut TestContext,
     entry: ExMemEntry,
-) -> riscv_core::core::pipeline::latches::MemWbEntry {
+) -> inspectre::core::pipeline::latches::MemWbEntry {
     tc.cpu.ex_mem.entries = vec![entry];
     mem_stage(&mut tc.cpu);
     assert!(
@@ -311,7 +311,7 @@ fn passthrough_preserves_metadata() {
 #[test]
 fn trap_passes_through_mem_stage() {
     let mut tc = ctx();
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = ExMemEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -329,7 +329,7 @@ fn trap_does_not_perform_memory_access() {
     // Write a known pattern first
     tc.cpu.bus.bus.write_u64(MEM_BASE, 0xAAAA_BBBB_CCCC_DDDD);
 
-    let trap = riscv_core::common::error::Trap::IllegalInstruction(0xDEAD);
+    let trap = inspectre::common::error::Trap::IllegalInstruction(0xDEAD);
     let entry = ExMemEntry {
         pc: PC,
         inst: 0xDEAD,
@@ -365,7 +365,7 @@ fn trap_entry_flushes_remaining() {
 
     let trap_entry = ExMemEntry {
         pc: PC,
-        trap: Some(riscv_core::common::error::Trap::IllegalInstruction(0)),
+        trap: Some(inspectre::common::error::Trap::IllegalInstruction(0)),
         ..Default::default()
     };
     let normal_entry = passthrough_entry(1, 99);

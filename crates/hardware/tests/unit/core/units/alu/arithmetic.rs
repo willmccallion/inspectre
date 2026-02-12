@@ -9,8 +9,8 @@
 //!
 //! Reference: RISC-V ISA Specification, Volume I, Chapters 2.4 and 7.
 
-use riscv_core::core::pipeline::signals::AluOp;
-use riscv_core::core::units::alu::Alu;
+use inspectre::core::pipeline::signals::AluOp;
+use inspectre::core::units::alu::Alu;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 // Named constants for readability. Every magic number in a test vector should

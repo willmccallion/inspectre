@@ -15,7 +15,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use riscv_core::isa::disasm::disassemble;
+//! use inspectre::isa::disasm::disassemble;
 //! let text = disassemble(0x00A00513); // ADDI x10, x0, 10
 //! assert_eq!(text, "addi x10, x0, 10");
 //! ```

@@ -1,6 +1,6 @@
 //! Quick test to verify disasm output format
 
-use riscv_core::isa::disasm::disassemble;
+use inspectre::isa::disasm::disassemble;
 
 #[test]
 fn check_formats() {

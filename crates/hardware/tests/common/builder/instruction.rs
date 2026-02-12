@@ -1,4 +1,4 @@
-use riscv_core::isa::rv64i::opcodes::*;
+use inspectre::isa::rv64i::opcodes::*;
 
 pub struct InstructionBuilder {
     opcode: u32,
@@ -8,6 +8,12 @@ pub struct InstructionBuilder {
     rs2: u32,
     funct7: u32,
     imm: i32,
+}
+
+impl Default for InstructionBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InstructionBuilder {

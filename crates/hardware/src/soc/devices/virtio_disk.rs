@@ -350,34 +350,31 @@ impl VirtioBlock {
                 if is_write {
                     let mut current_disk_offset = sector_offset;
 
-                    for i in 1..descriptors.len() - 1 {
-                        let (d_addr, d_len, _) = descriptors[i];
-
-                        let data = self.dma_read(d_addr, d_len as usize);
+                    for (d_addr, d_len, _) in &descriptors[1..descriptors.len() - 1] {
+                        let data = self.dma_read(*d_addr, *d_len as usize);
                         if current_disk_offset + data.len() <= self.disk_image.len() {
                             self.disk_image[current_disk_offset..current_disk_offset + data.len()]
                                 .copy_from_slice(&data);
                         }
-                        current_disk_offset += d_len as usize;
-                        len_written += d_len;
+                        current_disk_offset += *d_len as usize;
+                        len_written += *d_len;
                     }
                 } else {
-                    for i in 1..descriptors.len() - 1 {
-                        let (d_addr, d_len, d_flags) = descriptors[i];
-                        if (d_flags & VRING_DESC_F_WRITE) != 0 {
-                            if sector_offset + current_offset < self.disk_image.len() {
-                                let available =
-                                    self.disk_image.len() - (sector_offset + current_offset);
-                                let copy_len = std::cmp::min(d_len as usize, available);
-                                self.dma_write(
-                                    d_addr,
-                                    &self.disk_image[sector_offset + current_offset
-                                        ..sector_offset + current_offset + copy_len],
-                                );
-                                len_written += copy_len as u32;
-                            }
+                    for (d_addr, d_len, d_flags) in &descriptors[1..descriptors.len() - 1] {
+                        if (d_flags & VRING_DESC_F_WRITE) != 0
+                            && sector_offset + current_offset < self.disk_image.len()
+                        {
+                            let available =
+                                self.disk_image.len() - (sector_offset + current_offset);
+                            let copy_len = std::cmp::min(*d_len as usize, available);
+                            self.dma_write(
+                                *d_addr,
+                                &self.disk_image[sector_offset + current_offset
+                                    ..sector_offset + current_offset + copy_len],
+                            );
+                            len_written += copy_len as u32;
                         }
-                        current_offset += d_len as usize;
+                        current_offset += *d_len as usize;
                     }
                 }
 
@@ -393,7 +390,7 @@ impl VirtioBlock {
             let used_elem = used_addr + 4 + (current_used as u64 % self.queue_num as u64) * 8;
 
             self.dma_write(used_elem, &u32::from(head_idx).to_le_bytes());
-            self.dma_write(used_elem + 4, &(len_written as u32).to_le_bytes());
+            self.dma_write(used_elem + 4, &len_written.to_le_bytes());
             self.dma_write(used_idx_addr, &current_used.wrapping_add(1).to_le_bytes());
 
             self.last_avail_idx = self.last_avail_idx.wrapping_add(1);
@@ -434,7 +431,7 @@ impl Device for VirtioBlock {
             REG_INTERRUPT_STATUS => self.interrupt_status,
             REG_STATUS => self.status,
             _ => {
-                if offset >= REG_CONFIG_BASE && offset < REG_CONFIG_BASE + 0x100 {
+                if (REG_CONFIG_BASE..REG_CONFIG_BASE + 0x100).contains(&offset) {
                     let config_offset = offset - REG_CONFIG_BASE;
                     match config_offset {
                         0 => (self.disk_image.len() as u64 / SECTOR_SIZE) as u32,
