@@ -170,4 +170,54 @@ impl PyCpu {
             0
         }
     }
+
+    /// Read a 32-bit value from a physical memory address.
+    pub fn read_memory_u32(&mut self, paddr: u64) -> u32 {
+        self.inner.bus.bus.read_u32(paddr)
+    }
+
+    /// Read a 64-bit value from a physical memory address.
+    pub fn read_memory_u64(&mut self, paddr: u64) -> u64 {
+        self.inner.bus.bus.read_u64(paddr)
+    }
+
+    /// Read a CSR by name. Returns None if unknown.
+    pub fn read_csr(&self, name: &str) -> Option<u64> {
+        let c = &self.inner.csrs;
+        match name {
+            "mstatus" => Some(c.mstatus),
+            "misa" => Some(c.misa),
+            "mie" => Some(c.mie),
+            "mip" => Some(c.mip),
+            "mtvec" => Some(c.mtvec),
+            "mepc" => Some(c.mepc),
+            "mcause" => Some(c.mcause),
+            "mtval" => Some(c.mtval),
+            "medeleg" => Some(c.medeleg),
+            "mideleg" => Some(c.mideleg),
+            "sstatus" => Some(c.sstatus),
+            "sie" => Some(c.sie),
+            "sip" => Some(c.sip),
+            "stvec" => Some(c.stvec),
+            "sepc" => Some(c.sepc),
+            "scause" => Some(c.scause),
+            "stval" => Some(c.stval),
+            "satp" => Some(c.satp),
+            _ => None,
+        }
+    }
+
+    /// Get the current privilege mode as a string ("M", "S", or "U").
+    pub fn get_privilege(&self) -> &'static str {
+        match self.inner.privilege {
+            PrivilegeMode::Machine => "M",
+            PrivilegeMode::Supervisor => "S",
+            PrivilegeMode::User => "U",
+        }
+    }
+
+    /// Enable or disable instruction tracing.
+    pub fn set_trace(&mut self, enabled: bool) {
+        self.inner.trace = enabled;
+    }
 }
