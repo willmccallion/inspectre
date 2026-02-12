@@ -20,7 +20,7 @@ impl Cpu {
     /// # Returns
     ///
     /// The current 64-bit value of the specified CSR.
-    pub(crate) fn csr_read(&self, addr: u32) -> u64 {
+    pub fn csr_read(&self, addr: u32) -> u64 {
         match addr {
             csr::MVENDORID => 0,
             csr::MARCHID => 0,

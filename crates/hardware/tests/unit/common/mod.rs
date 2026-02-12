@@ -3,6 +3,13 @@
 //! This module contains unit tests for fundamental RISC-V data structures and
 //! components, such as address types and register files.
 
+/// Unit tests for system-wide constants.
+///
+/// This module verifies that global constants are defined with correct values
+/// and maintain expected mathematical relationships, including page sizes,
+/// instruction masks, and delegation bits.
+pub mod constants;
+
 /// Unit tests for address arithmetic and type construction.
 ///
 /// This module verifies the behavior of virtual and physical address types,
@@ -15,3 +22,9 @@ pub mod address_arithmetic;
 /// and Floating-Point Registers (FPRs), ensuring correct read/write operations
 /// and adherence to architectural constraints like the hardwired zero in `x0`.
 pub mod register_indexing;
+
+/// Unit tests for error and trap handling.
+///
+/// This module verifies trap types, translation results, and error handling
+/// mechanisms used throughout the simulator.
+pub mod error;

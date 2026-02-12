@@ -20,6 +20,8 @@ pub mod common;
 /// within the hardware abstraction layer.
 pub mod unit;
 
-// pub mod integration;
+/// Integration tests for complete instruction execution and system behavior.
+pub mod integration;
+
 // pub mod fuzz;
 // pub mod compliance;

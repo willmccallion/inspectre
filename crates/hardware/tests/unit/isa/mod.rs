@@ -16,6 +16,7 @@ pub mod decode_properties;
 /// encodings into human-readable mnemonics for RV64I, RV64M, RV64A, RV64F/D,
 /// and privileged instructions.
 pub mod disasm;
+pub mod disasm_all_instructions;
 
 /// RISC-V Compressed (RVC) instruction set extension tests.
 ///

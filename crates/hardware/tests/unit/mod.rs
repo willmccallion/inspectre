@@ -4,6 +4,12 @@
 //! components of the system. It organizes the fundamental building blocks required
 //! for simulation, including the processor core, ISA definitions, and SoC integration.
 
+/// Unit tests for configuration system.
+///
+/// This module includes tests for configuration structures, JSON deserialization,
+/// defaults, and validation of all configuration options.
+pub mod config;
+
 /// Unit tests for common RISC-V components.
 ///
 /// This module includes tests for address arithmetic, register indexing,
@@ -30,9 +36,18 @@ pub mod isa;
 /// and memory controllers.
 pub mod soc;
 
+/// Unit tests for simulation-related functionality.
+///
+/// This module contains tests for binary loading, kernel setup,
+/// and other simulation initialization tasks.
+pub mod sim;
+
 /// Unit tests for simulation statistics verification.
 ///
 /// This module contains tests that ensure the [`SimStats`](riscv_core::stats::SimStats) structure
 /// correctly tracks and calculates various performance metrics, including
 /// instruction mixes, cache hit rates, and stall breakdowns.
 pub mod stats_verification;
+
+/// Comprehensive simulation statistics tests.
+pub mod stats_comprehensive;

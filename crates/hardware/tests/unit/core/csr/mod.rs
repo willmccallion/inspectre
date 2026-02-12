@@ -21,3 +21,9 @@ pub mod counters;
 /// This module verifies the logic for trap delegation, vector modes,
 /// and interrupt enable/pending bits within the RISC-V architecture.
 pub mod trap_setup;
+
+/// Unit tests for CPU CSR read/write operations.
+///
+/// This module verifies the CPU-level CSR operations including side effects
+/// like TLB flushes, interrupt inhibition, and MSTATUS/SSTATUS synchronization.
+pub mod cpu_csr_operations;

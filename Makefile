@@ -24,6 +24,7 @@ help:
 	@echo "Development:"
 	@echo "  check            Run cargo check on all Rust crates"
 	@echo "  test             Run Rust tests (cargo test)"
+	@echo "  test-coverage    Run Rust tests coverage (cargo llvm-cov)"
 	@echo "  clippy           Run cargo clippy linter"
 	@echo "  fmt              Format Rust code with cargo fmt"
 	@echo ""
@@ -75,6 +76,11 @@ check:
 test:
 	@echo "[Test] Running cargo test..."
 	@cargo test --workspace
+
+# Run Rust tests
+test-coverage:
+	@echo "[Test] Running cargo llvm-cov..."
+	@cargo llvm-cov
 
 # Run clippy linter
 clippy:

@@ -131,3 +131,40 @@ fn gpr_fpr_independent() {
     assert_eq!(regs.read(5), 0xAAAA);
     assert_eq!(regs.read_f(5), 0xBBBB);
 }
+
+/// Verifies that the dump method can be called without panicking.
+///
+/// The dump method outputs register state to stdout for debugging purposes.
+/// This test ensures it executes correctly with various register states.
+#[test]
+fn dump_does_not_panic() {
+    // Test with zero-initialized registers
+    let regs = RegisterFile::new();
+    regs.dump();
+
+    // Test with some non-zero values
+    let mut regs = RegisterFile::new();
+    regs.write(1, 0x1234_5678_9ABC_DEF0);
+    regs.write(10, u64::MAX);
+    regs.write(31, 0xDEAD_BEEF);
+    regs.dump();
+}
+
+/// Verifies that dump works correctly after register modifications.
+#[test]
+fn dump_after_modifications() {
+    let mut regs = RegisterFile::new();
+
+    // Write to multiple registers
+    for i in 1..32 {
+        regs.write(i, i as u64 * 0x1000);
+    }
+
+    // Call dump - should not panic and should be able to dump all values
+    regs.dump();
+
+    // Verify registers still have correct values after dump
+    for i in 1..32 {
+        assert_eq!(regs.read(i), i as u64 * 0x1000);
+    }
+}
