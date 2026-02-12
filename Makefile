@@ -1,10 +1,10 @@
 # RISC-V System Simulator - Top-level Makefile
 # Build the simulator (Rust) and example software (C/Assembly)
 
-.PHONY: all help simulator software examples linux clean check test run-example run-linux
+.PHONY: all help simulator software examples linux clean check test run-example run-linux python
 
-# Default target
-all: simulator software
+# Default target - show help
+all: help
 
 # ============================================================================
 # Help Target
@@ -14,11 +14,12 @@ help:
 	@echo "========================================"
 	@echo ""
 	@echo "Main Targets:"
-	@echo "  all              Build simulator and software (default)"
+	@echo "  help             Show this help message (default)"
 	@echo "  simulator        Build Rust simulator (release binary at target/release/sim)"
 	@echo "  software         Build libc and example programs"
 	@echo "  examples         Alias for 'software'"
 	@echo "  linux            Download and build Linux kernel + rootfs"
+	@echo "  python           Build and install Python bindings (maturin develop)"
 	@echo ""
 	@echo "Development:"
 	@echo "  check            Run cargo check on all Rust crates"
@@ -89,7 +90,20 @@ fmt:
 # Python Development
 # ============================================================================
 
-# Install Python package in development mode
+# Build and install Python bindings with maturin
+python:
+	@echo "[Python] Building Python bindings with maturin..."
+	@if [ -f .venv/bin/maturin ]; then \
+		.venv/bin/maturin develop --release -m crates/bindings/Cargo.toml; \
+	elif command -v maturin >/dev/null 2>&1; then \
+		maturin develop --release -m crates/bindings/Cargo.toml; \
+	else \
+		echo "Error: maturin not found in .venv/bin/ or PATH"; \
+		echo "Install with: pip install maturin (in your .venv)"; \
+		exit 1; \
+	fi
+
+# Install Python package in development mode (legacy, use 'python' instead)
 python-dev:
 	@echo "[Python] Installing riscv_sim in development mode..."
 	@pip install -e .

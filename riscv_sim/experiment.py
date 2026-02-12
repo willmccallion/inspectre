@@ -6,6 +6,7 @@ This module provides:
 2. **ExperimentResult:** Structured result with exit code, stats dict, and wall time for logging and comparison.
 3. **run_experiment:** Single entry point to run one simulation and return an ExperimentResult; normalizes config and catches errors.
 """
+
 from __future__ import annotations
 
 import time
@@ -20,6 +21,7 @@ try:
     from . import PySystem, CPU
 except ImportError:
     from riscv_emulator import PySystem
+
     CPU = None
     for _ in (0,):
         try:
@@ -100,6 +102,10 @@ def run_experiment(env: Environment, quiet: bool = True) -> ExperimentResult:
             sys_obj.load_binary(f.read(), env.load_addr)
         cpu = CPU(sys_obj, config)
         exit_code = cpu.run()
+        if exit_code is None:
+            raise RuntimeError(
+                "CPU run completed without exit code (should not happen without limit)"
+            )
         stats_obj = cpu.get_stats()
         stats = stats_obj.to_dict()
     except Exception as e:

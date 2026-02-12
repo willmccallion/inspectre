@@ -4,6 +4,7 @@ Simulation statistics container with pattern-based querying.
 This module provides StatsObject: a dict-like wrapper for backend statistics (cycles, IPC,
 cache hits/misses, branch accuracy, etc.) with a query(pattern) method for filtering by key name or regex.
 """
+
 import re
 from typing import Any, Dict, List, Union
 
@@ -26,17 +27,17 @@ class StatsObject(dict):
         result.stats.query("branch")
         result.stats.query("^inst_")
     """
-    
+
     def __init__(self, data: Dict[str, Any]):
         super().__init__(data)
-        
-    def query(self, pattern: str) -> 'StatsObject':
+
+    def query(self, pattern: str) -> "StatsObject":
         """
         Search for statistics matching the given pattern (case-insensitive).
-        
+
         Args:
             pattern: A string or regex pattern to match against statistic names (keys).
-            
+
         Returns:
             A new StatsObject containing only the matching statistics.
         """
@@ -45,14 +46,14 @@ class StatsObject(dict):
             regex = re.compile(pattern, re.IGNORECASE)
         except re.error:
             regex = None
-            
+
         for key, value in self.items():
             if regex:
                 if regex.search(key):
                     matches[key] = value
             elif pattern.lower() in key.lower():
                 matches[key] = value
-                
+
         return StatsObject(matches)
 
     def __repr__(self) -> str:
@@ -63,5 +64,5 @@ class StatsObject(dict):
         lines = []
         for key, value in sorted(self.items()):
             lines.append(f"{key:<{max_key_len}} : {value}")
-            
+
         return "\n".join(lines)

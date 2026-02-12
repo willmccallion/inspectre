@@ -230,7 +230,7 @@ def run_with_progress(
     if progress_stream is None:
         progress_stream = sys.stderr
     while True:
-        exit_code = cpu.run_with_limit(progress_interval_cycles)
+        exit_code = cpu.run(limit=progress_interval_cycles)
         if exit_code is not None:
             return int(exit_code)
         cycles = cpu.get_stats().cycles
@@ -249,6 +249,10 @@ def simulate(cpu, print_stats=True, stats_sections=None):
     sys.stdout.flush()
     try:
         exit_code = cpu.run()
+        if exit_code is None:
+            raise RuntimeError(
+                "CPU run completed without exit code (should not happen without limit)"
+            )
         if print_stats:
             stats = cpu.get_stats()
             if stats_sections is not None:
@@ -383,7 +387,9 @@ class Simulator:
             print("Starting simulation (progress every 5M cycles; UART = stderr)...")
             sys.stdout.flush()
             try:
-                exit_code = run_with_progress(rust_cpu, progress_interval_cycles=5_000_000)
+                exit_code = run_with_progress(
+                    rust_cpu, progress_interval_cycles=5_000_000
+                )
                 print(file=sys.stderr)
                 stats = rust_cpu.get_stats()
                 stats.print()

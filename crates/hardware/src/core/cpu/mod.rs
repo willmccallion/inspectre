@@ -100,8 +100,10 @@ pub struct Cpu {
     pub wfi_waiting: bool,
     /// PC when WFI was entered.
     pub wfi_pc: u64,
-    /// Interrupt inhibit flag (for one cycle after CSR write).
-    pub interrupt_inhibit_one_cycle: bool,
+    /// Interrupt inhibit counter (cycles to skip interrupt checks).
+    /// Set to 1 after CSR writes, 2 after SRET/MRET to let pre-return
+    /// instructions drain from the pipeline before allowing interrupts.
+    pub interrupt_inhibit_cycles: u8,
 
     /// Raw pointer to the start of simulated RAM.
     ///
@@ -235,7 +237,7 @@ impl Cpu {
             same_pc_count: 0,
             wfi_waiting: false,
             wfi_pc: 0,
-            interrupt_inhibit_one_cycle: false,
+            interrupt_inhibit_cycles: 0,
             ram_ptr,
             ram_start,
             ram_end,

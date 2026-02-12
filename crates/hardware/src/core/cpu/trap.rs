@@ -318,6 +318,9 @@ impl Cpu {
         self.csrs.mstatus = new_mstatus;
         self.if_id = Default::default();
         self.id_ex = Default::default();
+        // Inhibit interrupts for 2 cycles to let pre-MRET instructions in
+        // MEM and EX drain through WB before allowing interrupt detection.
+        self.interrupt_inhibit_cycles = 2;
     }
 
     /// Executes the `SRET` instruction (Return from Supervisor Mode).
@@ -362,5 +365,10 @@ impl Cpu {
 
         self.if_id = Default::default();
         self.id_ex = Default::default();
+        // Inhibit interrupts for 2 cycles to let pre-SRET instructions in
+        // MEM and EX drain through WB before allowing interrupt detection.
+        // Without this, an interrupt could fire using a trap handler PC as
+        // the EPC, corrupting SEPC and causing return to the wrong address.
+        self.interrupt_inhibit_cycles = 2;
     }
 }

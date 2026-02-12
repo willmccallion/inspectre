@@ -100,16 +100,29 @@ impl PyCpu {
         self.inner.pc
     }
 
-    /// Runs the simulation until the program exits (e.g., via SysCon power-off).
+    /// Runs the simulation until the program exits (e.g., via SysCon power-off) or until the optional cycle limit is reached.
     ///
     /// Periodically checks for Python signals (e.g., Ctrl-C) and flushes stdout so UART
     /// output is visible when invoked from Python.
     ///
+    /// # Arguments
+    /// * `limit` - Optional maximum number of cycles to run. If None, runs until program exits.
+    ///
     /// # Returns
     ///
-    /// The exit code returned by the simulated program.
-    pub fn run(&mut self, py: Python) -> PyResult<u64> {
+    /// The exit code returned by the simulated program if it exited, or None if the cycle limit was reached.
+    #[pyo3(signature = (limit=None))]
+    pub fn run(&mut self, py: Python, limit: Option<u64>) -> PyResult<Option<u64>> {
+        let start_cycles = self.inner.stats.cycles;
         loop {
+            // Check if we've hit the cycle limit (if specified)
+            if let Some(max_cycles) = limit {
+                if self.inner.stats.cycles - start_cycles >= max_cycles {
+                    let _ = std::io::stdout().flush();
+                    return Ok(None);
+                }
+            }
+
             if self.inner.stats.cycles % 10000 == 0 {
                 if let Err(e) = py.check_signals() {
                     return Err(e);
@@ -121,36 +134,12 @@ impl PyCpu {
                 Ok(_) => {
                     if let Some(code) = self.inner.take_exit() {
                         let _ = std::io::stdout().flush();
-                        return Ok(code);
-                    }
-                }
-                Err(e) => return Err(PyRuntimeError::new_err(e)),
-            }
-        }
-    }
-
-    /// Run until exit or until max_cycles is reached. Returns exit code if the program exited, None if cycle limit hit.
-    /// Flushes stdout before returning so UART output is visible when called from Python.
-    pub fn run_with_limit(&mut self, py: Python, max_cycles: u64) -> PyResult<Option<u64>> {
-        let start_cycles = self.inner.stats.cycles;
-        while self.inner.stats.cycles - start_cycles < max_cycles {
-            if (self.inner.stats.cycles - start_cycles) % 10000 == 0 {
-                if let Err(e) = py.check_signals() {
-                    return Err(e);
-                }
-            }
-            match self.inner.tick() {
-                Ok(_) => {
-                    if let Some(code) = self.inner.take_exit() {
-                        let _ = std::io::stdout().flush();
                         return Ok(Some(code));
                     }
                 }
                 Err(e) => return Err(PyRuntimeError::new_err(e)),
             }
         }
-        let _ = std::io::stdout().flush();
-        Ok(None)
     }
 
     /// Enable or disable direct (bare-metal) mode. When enabled, traps cause exit instead of jumping to trap handler.

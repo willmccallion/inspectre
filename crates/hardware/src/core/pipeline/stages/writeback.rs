@@ -36,8 +36,8 @@ pub fn wb_stage(cpu: &mut Cpu) {
     let mut trap_event: Option<(crate::common::error::Trap, u64)> = None;
 
     if !cpu.mem_wb.entries.is_empty() || cpu.wfi_waiting {
-        if cpu.interrupt_inhibit_one_cycle {
-            cpu.interrupt_inhibit_one_cycle = false;
+        if cpu.interrupt_inhibit_cycles > 0 {
+            cpu.interrupt_inhibit_cycles -= 1;
         } else {
             let interrupt_pc = if !cpu.mem_wb.entries.is_empty() {
                 cpu.mem_wb.entries[0].pc

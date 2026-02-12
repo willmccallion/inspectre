@@ -18,6 +18,7 @@ Example:
     env = Environment(binary="bench.bin", config=config)
     result = run_experiment(env)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ BranchPredictorT = Literal["Static", "GShare", "Perceptron", "TAGE", "Tournament
 @dataclass
 class GeneralConfig:
     """General simulation settings (tracing, start PC, direct mode, initial stack pointer)."""
+
     trace_instructions: bool = False
     start_pc: int = 0x8000_0000
     direct_mode: bool = True
@@ -51,6 +53,7 @@ class GeneralConfig:
 @dataclass
 class SystemConfig:
     """System memory map and bus parameters."""
+
     ram_base: int = 0x8000_0000
     uart_base: int = 0x1000_0000
     disk_base: int = 0x9000_0000
@@ -80,6 +83,7 @@ class SystemConfig:
 @dataclass
 class MemoryConfig:
     """Main memory configuration (RAM size, controller type, DRAM timing, TLB size)."""
+
     ram_size: int = 0x1000_0000
     controller: MemoryControllerT = "Simple"
     t_cas: int = 14
@@ -103,6 +107,7 @@ class MemoryConfig:
 @dataclass
 class CacheConfig:
     """Single cache level (L1-I, L1-D, L2, L3)."""
+
     enabled: bool = False
     size_bytes: int = 4096
     line_bytes: int = 64
@@ -130,6 +135,7 @@ class CacheConfig:
 @dataclass
 class TageConfig:
     """TAGE branch predictor parameters."""
+
     num_banks: int = 4
     table_size: int = 2048
     loop_table_size: int = 256
@@ -151,6 +157,7 @@ class TageConfig:
 @dataclass
 class PerceptronConfig:
     """Perceptron branch predictor parameters."""
+
     history_length: int = 32
     table_bits: int = 10
 
@@ -164,6 +171,7 @@ class PerceptronConfig:
 @dataclass
 class TournamentConfig:
     """Tournament branch predictor parameters."""
+
     global_size_bits: int = 12
     local_hist_bits: int = 10
     local_pred_bits: int = 10
@@ -179,6 +187,7 @@ class TournamentConfig:
 @dataclass
 class PipelineConfig:
     """Pipeline and branch predictor configuration."""
+
     width: int = 1
     branch_predictor: BranchPredictorT = "Static"
     btb_size: int = 256
@@ -202,6 +211,7 @@ class PipelineConfig:
 @dataclass
 class CacheHierarchyConfig:
     """L1-I, L1-D, L2, L3 cache configuration."""
+
     l1_i: CacheConfig = field(default_factory=CacheConfig)
     l1_d: CacheConfig = field(default_factory=CacheConfig)
     l2: CacheConfig = field(default_factory=CacheConfig)

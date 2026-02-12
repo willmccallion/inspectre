@@ -8,6 +8,7 @@ This package provides a Python-first interface to the cycle-accurate RISC-V simu
 4. **Statistics:** `StatsObject` for performance metrics and sectioned output.
 5. **Rust bindings:** `PySystem`, `CPU` (PyCpu), and `Memory` from the riscv_emulator extension.
 """
+
 import riscv_emulator
 from .config import SimConfig, config_to_dict
 from .objects import System, P550Cpu, simulate, get_default_config, Simulator
@@ -19,6 +20,7 @@ CPU = riscv_emulator.PyCpu
 Memory = riscv_emulator.PyMemory
 
 import sys
+
 sys.modules[f"{__name__}._core"] = riscv_emulator
 
 __all__ = [
