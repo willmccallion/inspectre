@@ -801,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "rvsim-bindings"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "pyo3",
  "rvsim-core",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "rvsim-core"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "env_logger",
  "libc",

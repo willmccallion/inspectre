@@ -123,7 +123,7 @@ fmt:
 	@printf "$(GREEN)Formatting Rust code…$(RESET)\n"
 	$(CARGO) fmt --all
 	@printf "$(GREEN)Formatting Python code…$(RESET)\n"
-	$(PYTHON) -m ruff format rvsim/ *.py
+	$(PYTHON) -m ruff format rvsim/*.py
 	@printf "$(GREEN)Formatting C code…$(RESET)\n"
 	find examples/ software/libc/ -name '*.c' -o -name '*.h' | xargs clang-format -i
 
@@ -131,7 +131,7 @@ fmt-check:
 	@printf "$(GREEN)Checking Rust formatting…$(RESET)\n"
 	$(CARGO) fmt --all -- --check
 	@printf "$(GREEN)Checking Python formatting…$(RESET)\n"
-	$(PYTHON) -m ruff format --check rvsim/ *.py
+	$(PYTHON) -m ruff format --check rvsim/*.py
 	@printf "$(GREEN)Checking C formatting…$(RESET)\n"
 	find examples/ software/libc/ -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
 

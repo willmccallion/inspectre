@@ -8,6 +8,8 @@
 //! 4. **Forwarding:** Provides the most recent result for any register from in-flight instructions.
 //! 5. **Flush:** Squashes speculative entries after a misprediction or trap.
 
+use std::collections::HashMap;
+
 use crate::common::error::{ExceptionStage, Trap};
 use crate::core::pipeline::signals::ControlSignals;
 
@@ -85,6 +87,8 @@ pub struct Rob {
     count: usize,
     /// Monotonically increasing tag counter.
     next_tag: u32,
+    /// O(1) tag → slot index lookup.
+    tag_index: HashMap<RobTag, usize>,
 }
 
 impl Rob {
@@ -98,6 +102,7 @@ impl Rob {
             tail: 0,
             count: 0,
             next_tag: 1,
+            tag_index: HashMap::with_capacity(capacity),
         }
     }
 
@@ -169,6 +174,7 @@ impl Rob {
             valid: true,
         };
 
+        self.tag_index.insert(tag, self.tail);
         self.tail = (self.tail + 1) % self.entries.len();
         self.count += 1;
         Some(tag)
@@ -179,11 +185,11 @@ impl Rob {
     /// Does nothing if the entry is already Faulted — a fault set during
     /// execute must not be overwritten by a later writeback completion.
     pub fn complete(&mut self, tag: RobTag, result: u64) {
-        if let Some(entry) = self.find_entry_mut(tag) {
-            if entry.state != RobState::Faulted {
-                entry.state = RobState::Completed;
-                entry.result = result;
-            }
+        if let Some(entry) = self.find_entry_mut(tag)
+            && entry.state != RobState::Faulted
+        {
+            entry.state = RobState::Completed;
+            entry.result = result;
         }
     }
 
@@ -242,6 +248,7 @@ impl Rob {
         }
 
         let committed = self.entries[self.head].clone();
+        self.tag_index.remove(&committed.tag);
         self.entries[self.head].valid = false;
         self.head = (self.head + 1) % self.entries.len();
         self.count -= 1;
@@ -253,6 +260,7 @@ impl Rob {
         for entry in &mut self.entries {
             entry.valid = false;
         }
+        self.tag_index.clear();
         self.head = 0;
         self.tail = 0;
         self.count = 0;
@@ -284,6 +292,7 @@ impl Rob {
         let keep_idx = (idx + 1) % self.entries.len();
         let mut remove_idx = keep_idx;
         while remove_idx != self.tail {
+            self.tag_index.remove(&self.entries[remove_idx].tag);
             self.entries[remove_idx].valid = false;
             remove_idx = (remove_idx + 1) % self.entries.len();
         }
@@ -377,18 +386,9 @@ impl Rob {
 
     /// Finds a mutable reference to the entry with the given tag.
     fn find_entry_mut(&mut self, tag: RobTag) -> Option<&mut RobEntry> {
-        if self.count == 0 {
-            return None;
-        }
-
-        let mut idx = self.head;
-        for _ in 0..self.count {
-            if self.entries[idx].valid && self.entries[idx].tag == tag {
-                return Some(&mut self.entries[idx]);
-            }
-            idx = (idx + 1) % self.entries.len();
-        }
-        None
+        let idx = *self.tag_index.get(&tag)?;
+        let entry = &mut self.entries[idx];
+        if entry.valid { Some(entry) } else { None }
     }
 
     /// Iterate over all valid entries from head to tail, calling `f` on each.
@@ -407,18 +407,9 @@ impl Rob {
 
     /// Finds a reference to the entry with the given tag.
     pub fn find_entry(&self, tag: RobTag) -> Option<&RobEntry> {
-        if self.count == 0 {
-            return None;
-        }
-
-        let mut idx = self.head;
-        for _ in 0..self.count {
-            if self.entries[idx].valid && self.entries[idx].tag == tag {
-                return Some(&self.entries[idx]);
-            }
-            idx = (idx + 1) % self.entries.len();
-        }
-        None
+        let idx = *self.tag_index.get(&tag)?;
+        let entry = &self.entries[idx];
+        if entry.valid { Some(entry) } else { None }
     }
 }
 

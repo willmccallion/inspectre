@@ -16,6 +16,7 @@ from .config import Config, _config_to_dict
 from .stats import Stats, _compare_flat, _compare_matrix
 
 from ._core import PySystem, PyCpu
+from .objects import Cpu
 
 
 @dataclass
@@ -40,7 +41,9 @@ class Environment:
             return _config_to_dict(self.config)
         return Config().to_dict()
 
-    def run(self, quiet: bool = True, limit: Optional[int] = None) -> Result:
+    def run(
+        self, quiet: bool = True, limit: Optional[int] = None, progress: int = 0
+    ) -> Result:
         """
         Run the simulation and return a :class:`Result`.
 
@@ -60,14 +63,13 @@ class Environment:
             sys_obj = PySystem(config, self.disk)
             with open(self.binary, "rb") as f:
                 sys_obj.load_binary(f.read(), self.load_addr)
-            cpu = PyCpu(sys_obj, config)
-            exit_code = cpu.run(limit=limit)
+            cpu = Cpu(PyCpu(sys_obj, config))
+            exit_code = cpu.run(limit=limit, progress=progress)
             if exit_code is None and limit is None:
                 raise RuntimeError(
                     "CPU run completed without exit code (should not happen without limit)"
                 )
-            stats_obj = cpu.get_stats()
-            stats = stats_obj.to_dict()
+            stats = cpu.stats
         except Exception as e:
             err_msg = str(e)
             if not quiet:
@@ -80,7 +82,7 @@ class Environment:
             )
         wall = time.perf_counter() - t0
         return Result(
-            exit_code=int(exit_code),
+            exit_code=int(exit_code) if exit_code is not None else -1,
             stats=Stats(stats),
             wall_time_sec=wall,
             binary=self.binary,

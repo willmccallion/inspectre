@@ -53,12 +53,18 @@ impl<E: ExecutionEngine> Frontend<E> {
         rename::rename_stage(cpu, &mut self.decode_rename, engine, rename_output);
 
         // Decode: fetch2_decode -> decode_rename
-        decode::decode_stage(cpu, &mut self.fetch2_decode, &mut self.decode_rename);
+        // Only run decode when rename has consumed the previous output;
+        // otherwise decode would keep appending to decode_rename while
+        // rename can't drain it (e.g. ROB full), causing unbounded growth
+        // and O(n²) behaviour as rename re-scans the growing vec each cycle.
+        if self.decode_rename.is_empty() {
+            decode::decode_stage(cpu, &mut self.fetch2_decode, &mut self.decode_rename);
+        }
 
-        // Fetch2: fetch1_fetch2 -> fetch2_decode (gated by fetch2_stall)
+        // Fetch2: fetch1_fetch2 -> fetch2_decode (gated by fetch2_stall or backpressure)
         if self.fetch2_stall > 0 {
             self.fetch2_stall -= 1;
-        } else {
+        } else if self.fetch2_decode.is_empty() {
             fetch2::fetch2_stage(
                 cpu,
                 &mut self.fetch1_fetch2,
