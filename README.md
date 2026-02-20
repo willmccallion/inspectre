@@ -87,17 +87,17 @@ Modular scripts for design-space exploration in `scripts/analysis/`:
 | `stall_breakdown.py` | Memory/control/data stall cycles |
 
 ```bash
-.venv/bin/python scripts/analysis/width_scaling.py --bp TAGE --widths 1 2 4
-.venv/bin/python scripts/analysis/branch_predict.py --width 2 --programs maze qsort
-.venv/bin/python scripts/analysis/cache_sweep.py --sizes 4KB 16KB 64KB
+rvsim scripts/analysis/width_scaling.py --bp TAGE --widths 1 2 4
+rvsim scripts/analysis/branch_predict.py --width 2 --programs maze qsort
+rvsim scripts/analysis/cache_sweep.py --sizes 4KB 16KB 64KB
 ```
 
 Machine model benchmarks in `scripts/benchmarks/`:
 
 ```bash
-.venv/bin/python scripts/benchmarks/p550/run.py
-.venv/bin/python scripts/benchmarks/m1/run.py
-.venv/bin/python scripts/benchmarks/tests/compare_p550_m1.py
+rvsim scripts/benchmarks/p550/run.py
+rvsim scripts/benchmarks/m1/run.py
+rvsim scripts/benchmarks/tests/compare_p550_m1.py
 ```
 
 ## Project Structure
