@@ -1,144 +1,155 @@
-# RISC-V 64-bit System Simulator
+# rvsim
 
-A cycle-accurate system simulator for the RISC-V 64-bit architecture (RV64IMAFD). Features a 5-stage pipelined CPU, comprehensive memory hierarchy, and can boot Linux (experimental).
+A cycle-accurate RISC-V 64-bit system simulator (RV64IMAFDC) written in Rust with Python bindings. Features a 10-stage superscalar pipeline, multi-level cache hierarchy, branch prediction, and virtual memory. Can boot Linux (experimental).
 
-## Technologies Used
+## Pipeline
 
-* **Languages:** Rust (Simulator), C (Libc/Software), RISC-V Assembly, Python (Analysis)
-* **Concepts:** Pipelining, Virtual Memory (SV39), Cache Coherence, Branch Prediction, OS Development
-* **Tools:** Make, GCC Cross-Compiler, Cargo
+10-stage in-order pipeline with configurable superscalar width:
 
-## Key Implementation Details
+```
+Fetch1 → Fetch2 → Decode → Rename → Issue → Execute → Memory1 → Memory2 → Writeback → Commit
+```
 
-### CPU Core (Rust)
+- **Superscalar:** configurable width (1, 2, 4+)
+- **Reorder buffer** for in-order commit with tag-based register scoreboard
+- **Store buffer** with store-to-load forwarding
+- **Branch prediction:** Static, GShare, Tournament, Perceptron, TAGE
 
-* **5-Stage Pipeline:** Implements Fetch, Decode, Execute, Memory, and Writeback stages with full data forwarding and hazard detection.
-* **Branch Prediction:** Multiple swappable predictors including Static, GShare, Tournament, Perceptron, and TAGE (Tagged Geometric History).
-* **Floating Point:** Support for single and double-precision floating-point arithmetic (F/D extensions).
+## Memory System
 
-### Memory System
+- **MMU:** SV39 virtual addressing with separate iTLB and dTLB
+- **Cache hierarchy:** configurable L1i, L1d, L2, L3 with LRU/PLRU/FIFO/Random replacement
+- **Prefetchers:** next-line, stride, stream, tagged
+- **DRAM controller:** row-buffer aware timing (CAS/RAS/precharge)
 
-* **Memory Management Unit (MMU):** Implements SV39 virtual addressing with translation lookaside buffers (iTLB and dTLB).
-* **Cache Hierarchy:** Configurable L1, L2, and L3 caches supporting LRU, PLRU, and Random replacement policies.
-* **DRAM Controller:** Simulates timing constraints including row-buffer conflicts, CAS/RAS latency, and precharge penalties.
+## ISA Support
 
-### Example Programs (C & Assembly)
+RV64IMAFDC — base integer, multiply/divide, atomics, single/double float, compressed instructions. Privileged ISA with M/S/U modes, traps, CSRs, and CLINT timer.
 
-* **Custom Libc:** A minimal standard library written from scratch (includes `printf`, `malloc`, string manipulation).
-* **Benchmarks:** Complete programs including chess engine, raytracer, quicksort, and performance microbenchmarks.
-* **User Programs:** Various test applications (Game of Life, Mandelbrot, 2048, etc.).
+## Quick Start
 
-### Performance Analysis
+**Install:**
+```bash
+pip install rvsim
+```
 
-* **Automated Benchmarking:** Python scripts to sweep hardware parameters (e.g., cache size vs. IPC) and visualize bottlenecks.
-* **Design Space Exploration:** Hardware configuration comparison and performance analysis tools.
+**Run a program:**
+```python
+from rvsim import Config, Environment
+
+result = Environment(binary="software/bin/programs/mandelbrot.bin").run()
+print(result.stats.query("ipc|branch"))
+```
+
+**From the command line:**
+```bash
+make build
+rvsim -f software/bin/programs/qsort.bin
+```
+
+## Python API
+
+```python
+from rvsim import Config, Cache, BranchPredictor, Environment, Stats
+
+config = Config(
+    width=4,
+    branch_predictor=BranchPredictor.TAGE(),
+    l1d=Cache("64KB", ways=8),
+    l2=Cache("512KB", ways=16, latency=10),
+)
+
+result = Environment(binary="software/bin/programs/qsort.bin", config=config).run()
+
+# Query specific stats
+print(result.stats.query("branch"))
+print(result.stats.query("miss"))
+
+# Compare configurations
+rows = {}
+for w in [1, 2, 4]:
+    cfg = Config(width=w, uart_quiet=True)
+    r = Environment(binary="software/bin/programs/qsort.bin", config=cfg).run()
+    rows[f"w{w}"] = r.stats.query("ipc|cycles")
+print(Stats.tabulate(rows, title="Width Scaling"))
+```
+
+## Analysis Scripts
+
+Modular scripts for design-space exploration in `scripts/analysis/`:
+
+| Script | Purpose |
+|--------|---------|
+| `width_scaling.py` | IPC vs pipeline width |
+| `branch_predict.py` | Compare branch predictor accuracy |
+| `cache_sweep.py` | L1 D-cache size vs miss rate |
+| `inst_mix.py` | Instruction class breakdown |
+| `stall_breakdown.py` | Memory/control/data stall cycles |
+
+```bash
+.venv/bin/python scripts/analysis/width_scaling.py --bp TAGE --widths 1 2 4
+.venv/bin/python scripts/analysis/branch_predict.py --width 2 --programs maze qsort
+.venv/bin/python scripts/analysis/cache_sweep.py --sizes 4KB 16KB 64KB
+```
+
+Machine model benchmarks in `scripts/benchmarks/`:
+
+```bash
+.venv/bin/python scripts/benchmarks/p550/run.py
+.venv/bin/python scripts/benchmarks/m1/run.py
+.venv/bin/python scripts/benchmarks/tests/compare_p550_m1.py
+```
 
 ## Project Structure
 
 ```
 rvsim/
-├── crates/              # Rust workspace
-│   ├── hardware/        # CPU simulator core
+├── crates/
+│   ├── hardware/        # Simulator core (Rust)
+│   │   └── src/
+│   │       ├── core/    # CPU, pipeline, execution units
+│   │       ├── isa/     # RV64IMAFDC decode and execution
+│   │       ├── sim/     # Simulator driver, binary loader
+│   │       └── soc/     # Bus, UART, PLIC, VirtIO, CLINT
 │   └── bindings/        # Python bindings (PyO3)
-├── rvsim/               # Python package for scripting
-├── software/            # System software
-│   ├── libc/            # Custom C standard library
+├── rvsim/               # Python package
+├── examples/
+│   ├── programs/        # C and assembly source
+│   └── benchmarks/      # Microbenchmarks and synthetic workloads
+├── software/
+│   ├── libc/            # Custom minimal C standard library
 │   └── linux/           # Linux boot configuration
-├── examples/            # Example programs
-│   ├── benchmarks/      # Performance benchmarks
-│   └── programs/        # User applications
-├── scripts/             # Analysis and utilities
-│   ├── benchmarks/      # Performance analysis scripts
-│   └── setup/           # Installation helpers
-└── docs/                # Documentation
-```
-
-## Installation
-
-**Python bindings** (via pip):
-```bash
-pip install rvsim
+├── scripts/
+│   ├── analysis/        # Design-space exploration scripts
+│   ├── benchmarks/      # Machine model configs (P550, M1)
+│   └── setup/           # Linux build helpers
+└── docs/                # Architecture and API documentation
 ```
 
 ## Build from Source
 
 **Requirements:**
-- Rust toolchain (1.70+)
-- `riscv64-unknown-elf-gcc` cross-compiler
-- Python 3.10+ with maturin (for Python bindings)
-
-### Quick Start
-
-**Build everything:**
-```bash
-make build
-```
-
-**Run a benchmark:**
-```bash
-rvsim -f software/bin/benchmarks/qsort.bin
-```
-
-**Run a Python script:**
-```bash
-rvsim --script scripts/benchmarks/tests/smoke_test.py
-```
-
-### Available Make Targets
+- Rust (2024 edition)
+- Python 3.10+ with maturin
+- `riscv64-unknown-elf-gcc` cross-compiler (for building example programs)
 
 ```bash
-make help           # Show all available targets
-make python         # Build and install Python bindings (editable)
+make build          # Build Python bindings (editable)
 make software       # Build libc and example programs
 make test           # Run Rust tests
 make lint           # Format check + clippy
-make run-example    # Quick test (quicksort benchmark)
 make clean          # Remove all build artifacts
 ```
 
-### Python Scripting
-
-The simulator supports Python scripting for hardware configuration and performance analysis:
-
-```python
-from rvsim import SimConfig, Simulator
-
-# Configure a machine model
-config = SimConfig.default()
-config.pipeline.width = 4
-config.pipeline.branch_predictor = "TAGE"
-config.cache.l1_i.enabled = True
-config.cache.l1_i.size_bytes = 65536
-
-# Run a binary
-Simulator().with_config(config).binary("software/bin/benchmarks/qsort.bin").run()
-```
-
-See **[docs/](docs/README.md)** for full API documentation and architecture details.
-
-## Documentation
-
-- **[Getting Started](docs/getting_started/README.md)** - Installation and quickstart guide
-- **[Architecture](docs/architecture/README.md)** - CPU pipeline, memory system, ISA support
-- **[API Reference](docs/api/README.md)** - Rust and Python API documentation
-- **[Scripts](scripts/README.md)** - Performance analysis tools
-
 ## Linux Boot (Experimental)
 
-⚠️ **Experimental Feature** — The simulator can boot Linux, though full boot is still in progress:
+The simulator can boot Linux through OpenSBI. Full boot is still in progress.
 
 ```bash
-make linux          # Download and build Linux (takes time)
-make run-linux      # Attempt to boot Linux
+make linux          # Download and build Linux via Buildroot
+make run-linux      # Boot Linux
 ```
 
 ## License
 
-Licensed under either of the following, at your option:
-
-- [MIT License](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this project shall be dual-licensed as above, without any
-additional terms or conditions.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
