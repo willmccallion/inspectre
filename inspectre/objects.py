@@ -368,6 +368,15 @@ class Simulator:
         sys_obj = System(ram_size=ram_size)
         sys_obj.instantiate(disk_image=self._disk_path, config=self._config_obj)
 
+        # Load binary BEFORE creating CPU, because PyCpu consumes the system.
+        # Kernel loading happens after CPU creation via cpu.load_kernel().
+        if not self._is_kernel_mode and self._binary_path:
+            print(f"[Simulator] Loading binary: {self._binary_path}")
+            with open(self._binary_path, "rb") as f:
+                sys_obj.rust_system.load_binary(f.read(), 0x80000000)
+        elif not self._is_kernel_mode and not self._kernel_path:
+            print("Warning: No binary or kernel specified.")
+
         cpu_obj = Cpu(sys_obj, config=self._config_obj)
         rust_cpu = cpu_obj.create()
 
@@ -380,13 +389,6 @@ class Simulator:
             if self._dtb_path:
                 print(f"[Simulator] Loading DTB: {self._dtb_path}")
             cpu_obj.load_kernel(self._kernel_path, self._dtb_path)
-        elif self._binary_path:
-            print(f"[Simulator] Loading binary: {self._binary_path}")
-            with open(self._binary_path, "rb") as f:
-                sys_obj.rust_system.load_binary(f.read(), 0x80000000)
-        else:
-            if not self._kernel_path:
-                print("Warning: No binary or kernel specified.")
 
         if self._is_kernel_mode:
             print("Starting simulation (progress every 5M cycles; UART = stderr)...")

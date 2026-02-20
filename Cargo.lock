@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "inspectre"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "env_logger",
  "libc",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "inspectre-bindings"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "inspectre",
  "pyo3",
