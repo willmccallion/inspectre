@@ -111,4 +111,16 @@ impl BranchPredictor for GSharePredictor {
     fn on_return(&mut self) {
         self.ras.pop();
     }
+
+    fn speculate(&mut self, _pc: u64, taken: bool) {
+        self.ghr = ((self.ghr << 1) | if taken { 1 } else { 0 }) & ((TABLE_SIZE as u64) - 1);
+    }
+
+    fn snapshot_history(&self) -> u64 {
+        self.ghr
+    }
+
+    fn repair_history(&mut self, ghr: u64) {
+        self.ghr = ghr;
+    }
 }

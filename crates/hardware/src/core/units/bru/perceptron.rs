@@ -151,4 +151,17 @@ impl BranchPredictor for PerceptronPredictor {
     fn on_return(&mut self) {
         self.ras.pop();
     }
+
+    fn speculate(&mut self, _pc: u64, taken: bool) {
+        self.ghr =
+            ((self.ghr << 1) | if taken { 1 } else { 0 }) & ((1u64 << self.history_length) - 1);
+    }
+
+    fn snapshot_history(&self) -> u64 {
+        self.ghr
+    }
+
+    fn repair_history(&mut self, ghr: u64) {
+        self.ghr = ghr;
+    }
 }

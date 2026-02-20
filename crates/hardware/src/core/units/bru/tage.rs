@@ -29,23 +29,6 @@ struct TageEntry {
     u: u8,
 }
 
-/// Loop Predictor Entry for handling loop exit branches.
-#[derive(Clone, Default)]
-struct LoopEntry {
-    /// Tag for matching the branch PC.
-    tag: u16,
-    /// Confidence counter.
-    conf: u8,
-    /// Current iteration count.
-    count: u16,
-    /// Iteration limit detected.
-    limit: u16,
-    /// Age/Usefulness counter.
-    age: u8,
-    /// Predicted direction.
-    dir: bool,
-}
-
 /// TAGE Predictor structure.
 pub struct TagePredictor {
     /// Branch Target Buffer.
@@ -54,8 +37,6 @@ pub struct TagePredictor {
     ras: Ras,
     /// Global History Register.
     ghr: u64,
-    /// Path History Register.
-    phr: u64,
 
     /// Base bimodal predictor table.
     base: Vec<i8>,
@@ -68,11 +49,6 @@ pub struct TagePredictor {
     tag_widths: Vec<usize>,
     /// Mask for indexing the tables.
     table_mask: usize,
-
-    /// Loop predictor table.
-    loops: Vec<LoopEntry>,
-    /// Mask for indexing the loop table.
-    loop_mask: usize,
 
     /// Index of the bank providing the current prediction.
     provider_bank: usize,
@@ -91,10 +67,6 @@ impl TagePredictor {
         assert!(
             config.table_size.is_power_of_two(),
             "TAGE table size must be power of 2"
-        );
-        assert!(
-            config.loop_table_size.is_power_of_two(),
-            "TAGE loop table size must be power of 2"
         );
 
         let (hist_lengths, tag_widths, num_banks) = if !config.history_lengths.is_empty() {
@@ -127,15 +99,11 @@ impl TagePredictor {
             btb: Btb::new(btb_size),
             ras: Ras::new(ras_size),
             ghr: 0,
-            phr: 0,
             base: vec![0; config.table_size],
             banks,
             hist_lengths,
             tag_widths,
             table_mask: config.table_size - 1,
-
-            loops: vec![LoopEntry::default(); config.loop_table_size],
-            loop_mask: config.loop_table_size - 1,
 
             provider_bank: 0,
             alt_bank: 0,
@@ -144,63 +112,58 @@ impl TagePredictor {
         }
     }
 
-    /// Calculates the index for a specific bank using PC, GHR, and PHR.
-    fn index(&self, pc: u64, bank: usize) -> usize {
-        let len = self.hist_lengths[bank];
-        let mask = if len >= 64 {
-            u64::MAX
-        } else {
-            (1u64 << len) - 1
-        };
+    /// Folds a wide value into `bits` width by XOR-compressing.
+    fn fold(val: u64, bits: usize) -> u64 {
+        if bits == 0 || bits >= 64 {
+            return val;
+        }
+        let mask = (1u64 << bits) - 1;
+        let mut r = 0u64;
+        let mut v = val;
+        while v != 0 {
+            r ^= v & mask;
+            v >>= bits;
+        }
+        r
+    }
 
-        let h = self.ghr & mask;
-        let ph = self.phr & mask;
-        ((pc ^ h ^ (ph << 1)) as usize) & self.table_mask
+    /// Masks the GHR to the history length for a given bank.
+    fn bank_history(&self, bank: usize) -> u64 {
+        let len = self.hist_lengths[bank];
+        if len >= 64 {
+            self.ghr
+        } else {
+            self.ghr & ((1u64 << len) - 1)
+        }
+    }
+
+    /// Calculates the index for a specific bank using PC and GHR.
+    fn index(&self, pc: u64, bank: usize) -> usize {
+        let table_bits = (self.table_mask + 1).trailing_zeros() as usize;
+        let h = self.bank_history(bank);
+        let pc_hash = pc >> 2;
+        let h_folded = Self::fold(h, table_bits);
+        let h_folded2 = Self::fold(h, table_bits.wrapping_sub(1).max(1));
+        (pc_hash as usize ^ h_folded as usize ^ h_folded2 as usize) & self.table_mask
     }
 
     /// Calculates the tag for a specific bank using PC and GHR.
     fn tag(&self, pc: u64, bank: usize) -> u16 {
-        let len = self.hist_lengths[bank];
         let width = self.tag_widths[bank];
-
-        let mask = if len >= 64 {
-            u64::MAX
-        } else {
-            (1u64 << len) - 1
-        };
-
-        let h = self.ghr & mask;
-        let tag = pc ^ (h >> 3);
-        (tag as u16) & ((1 << width) - 1)
-    }
-
-    /// Checks the loop predictor for a matching entry.
-    fn get_loop_pred(&self, pc: u64) -> Option<bool> {
-        let idx = (pc as usize) & self.loop_mask;
-        let e = &self.loops[idx];
-        let tag = ((pc >> 8) & 0xFFFF) as u16;
-
-        if e.tag == tag && e.conf == 3 {
-            if e.count < e.limit {
-                return Some(e.dir);
-            } else {
-                return Some(!e.dir);
-            }
-        }
-        None
+        let h = self.bank_history(bank);
+        let pc_hash = pc >> 2;
+        let h_folded = Self::fold(h, width);
+        let h_folded2 = Self::fold(h, width.wrapping_sub(1).max(1));
+        ((pc_hash as usize ^ h_folded as usize ^ h_folded2 as usize) & ((1 << width) - 1)) as u16
     }
 }
 
 impl BranchPredictor for TagePredictor {
     /// Predicts branch direction and target.
     ///
-    /// Checks the loop predictor first, then searches the tagged banks for the
-    /// longest history match (provider). If no match is found, uses the base predictor.
+    /// Searches the tagged banks for the longest history match (provider).
+    /// If no match is found, uses the base predictor.
     fn predict_branch(&self, pc: u64) -> (bool, Option<u64>) {
-        if let Some(loop_pred) = self.get_loop_pred(pc) {
-            return (loop_pred, self.btb.lookup(pc));
-        }
-
         let mut provider = 0;
         let num_banks = self.banks.len();
 
@@ -226,9 +189,9 @@ impl BranchPredictor for TagePredictor {
 
     /// Updates the predictor state.
     ///
-    /// Updates the loop predictor, the provider bank, and potentially allocates
-    /// a new entry in a bank with longer history on mispredictions. Also handles
-    /// periodic resetting of useful bits.
+    /// Updates the provider bank, and potentially allocates a new entry in a
+    /// bank with longer history on mispredictions. Also handles periodic
+    /// resetting of useful bits.
     fn update_branch(&mut self, pc: u64, taken: bool, target: Option<u64>) {
         self.clock_counter += 1;
         if self.clock_counter >= self.reset_interval {
@@ -276,38 +239,6 @@ impl BranchPredictor for TagePredictor {
         };
 
         let mispredicted = pred_taken != taken;
-
-        let l_idx = (pc as usize) & self.loop_mask;
-        let l_tag = ((pc >> 8) & 0xFFFF) as u16;
-        let loop_entry = &mut self.loops[l_idx];
-
-        if loop_entry.tag == l_tag {
-            loop_entry.age = loop_entry.age.saturating_add(1);
-
-            if taken == loop_entry.dir {
-                loop_entry.count += 1;
-            } else {
-                if loop_entry.count == loop_entry.limit {
-                    if loop_entry.conf < 3 {
-                        loop_entry.conf += 1;
-                    }
-                } else {
-                    loop_entry.limit = loop_entry.count;
-                    loop_entry.conf = 0;
-                    loop_entry.age = 0;
-                }
-                loop_entry.count = 0;
-            }
-        } else if loop_entry.age == 0 {
-            loop_entry.tag = l_tag;
-            loop_entry.limit = 0;
-            loop_entry.count = 0;
-            loop_entry.conf = 0;
-            loop_entry.age = 255;
-            loop_entry.dir = taken;
-        } else {
-            loop_entry.age -= 1;
-        }
 
         if self.provider_bank > 0 {
             let bank_idx = self.provider_bank - 1;
@@ -372,7 +303,6 @@ impl BranchPredictor for TagePredictor {
         }
 
         self.ghr = (self.ghr << 1) | (if taken { 1 } else { 0 });
-        self.phr = (self.phr << 1) | (pc & 1);
 
         if let Some(tgt) = target {
             self.btb.update(pc, tgt);
@@ -398,5 +328,17 @@ impl BranchPredictor for TagePredictor {
     /// Handles a function return by popping from the RAS.
     fn on_return(&mut self) {
         self.ras.pop();
+    }
+
+    fn speculate(&mut self, _pc: u64, taken: bool) {
+        self.ghr = (self.ghr << 1) | (if taken { 1 } else { 0 });
+    }
+
+    fn snapshot_history(&self) -> u64 {
+        self.ghr
+    }
+
+    fn repair_history(&mut self, ghr: u64) {
+        self.ghr = ghr;
     }
 }

@@ -53,7 +53,11 @@ impl System {
         let mem = Memory::new(ram_buffer.clone(), ram_base);
 
         let uart_base = config.system.uart_base;
-        let uart = Uart::new(uart_base, config.system.uart_to_stderr);
+        let uart = Uart::new(
+            uart_base,
+            config.system.uart_to_stderr,
+            config.system.uart_quiet,
+        );
 
         let clint_addr = config.system.clint_base;
         let clint = Clint::new(clint_addr, config.system.clint_divider);

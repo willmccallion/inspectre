@@ -97,6 +97,8 @@ pub struct Uart {
     tx_buffer: Vec<u8>,
     /// When true, output goes to stderr (for visibility when run from Python).
     to_stderr: bool,
+    /// When true, all output is suppressed (for scripting / benchmarks).
+    quiet: bool,
     /// State machine index for panic detection.
     panic_match_state: usize,
     /// Flag indicating if a kernel panic string was detected.
@@ -112,7 +114,8 @@ impl Uart {
     ///
     /// * `base_addr` - The base physical address of the UART device.
     /// * `to_stderr` - When true, write output to stderr instead of stdout (for Python API).
-    pub fn new(base_addr: u64, to_stderr: bool) -> Self {
+    /// * `quiet` - When true, all output is discarded (for scripting / benchmarks).
+    pub fn new(base_addr: u64, to_stderr: bool, quiet: bool) -> Self {
         let (tx, rx) = channel();
 
         thread::spawn(move || {
@@ -137,6 +140,7 @@ impl Uart {
             thre_ip: true,
             tx_buffer: Vec::new(),
             to_stderr,
+            quiet,
             panic_match_state: 0,
             panic_detected: false,
         }
@@ -165,16 +169,18 @@ impl Uart {
         IIR_NO_INTERRUPT
     }
 
-    /// Flushes the transmit buffer to stdout or stderr.
+    /// Flushes the transmit buffer to stdout or stderr (or discards if quiet).
     fn flush_buffer(&mut self) {
         if !self.tx_buffer.is_empty() {
-            let output: String = self.tx_buffer.iter().map(|&b| b as char).collect();
-            if self.to_stderr {
-                eprint!("{}", output);
-                io::stderr().flush().ok();
-            } else {
-                print!("{}", output);
-                io::stdout().flush().ok();
+            if !self.quiet {
+                let output: String = self.tx_buffer.iter().map(|&b| b as char).collect();
+                if self.to_stderr {
+                    eprint!("{}", output);
+                    io::stderr().flush().ok();
+                } else {
+                    print!("{}", output);
+                    io::stdout().flush().ok();
+                }
             }
             self.tx_buffer.clear();
         }
@@ -250,7 +256,10 @@ impl Uart {
     /// Reads Line Status Register (LSR).
     ///
     /// Indicates if data is ready or if the transmitter is empty.
-    fn read_lsr(&self) -> u8 {
+    /// Also flushes the TX buffer, since a guest polling for input has
+    /// likely finished its output (e.g. a prompt without a trailing newline).
+    fn read_lsr(&mut self) -> u8 {
+        self.flush_buffer();
         let mut lsr = LSR_DEFAULT;
         if !self.rx_queue.is_empty() {
             lsr |= LSR_DATA_READY;

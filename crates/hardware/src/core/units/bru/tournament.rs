@@ -175,4 +175,16 @@ impl BranchPredictor for TournamentPredictor {
     fn on_return(&mut self) {
         self.ras.pop();
     }
+
+    fn speculate(&mut self, _pc: u64, taken: bool) {
+        self.ghr = ((self.ghr << 1) | (taken as u64)) & (self.global_mask as u64);
+    }
+
+    fn snapshot_history(&self) -> u64 {
+        self.ghr
+    }
+
+    fn repair_history(&mut self, ghr: u64) {
+        self.ghr = ghr;
+    }
 }

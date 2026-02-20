@@ -78,6 +78,7 @@ class Config:
         bus_latency: int = 4,
         clint_divider: int = 10,
         uart_to_stderr: bool = False,
+        uart_quiet: bool = False,
     ):
         # Pipeline
         self.width = width
@@ -118,6 +119,7 @@ class Config:
         self.bus_latency = bus_latency
         self.clint_divider = clint_divider
         self.uart_to_stderr = uart_to_stderr
+        self.uart_quiet = uart_quiet
 
     def to_dict(self) -> Dict[str, Any]:
         """Produce the nested dict expected by the Rust backend."""
@@ -142,6 +144,7 @@ class Config:
             "bus_latency": self.bus_latency,
             "clint_divider": self.clint_divider,
             "uart_to_stderr": self.uart_to_stderr,
+            "uart_quiet": self.uart_quiet,
         }
 
         # Memory — merge controller-specific params

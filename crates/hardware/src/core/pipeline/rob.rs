@@ -175,10 +175,15 @@ impl Rob {
     }
 
     /// Marks an entry as Completed with its result value.
+    ///
+    /// Does nothing if the entry is already Faulted — a fault set during
+    /// execute must not be overwritten by a later writeback completion.
     pub fn complete(&mut self, tag: RobTag, result: u64) {
         if let Some(entry) = self.find_entry_mut(tag) {
-            entry.state = RobState::Completed;
-            entry.result = result;
+            if entry.state != RobState::Faulted {
+                entry.state = RobState::Completed;
+                entry.result = result;
+            }
         }
     }
 

@@ -465,6 +465,10 @@ pub struct SystemConfig {
     /// When true, UART output goes to stderr (for visibility when run from Python).
     #[serde(default)]
     pub uart_to_stderr: bool,
+
+    /// When true, UART output is suppressed entirely (for scripting / benchmarks).
+    #[serde(default)]
+    pub uart_quiet: bool,
 }
 
 impl SystemConfig {
@@ -531,6 +535,7 @@ impl Default for SystemConfig {
             bus_latency: defaults::BUS_LATENCY,
             clint_divider: defaults::CLINT_DIVIDER,
             uart_to_stderr: false,
+            uart_quiet: false,
         }
     }
 }

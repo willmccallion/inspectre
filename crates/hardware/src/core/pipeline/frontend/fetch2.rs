@@ -39,6 +39,7 @@ pub fn fetch2_stage(
                 pred_target: f1.pred_target,
                 trap: f1.trap,
                 exception_stage: f1.exception_stage,
+                ghr_snapshot: f1.ghr_snapshot,
             });
             break;
         }
@@ -116,6 +117,7 @@ pub fn fetch2_stage(
                 pred_target: f1.pred_target,
                 trap: Some(t),
                 exception_stage: Some(ExceptionStage::Fetch),
+                ghr_snapshot: f1.ghr_snapshot,
             });
             break;
         }
@@ -139,6 +141,7 @@ pub fn fetch2_stage(
             pred_target: f1.pred_target,
             trap: None,
             exception_stage: None,
+            ghr_snapshot: f1.ghr_snapshot,
         });
     }
 }

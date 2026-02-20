@@ -31,6 +31,8 @@ pub struct IfIdEntry {
     pub trap: Option<Trap>,
     /// Pipeline stage where the exception was first detected.
     pub exception_stage: Option<ExceptionStage>,
+    /// GHR snapshot captured at prediction time for speculative history repair.
+    pub ghr_snapshot: u64,
 }
 
 /// Entry in the ID/EX pipeline latch (Decode to Execute stage).
@@ -71,6 +73,8 @@ pub struct IdExEntry {
     pub pred_taken: bool,
     /// Predicted target address for branch/jump instructions.
     pub pred_target: u64,
+    /// GHR snapshot captured at prediction time for speculative history repair.
+    pub ghr_snapshot: u64,
 }
 
 /// Entry in the EX/MEM pipeline latch (Execute to Memory stage).
@@ -145,6 +149,8 @@ pub struct Fetch1Fetch2Entry {
     pub trap: Option<Trap>,
     /// Pipeline stage where the exception was detected.
     pub exception_stage: Option<ExceptionStage>,
+    /// GHR snapshot captured at prediction time for speculative history repair.
+    pub ghr_snapshot: u64,
 }
 
 /// Entry from Rename -> Issue (also used as Issue -> Execute input).
@@ -193,6 +199,8 @@ pub struct RenameIssueEntry {
     pub pred_taken: bool,
     /// Branch prediction target.
     pub pred_target: u64,
+    /// GHR snapshot captured at prediction time for speculative history repair.
+    pub ghr_snapshot: u64,
 }
 
 /// Entry from Execute -> Memory1 latch.

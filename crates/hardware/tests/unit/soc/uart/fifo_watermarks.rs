@@ -9,13 +9,13 @@ use rvsim_core::soc::devices::uart::Uart;
 
 #[test]
 fn uart_name() {
-    let uart = Uart::new(0x1000_0000, true);
+    let uart = Uart::new(0x1000_0000, true, true);
     assert_eq!(uart.name(), "UART0");
 }
 
 #[test]
 fn uart_address_range() {
-    let uart = Uart::new(0x1000_0000, true);
+    let uart = Uart::new(0x1000_0000, true, true);
     let (base, size) = uart.address_range();
     assert_eq!(base, 0x1000_0000);
     assert_eq!(size, 0x100);
@@ -23,7 +23,7 @@ fn uart_address_range() {
 
 #[test]
 fn uart_lsr_default_thre_temt() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     let lsr = uart.read_u8(5); // LSR
     // Bits 5 (THRE) and 6 (TEMT) should be set (transmitter ready)
     assert_ne!(lsr & 0x20, 0, "THRE should be set");
@@ -32,35 +32,35 @@ fn uart_lsr_default_thre_temt() {
 
 #[test]
 fn uart_lsr_no_data_ready() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     let lsr = uart.read_u8(5);
     assert_eq!(lsr & 0x01, 0, "No data ready initially");
 }
 
 #[test]
 fn uart_scratch_register() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     uart.write_u8(7, 0xAB); // SCR
     assert_eq!(uart.read_u8(7), 0xAB);
 }
 
 #[test]
 fn uart_lcr_write_and_read() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     uart.write_u8(3, 0x03); // LCR = 8N1
     assert_eq!(uart.read_u8(3), 0x03);
 }
 
 #[test]
 fn uart_mcr_write_and_read() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     uart.write_u8(4, 0x0B); // MCR
     assert_eq!(uart.read_u8(4), 0x0B);
 }
 
 #[test]
 fn uart_dlab_mode_divisor() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     // Set DLAB
     uart.write_u8(3, 0x80);
     // Write divisor latch low
@@ -75,7 +75,7 @@ fn uart_dlab_mode_divisor() {
 
 #[test]
 fn uart_ier_write_and_read() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     // Ensure DLAB is clear
     uart.write_u8(3, 0x00);
     uart.write_u8(1, 0x03); // IER: enable RDA and THRE interrupts
@@ -84,7 +84,7 @@ fn uart_ier_write_and_read() {
 
 #[test]
 fn uart_iir_no_interrupt_initially() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     let iir = uart.read_u8(2);
     // Bit 0 should be 1 (no interrupt pending) per 16550 spec
     // IIR has bits 7:6 set, plus the ID
@@ -93,19 +93,19 @@ fn uart_iir_no_interrupt_initially() {
 
 #[test]
 fn uart_irq_id() {
-    let uart = Uart::new(0, true);
+    let uart = Uart::new(0, true, true);
     assert_eq!(uart.get_irq_id(), Some(10));
 }
 
 #[test]
 fn uart_msr_returns_zero() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     assert_eq!(uart.read_u8(6), 0, "MSR should return 0");
 }
 
 #[test]
 fn uart_unknown_register_returns_zero() {
-    let mut uart = Uart::new(0, true);
+    let mut uart = Uart::new(0, true, true);
     // Register offset > 7 should return 0
     assert_eq!(uart.read_u8(15), 0);
 }

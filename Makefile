@@ -49,7 +49,7 @@ help:
 	@printf "    %-$(HELP_W)s  Run Rust tests\n" "make test"
 	@printf "    %-$(HELP_W)s  Run Rust tests with coverage (llvm-cov)\n" "make test-coverage"
 	@printf "    %-$(HELP_W)s  Run clippy linter\n" "make clippy"
-	@printf "    %-$(HELP_W)s  Format Rust code\n" "make fmt"
+	@printf "    %-$(HELP_W)s  Format all code (Rust, Python, C)\n" "make fmt"
 	@printf "    %-$(HELP_W)s  Check formatting without modifying\n" "make fmt-check"
 	@printf "    %-$(HELP_W)s  fmt-check + clippy\n" "make lint"
 	@printf "    %-$(HELP_W)s  Full pre-release check (git+lint+test+versions+build)\n" "make prerelease"
@@ -122,10 +122,18 @@ clippy:
 fmt:
 	@printf "$(GREEN)Formatting Rust code…$(RESET)\n"
 	$(CARGO) fmt --all
+	@printf "$(GREEN)Formatting Python code…$(RESET)\n"
+	$(PYTHON) -m ruff format rvsim/ *.py
+	@printf "$(GREEN)Formatting C code…$(RESET)\n"
+	find examples/ software/libc/ -name '*.c' -o -name '*.h' | xargs clang-format -i
 
 fmt-check:
 	@printf "$(GREEN)Checking Rust formatting…$(RESET)\n"
 	$(CARGO) fmt --all -- --check
+	@printf "$(GREEN)Checking Python formatting…$(RESET)\n"
+	$(PYTHON) -m ruff format --check rvsim/ *.py
+	@printf "$(GREEN)Checking C formatting…$(RESET)\n"
+	find examples/ software/libc/ -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
 
 lint: fmt-check clippy
 

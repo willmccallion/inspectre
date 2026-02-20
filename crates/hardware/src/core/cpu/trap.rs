@@ -12,7 +12,9 @@ use crate::common::Trap;
 use crate::common::constants::CAUSE_INTERRUPT_BIT;
 use crate::core::arch::csr;
 use crate::core::arch::mode::PrivilegeMode;
+use crate::isa::abi;
 use crate::isa::privileged::cause::{exception, interrupt};
+use crate::isa::privileged::opcodes as sys_ops;
 
 impl Cpu {
     /// Handles a trap (exception or interrupt).
@@ -24,7 +26,33 @@ impl Cpu {
     pub fn trap(&mut self, cause: Trap, epc: u64) {
         self.load_reservation = None;
 
-        if self.direct_mode && !matches!(cause, Trap::EnvironmentCallFromUMode) {
+        if self.direct_mode {
+            // In direct mode, ecall is handled here at commit time so that
+            // all preceding instructions have retired and the architectural
+            // register file contains the correct syscall arguments.
+            if matches!(cause, Trap::EnvironmentCallFromUMode) {
+                let val_a7 = self.regs.read(abi::REG_A7);
+                let val_a0 = self.regs.read(abi::REG_A0);
+
+                if val_a7 == sys_ops::SYS_EXIT {
+                    self.exit_code = Some(val_a0);
+                    return;
+                } else if val_a0 == sys_ops::SYS_EXIT {
+                    let val_a1 = self.regs.read(abi::REG_A1);
+                    self.exit_code = Some(val_a1);
+                    return;
+                }
+
+                // Unknown syscall in direct mode — treat as fatal.
+                eprintln!(
+                    "\n[!] Unhandled ecall in direct mode: a7={} a0={} at PC {:#x}",
+                    val_a7, val_a0, epc
+                );
+                self.exit_code = Some(1);
+                return;
+            }
+
+            // Non-ecall traps in direct mode are fatal.
             if matches!(cause, Trap::IllegalInstruction(0)) {
                 self.exit_code = Some(0);
                 return;

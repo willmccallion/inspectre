@@ -9,7 +9,7 @@ import os
 _scripts = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _scripts)
 
-from rvsim import Environment, run_experiment
+from rvsim import Environment
 from p550.config import p550_config
 from m1.config import m1_config
 
@@ -27,10 +27,10 @@ def main():
 
     # P550
     env_p550 = Environment(binary=binary, config=p550_config())
-    r550 = run_experiment(env_p550, quiet=True)
+    r550 = env_p550.run(quiet=True)
     # M1
     env_m1 = Environment(binary=binary, config=m1_config())
-    r_m1 = run_experiment(env_m1, quiet=True)
+    r_m1 = env_m1.run(quiet=True)
 
     print("Compare P550 vs M1:", name)
     print()

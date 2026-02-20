@@ -4,17 +4,16 @@ Reproducible experiment API for RISC-V architecture testing.
 Provides:
 - Environment: Immutable description of a run (binary, config, load address).
 - Result: Structured result with exit code, stats, and wall time.
-- run_experiment: Run one simulation and return a Result.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from .config import Config, _config_to_dict
-from .stats import Stats
+from .stats import Stats, _compare_flat, _compare_matrix
 
 from ._core import PySystem, PyCpu
 
@@ -40,6 +39,52 @@ class Environment:
         if self.config is not None:
             return _config_to_dict(self.config)
         return Config().to_dict()
+
+    def run(self, quiet: bool = True, limit: Optional[int] = None) -> Result:
+        """
+        Run the simulation and return a :class:`Result`.
+
+        Args:
+            quiet: Suppress exceptions and return error Result instead.
+            limit: Max cycles to simulate. ``None`` means unlimited.
+
+        Example::
+
+            env = Environment(binary="software/bin/benchmarks/qsort.bin")
+            result = env.run()
+            print(result.stats["ipc"], result.stats["cycles"])
+        """
+        config = self.get_config()
+        t0 = time.perf_counter()
+        try:
+            sys_obj = PySystem(config, self.disk)
+            with open(self.binary, "rb") as f:
+                sys_obj.load_binary(f.read(), self.load_addr)
+            cpu = PyCpu(sys_obj, config)
+            exit_code = cpu.run(limit=limit)
+            if exit_code is None and limit is None:
+                raise RuntimeError(
+                    "CPU run completed without exit code (should not happen without limit)"
+                )
+            stats_obj = cpu.get_stats()
+            stats = stats_obj.to_dict()
+        except Exception as e:
+            err_msg = str(e)
+            if not quiet:
+                raise
+            return Result(
+                exit_code=-1,
+                stats=Stats({"error": err_msg}),
+                wall_time_sec=time.perf_counter() - t0,
+                binary=self.binary,
+            )
+        wall = time.perf_counter() - t0
+        return Result(
+            exit_code=int(exit_code),
+            stats=Stats(stats),
+            wall_time_sec=wall,
+            binary=self.binary,
+        )
 
 
 @dataclass
@@ -67,45 +112,26 @@ class Result:
             "stats": dict(self.stats),
         }
 
+    @staticmethod
+    def compare(
+        results: Dict[str, Any],
+        *,
+        metrics: Optional[List[str]] = None,
+        baseline: Optional[str] = None,
+    ) -> None:
+        """
+        Print a comparison table for experiment results.
 
-def run_experiment(env: Environment, quiet: bool = True) -> Result:
-    """
-    Run one simulation in a reproducible way.
+        Args:
+            results: Either ``dict[str, Result]`` (single binary, multiple configs)
+                     or ``dict[str, dict[str, Result]]`` (multi-binary x multi-config).
+            metrics: Specific metric names to show. If None, shows a default set.
+            baseline: Config name to normalize against (shows speedup ratios).
+        """
+        first_val = next(iter(results.values()))
+        is_nested = isinstance(first_val, dict)
 
-    Example::
-
-        env = Environment(binary="software/bin/benchmarks/qsort.bin")
-        result = run_experiment(env)
-        print(result.stats["ipc"], result.stats["cycles"])
-    """
-    config = env.get_config()
-    t0 = time.perf_counter()
-    try:
-        sys_obj = PySystem(config, env.disk)
-        with open(env.binary, "rb") as f:
-            sys_obj.load_binary(f.read(), env.load_addr)
-        cpu = PyCpu(sys_obj, config)
-        exit_code = cpu.run()
-        if exit_code is None:
-            raise RuntimeError(
-                "CPU run completed without exit code (should not happen without limit)"
-            )
-        stats_obj = cpu.get_stats()
-        stats = stats_obj.to_dict()
-    except Exception as e:
-        err_msg = str(e)
-        if not quiet:
-            raise
-        return Result(
-            exit_code=-1,
-            stats=Stats({"error": err_msg}),
-            wall_time_sec=time.perf_counter() - t0,
-            binary=env.binary,
-        )
-    wall = time.perf_counter() - t0
-    return Result(
-        exit_code=int(exit_code),
-        stats=Stats(stats),
-        wall_time_sec=wall,
-        binary=env.binary,
-    )
+        if is_nested:
+            _compare_matrix(results, metrics=metrics, baseline=baseline)
+        else:
+            _compare_flat(results, metrics=metrics, baseline=baseline)

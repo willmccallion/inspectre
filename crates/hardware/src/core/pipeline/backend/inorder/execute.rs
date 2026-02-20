@@ -225,23 +225,10 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // ECALL
+            // ECALL: always generate a trap and let commit handle it.
+            // In direct mode, the trap handler reads the (now committed)
+            // architectural registers for the syscall number and exit code.
             if id.inst == sys_ops::ECALL {
-                if cpu.direct_mode {
-                    // Check for exit syscall
-                    let val_a7 = cpu.regs.read(abi::REG_A7);
-                    let val_a0 = cpu.regs.read(abi::REG_A0);
-
-                    if val_a7 == sys_ops::SYS_EXIT {
-                        cpu.exit_code = Some(val_a0);
-                        break;
-                    } else if val_a0 == sys_ops::SYS_EXIT {
-                        let val_a1 = cpu.regs.read(abi::REG_A1);
-                        cpu.exit_code = Some(val_a1);
-                        break;
-                    }
-                }
-
                 use crate::core::arch::mode::PrivilegeMode;
                 let trap = match cpu.privilege {
                     PrivilegeMode::User => Trap::EnvironmentCallFromUMode,
@@ -338,6 +325,7 @@ pub fn execute_inorder(
 
             let mispredicted = predicted_target != actual_next_pc;
 
+            cpu.branch_predictor.repair_history(id.ghr_snapshot);
             cpu.branch_predictor.update_branch(
                 id.pc,
                 taken,

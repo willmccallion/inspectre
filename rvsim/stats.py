@@ -2,14 +2,15 @@
 Simulation statistics container with pattern-based querying and comparison.
 
 Provides ``Stats`` (dict subclass) with ``.query(pattern)`` for filtering,
-``.compare(other)`` for two-way comparison, and a top-level ``compare()``
-function for multi-config / multi-binary result matrices.
+``.compare(other)`` for two-way comparison, and ``.tabulate()`` for multi-run
+tables.
 """
 
 from __future__ import annotations
 
 import math
 import re
+import sys
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 
@@ -49,6 +50,37 @@ class Stats(dict):
 
         return Stats(matches)
 
+    @staticmethod
+    def tabulate(rows: Dict[str, Stats], *, title: str = "") -> Table:
+        """Build a comparison table from labeled :class:`Stats` objects.
+
+        Each *Stats* is typically a ``.query()`` result, so all share similar
+        keys.  Columns are the sorted union of all keys across the provided
+        Stats objects.
+
+        Args:
+            rows:  ``{label: Stats}`` — insertion order gives row order.
+            title: Optional table title rendered above the header.
+
+        Returns:
+            :class:`Table` with ``__repr__``/``__str__`` rendering.
+        """
+        if not rows:
+            return Table([], [], [], title)
+
+        labels = list(rows.keys())
+        all_keys: set = set()
+        for s in rows.values():
+            all_keys.update(s.keys())
+        metrics = sorted(all_keys)
+
+        grid = []
+        for label in labels:
+            s = rows[label]
+            grid.append([_fmt(s.get(m, "—")) for m in metrics])
+
+        return Table(labels, metrics, grid, title)
+
     def compare(self, other: Stats) -> None:
         """Print a two-column comparison table (self vs other) to stdout."""
         all_keys = sorted(set(self) | set(other))
@@ -76,11 +108,29 @@ class Stats(dict):
     def __repr__(self) -> str:
         if not self:
             return "Stats({})"
-        max_key_len = max(len(k) for k in self.keys())
-        lines = []
-        for key, value in sorted(self.items()):
-            lines.append(f"{key:<{max_key_len}} : {value}")
-        return "\n".join(lines)
+        items = sorted(self.items())
+        key_w = max(len(k) for k in self.keys())
+        val_w = max(len(_fmt(v)) for _, v in items)
+
+        is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        if not is_tty:
+            lines = []
+            for key, value in items:
+                lines.append(f"{key:<{key_w}}  {_fmt(value):>{val_w}}")
+            return "\n".join(lines)
+
+        bold = "\033[1m"
+        teal = "\033[36m"
+        rst = "\033[0m"
+
+        inner_w = key_w + 2 + val_w
+        rule = f"{bold}{teal}{'─' * (inner_w + 4)}{rst}"
+
+        parts = [rule]
+        for key, value in items:
+            parts.append(f"  {key:<{key_w}}  {_fmt(value):>{val_w}}")
+        parts.append(rule)
+        return "\n".join(parts)
 
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
@@ -171,29 +221,58 @@ def _format_table(
     return "\n".join(parts)
 
 
-def compare(
-    results: Dict[str, Any],
-    *,
-    metrics: Optional[List[str]] = None,
-    baseline: Optional[str] = None,
-) -> None:
-    """
-    Print a comparison table for experiment results.
+class Table:
+    """Rendered comparison table.  Created by :func:`tabulate`, displayed via
+    ``print()`` or REPL auto-repr."""
 
-    Args:
-        results: Either ``dict[str, Result]`` (single binary, multiple configs)
-                 or ``dict[str, dict[str, Result]]`` (multi-binary x multi-config).
-        metrics: Specific metric names to show. If None, shows a default set.
-        baseline: Config name to normalize against (shows speedup ratios).
-    """
-    # Detect shape: flat (str→Result) or nested (str→dict→Result)
-    first_val = next(iter(results.values()))
-    is_nested = isinstance(first_val, dict)
+    def __init__(
+        self,
+        labels: List[str],
+        metrics: List[str],
+        grid: List[List[str]],
+        title: str,
+    ):
+        self._labels = labels
+        self._metrics = metrics
+        self._grid = grid
+        self._title = title
 
-    if is_nested:
-        _compare_matrix(results, metrics=metrics, baseline=baseline)
-    else:
-        _compare_flat(results, metrics=metrics, baseline=baseline)
+    def __repr__(self) -> str:
+        return self._render()
+
+    def __str__(self) -> str:
+        return self._render()
+
+    def _render(self) -> str:
+        if not self._labels:
+            return "(empty table)"
+
+        headers = [""] + self._metrics
+        rows = [[label] + cells for label, cells in zip(self._labels, self._grid)]
+        plain = _format_table(headers, rows)
+
+        is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        if not is_tty:
+            return plain
+
+        bold = "\033[1m"
+        teal = "\033[36m"
+        rst = "\033[0m"
+
+        lines = plain.split("\n")
+        width = max(len(line) for line in lines)
+        rule = f"{bold}{teal}{'─' * (width + 4)}{rst}"
+
+        parts = []
+        if self._title:
+            parts.append(f"  {bold}{self._title}{rst}")
+        parts.append(rule)
+        parts.append(f"  {bold}{lines[0]}{rst}")
+        parts.append(rule)
+        for line in lines[2:]:
+            parts.append(f"  {line}")
+        parts.append(rule)
+        return "\n".join(parts)
 
 
 def _compare_flat(

@@ -96,6 +96,7 @@ pub fn rename_stage<E: ExecutionEngine>(
             exception_stage: id.exception_stage,
             pred_taken: id.pred_taken,
             pred_target: id.pred_target,
+            ghr_snapshot: id.ghr_snapshot,
         };
 
         if cpu.trace {

@@ -72,4 +72,25 @@ pub trait BranchPredictor {
     /// Called when a return instruction (JALR with rd=zero, rs1=ra) is
     /// executed to pop the return address from the return address stack.
     fn on_return(&mut self);
+
+    /// Speculatively updates the GHR with a predicted branch outcome.
+    ///
+    /// Called at fetch time after `predict_branch` to keep the GHR
+    /// up-to-date for subsequent predictions before resolution.
+    fn speculate(&mut self, _pc: u64, _taken: bool) {}
+
+    /// Returns a snapshot of the current GHR for later repair.
+    ///
+    /// Called at fetch time before `speculate` so the snapshot can be
+    /// carried through the pipeline and used at resolution to restore
+    /// the GHR to the correct state.
+    fn snapshot_history(&self) -> u64 {
+        0
+    }
+
+    /// Restores the GHR to a previously captured snapshot.
+    ///
+    /// Called at resolution time (execute) before `update_branch` so
+    /// the predictor trains on the correct history state.
+    fn repair_history(&mut self, _ghr: u64) {}
 }

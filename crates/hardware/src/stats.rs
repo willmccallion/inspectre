@@ -7,6 +7,7 @@
 //! 4. **Stalls:** Memory, control, and data hazard stall counts.
 //! 5. **Cache hierarchy:** Hit/miss counts for L1-I, L1-D, L2, and L3.
 
+use std::io::IsTerminal;
 use std::time::Instant;
 
 /// Simulation statistics structure tracking all performance metrics.
@@ -144,6 +145,12 @@ impl SimStats {
     /// - `instr` is set to `max(instructions_retired, 1)` before division (lines 144-148)
     /// - All floating-point divisions use these protected values
     pub fn print_sections(&self, sections: &[String]) {
+        let color = std::io::stdout().is_terminal();
+        let bold = if color { "\x1b[1m" } else { "" };
+        let teal = if color { "\x1b[36m" } else { "" };
+        let dim = if color { "\x1b[2m" } else { "" };
+        let rst = if color { "\x1b[0m" } else { "" };
+
         let want = |s: &str| sections.is_empty() || sections.iter().any(|x| x == s);
         let duration = self.start_time.elapsed();
         let seconds = duration.as_secs_f64();
@@ -154,14 +161,18 @@ impl SimStats {
             self.instructions_retired
         };
 
+        let rule =
+            format!("{bold}{teal}=========================================================={rst}");
+        let sep = format!("{dim}----------------------------------------------------------{rst}");
+
         if want("summary") {
             let ipc = self.instructions_retired as f64 / cyc as f64;
             let cpi = cyc as f64 / instr as f64;
             let mips = (self.instructions_retired as f64 / seconds) / 1_000_000.0;
             let khz = (self.cycles as f64 / seconds) / 1000.0;
-            println!("\n==========================================================");
-            println!("RISC-V SYSTEM SIMULATION STATISTICS");
-            println!("==========================================================");
+            println!("\n{rule}");
+            println!("{bold}RISC-V SYSTEM SIMULATION STATISTICS{rst}");
+            println!("{rule}");
             println!("host_seconds             {:.4} s", seconds);
             println!("sim_cycles               {}", self.cycles);
             println!("sim_freq                 {:.2} kHz", khz);
@@ -169,10 +180,10 @@ impl SimStats {
             println!("sim_ipc                  {:.4}", ipc);
             println!("sim_cpi                  {:.4}", cpi);
             println!("sim_mips                 {:.2}", mips);
-            println!("----------------------------------------------------------");
+            println!("{sep}");
         }
         if want("core") {
-            println!("CORE BREAKDOWN");
+            println!("{bold}CORE BREAKDOWN{rst}");
             println!(
                 "  cycles.user            {} ({:.2}%)",
                 self.cycles_user,
@@ -203,11 +214,11 @@ impl SimStats {
                 self.stalls_data,
                 (self.stalls_data as f64 / cyc as f64) * 100.0
             );
-            println!("----------------------------------------------------------");
+            println!("{sep}");
         }
         if want("instruction_mix") {
             let total_inst = instr as f64;
-            println!("INSTRUCTION MIX");
+            println!("{bold}INSTRUCTION MIX{rst}");
             println!(
                 "  op.alu                 {} ({:.2}%)",
                 self.inst_alu,
@@ -238,7 +249,7 @@ impl SimStats {
                 self.inst_fp_arith,
                 (self.inst_fp_arith as f64 / total_inst) * 100.0
             );
-            println!("----------------------------------------------------------");
+            println!("{sep}");
         }
         if want("branch") {
             let bp_correct = self.branch_predictions;
@@ -249,11 +260,11 @@ impl SimStats {
             } else {
                 0.0
             };
-            println!("BRANCH PREDICTION");
+            println!("{bold}BRANCH PREDICTION{rst}");
             println!("  bp.lookups             {}", bp_total);
             println!("  bp.mispredicts         {}", bp_miss);
             println!("  bp.accuracy            {:.2}%", bp_acc);
-            println!("----------------------------------------------------------");
+            println!("{sep}");
         }
         if want("memory") {
             let print_cache = |name: &str, hits: u64, misses: u64| {
@@ -271,13 +282,13 @@ impl SimStats {
                     100.0 - rate
                 );
             };
-            println!("MEMORY HIERARCHY");
+            println!("{bold}MEMORY HIERARCHY{rst}");
             print_cache("L1-I", self.icache_hits, self.icache_misses);
             print_cache("L1-D", self.dcache_hits, self.dcache_misses);
             print_cache("L2", self.l2_hits, self.l2_misses);
             print_cache("L3", self.l3_hits, self.l3_misses);
         }
-        println!("==========================================================");
+        println!("{rule}");
     }
 
     /// Prints all statistics sections to stdout.

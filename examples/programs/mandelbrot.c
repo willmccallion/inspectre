@@ -5,20 +5,9 @@
 #define HEIGHT 30
 
 int main() {
-  char buf[16];
   int max_iter = 32;
 
   printf("Mandelbrot Set (Floating Point)\n");
-  printf("Enter Max Iterations (default 32): ");
-
-  if (gets(buf, sizeof(buf))) {
-    if (buf[0] != '\n' && buf[0] != 0) {
-      max_iter = atoi(buf);
-    }
-  }
-
-  if (max_iter <= 0)
-    max_iter = 32;
 
   printf("Rendering with %d iterations...\n", max_iter);
 

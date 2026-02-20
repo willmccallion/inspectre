@@ -63,6 +63,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                 pred_target: 0,
                 trap: Some(trap_cause.clone()),
                 exception_stage: Some(ExceptionStage::Fetch),
+                ghr_snapshot: 0,
             });
             break;
         }
@@ -94,8 +95,25 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
         let mut pred_taken = false;
         let mut pred_target = 0;
         let mut stop_fetch = false;
+        let mut ghr_snapshot = 0u64;
 
-        if !is_compressed {
+        if is_compressed {
+            // Compressed branch prediction: detect C.BEQZ / C.BNEZ
+            // Quadrant 1 (bits 1:0 = 01), funct3 = 110 or 111
+            let quadrant = half_word & 0x3;
+            let funct3_c = (half_word >> 13) & 0x7;
+            if quadrant == 0x01 && (funct3_c == 0b110 || funct3_c == 0b111) {
+                ghr_snapshot = cpu.branch_predictor.snapshot_history();
+                let (taken, target) = cpu.branch_predictor.predict_branch(current_pc);
+                cpu.branch_predictor.speculate(current_pc, taken);
+                if taken && let Some(tgt) = target {
+                    next_pc_calc = tgt;
+                    pred_taken = true;
+                    pred_target = tgt;
+                    stop_fetch = true;
+                }
+            }
+        } else {
             // For 32-bit instructions, read full instruction for opcode extraction
             let upper_va = current_pc.wrapping_add(2);
             let crosses_page = (current_pc >> 12) != (upper_va >> 12);
@@ -111,6 +129,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                         pred_target: 0,
                         trap: None,
                         exception_stage: None,
+                        ghr_snapshot: 0,
                     });
                     cpu.pc = next_pc_calc;
                     break;
@@ -136,7 +155,9 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             let rs1 = ((full_inst >> RS1_SHIFT) & RS1_MASK) as usize;
 
             if opcode == opcodes::OP_BRANCH {
+                ghr_snapshot = cpu.branch_predictor.snapshot_history();
                 let (taken, target) = cpu.branch_predictor.predict_branch(current_pc);
+                cpu.branch_predictor.speculate(current_pc, taken);
                 if taken && let Some(tgt) = target {
                     next_pc_calc = tgt;
                     pred_taken = true;
@@ -173,6 +194,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             pred_target,
             trap: None,
             exception_stage: None,
+            ghr_snapshot,
         });
 
         current_pc = next_pc_calc;

@@ -3,20 +3,19 @@ rvsim simulator Python API.
 
 A Python-first interface to the cycle-accurate RISC-V simulator:
 1. **Configuration:** ``Config``, ``Cache``, ``BranchPredictor``, etc.
-2. **Execution:** ``System``, ``Cpu``, ``Simulator``, ``simulate``.
-3. **Experiments:** ``Environment``, ``Result``, ``run_experiment``.
-4. **Statistics:** ``Stats``, ``compare``.
-5. **ISA:** ``reg``, ``csr``, ``disassemble``.
+2. **Execution:** ``System``, ``Cpu``, ``Simulator``.
+3. **Experiments:** ``Environment``, ``Result``.
+4. **Statistics:** ``Stats``, ``Table``.
+5. **ISA:** ``reg``, ``csr``, ``Disassemble``.
 """
 
 from importlib.metadata import version as _metadata_version
 
-from ._core import disassemble
 from .config import Config
-from .experiment import Environment, Result, run_experiment
-from .isa import Disassemble, csr, csr_name, reg, reg_name
-from .objects import Cpu, Instruction, Simulator, System, simulate
-from .stats import Stats, compare
+from .experiment import Environment, Result
+from .isa import Disassemble, csr, reg
+from .objects import Cpu, Instruction, Simulator, System
+from .stats import Stats, Table
 from .types import (
     Backend,
     BranchPredictor,
@@ -47,17 +46,12 @@ __all__ = [
     "System",
     "Cpu",
     "Simulator",
-    "simulate",
     "Instruction",
     "Environment",
     "Result",
-    "run_experiment",
     "Stats",
-    "compare",
-    "disassemble",
+    "Table",
     "reg",
-    "reg_name",
     "csr",
-    "csr_name",
     "Disassemble",
 ]

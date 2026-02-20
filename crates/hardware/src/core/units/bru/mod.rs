@@ -164,4 +164,37 @@ impl BranchPredictor for BranchPredictorWrapper {
             Self::Perceptron(bp) => bp.on_return(),
         }
     }
+
+    #[inline(always)]
+    fn speculate(&mut self, pc: u64, taken: bool) {
+        match self {
+            Self::Static(bp) => bp.speculate(pc, taken),
+            Self::GShare(bp) => bp.speculate(pc, taken),
+            Self::Tournament(bp) => bp.speculate(pc, taken),
+            Self::Tage(bp) => bp.speculate(pc, taken),
+            Self::Perceptron(bp) => bp.speculate(pc, taken),
+        }
+    }
+
+    #[inline(always)]
+    fn snapshot_history(&self) -> u64 {
+        match self {
+            Self::Static(bp) => bp.snapshot_history(),
+            Self::GShare(bp) => bp.snapshot_history(),
+            Self::Tournament(bp) => bp.snapshot_history(),
+            Self::Tage(bp) => bp.snapshot_history(),
+            Self::Perceptron(bp) => bp.snapshot_history(),
+        }
+    }
+
+    #[inline(always)]
+    fn repair_history(&mut self, ghr: u64) {
+        match self {
+            Self::Static(bp) => bp.repair_history(ghr),
+            Self::GShare(bp) => bp.repair_history(ghr),
+            Self::Tournament(bp) => bp.repair_history(ghr),
+            Self::Tage(bp) => bp.repair_history(ghr),
+            Self::Perceptron(bp) => bp.repair_history(ghr),
+        }
+    }
 }

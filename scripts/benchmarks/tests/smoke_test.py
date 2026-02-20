@@ -1,22 +1,22 @@
 """Minimal smoke test: one benchmark with base config. Run: sim script scripts/tests/smoke_test.py"""
 
-import sys
 import os
+import sys
 
 _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(_root, "python"))
 
-from rvsim import Environment, run_experiment, Config
+from rvsim import Config, Environment
 
 
 def main():
     root = _root
-    binary = os.path.join(root, "software", "bin", "benchmarks", "qsort.bin")
+    binary = os.path.join(root, "../" "software", "bin", "benchmarks", "qsort.bin")
     if not os.path.exists(binary):
         print("Skip: binary not found:", binary)
         return 0
     env = Environment(binary=binary, config=Config())
-    result = run_experiment(env, quiet=True)
+    result = env.run(quiet=True)
     print(
         "smoke_test: exit_code=%s ipc=%s" % (result.exit_code, result.stats.get("ipc"))
     )

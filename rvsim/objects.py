@@ -2,11 +2,10 @@
 Simulation objects and high-level run API.
 
 Provides:
-- Cpu: Pythonic wrapper with .pc, .regs[i], .mem32[addr], .stats, .step()
+- Cpu: Pythonic wrapper with .pc, .regs[i], .mem32[addr], .stats, .run()
 - System: Top-level system builder; instantiate() creates the Rust PySystem.
 - Simulator: Fluent API (config/kernel/disk/binary/run).
 - Instruction: Returned by cpu.step() with pc, raw, asm, cycles.
-- simulate / run_with_progress: Run helpers.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import os
 import sys
 from typing import Any, Dict, Optional
 
+from ._cli import info, warn, error, tag
 from ._core import PySystem, PyCpu
 from .config import Config, _config_to_dict
 from .stats import Stats
@@ -87,7 +87,7 @@ class Cpu:
 
     Methods:
         step(): Execute one instruction, return Instruction
-        run(limit): Run until exit or cycle limit
+        run(): Run until exit with optional limit and progress
         tick(): Advance one cycle
         csr(name): Read a CSR by name or address
         get_pc_trace(): Get committed PC trace
@@ -135,9 +135,74 @@ class Cpu:
         cycles = self._cpu.get_stats().cycles
         return Instruction(pc, raw, asm, cycles)
 
-    def run(self, limit: Optional[int] = None) -> Optional[int]:
-        """Run until exit or cycle limit. Returns exit code or None."""
-        return self._cpu.run(limit=limit)
+    def run(
+        self,
+        limit: Optional[int] = None,
+        progress: int = 0,
+        print_stats: bool = False,
+        stats_sections: Optional[list] = None,
+    ) -> Optional[int]:
+        """Run the simulation until exit or cycle limit.
+
+        Args:
+            limit: Max cycles to simulate. ``None`` means unlimited.
+            progress: Print progress every N cycles to stderr. 0 = silent.
+            print_stats: Print performance stats on completion/error (legacy).
+            stats_sections: Sections to print (``[]`` = all, ``None`` = suppress,
+                ``["summary", ...]`` = specific). Overrides *print_stats* when set.
+
+        Returns:
+            Exit code, or ``None`` if *limit* was reached without exiting.
+        """
+        raw = self._cpu
+
+        def _stats():
+            if stats_sections is not None:
+                s = raw.get_stats()
+                if stats_sections:
+                    s.print_sections(stats_sections)
+                else:
+                    s.print()
+            elif print_stats:
+                raw.get_stats().print()
+
+        try:
+            if progress > 0:
+                cycles_run = 0
+                while True:
+                    chunk = progress
+                    if limit is not None:
+                        remaining = limit - cycles_run
+                        if remaining <= 0:
+                            print(file=sys.stderr)
+                            _stats()
+                            return None
+                        chunk = min(chunk, remaining)
+                    exit_code = raw.run(limit=chunk)
+                    cycles_run += chunk
+                    if exit_code is not None:
+                        print(file=sys.stderr)
+                        _stats()
+                        return int(exit_code)
+                    s = raw.get_stats()
+                    print(
+                        f"\r{tag('rvsim', stderr=True)} {s.cycles:,} cycles, "
+                        f"{s.instructions_retired:,} insns",
+                        end="",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            else:
+                exit_code = raw.run(limit=limit)
+                _stats()
+                if exit_code is not None:
+                    return int(exit_code)
+                return None
+        except Exception:
+            if progress > 0:
+                print(file=sys.stderr)
+            _stats()
+            raise
 
     def tick(self) -> None:
         """Advance one cycle."""
@@ -156,13 +221,12 @@ class Cpu:
 
     def load_kernel(self, kernel_path: str, dtb_path: Optional[str] = None) -> None:
         """Load a kernel image and optionally a DTB."""
-        # Need config dict for kernel loading — we stored it during creation
         config_dict = self._config_dict if hasattr(self, "_config_dict") else {}
         self._cpu.load_kernel(kernel_path, config_dict, dtb_path)
 
-    # Direct access to underlying Rust CPU for advanced use
     @property
     def raw(self) -> PyCpu:
+        """Direct access to underlying Rust CPU for advanced use."""
         return self._cpu
 
 
@@ -209,51 +273,6 @@ def _create_cpu(
     return cpu
 
 
-def run_with_progress(
-    cpu, progress_interval_cycles: int = 5_000_000, progress_stream=None
-):
-    """Run the CPU in chunks, printing cycle progress. Returns exit code."""
-    if progress_stream is None:
-        progress_stream = sys.stderr
-    # Accept either Cpu wrapper or raw PyCpu
-    raw = cpu._cpu if isinstance(cpu, Cpu) else cpu
-    while True:
-        exit_code = raw.run(limit=progress_interval_cycles)
-        if exit_code is not None:
-            return int(exit_code)
-        sys.stdout.flush()
-
-
-def simulate(cpu, print_stats=True, stats_sections=None):
-    """Run the CPU until exit. Optionally print stats."""
-    print("Starting simulation...")
-    sys.stdout.flush()
-    # Accept either Cpu wrapper or raw PyCpu
-    raw = cpu._cpu if isinstance(cpu, Cpu) else cpu
-    try:
-        exit_code = raw.run()
-        if exit_code is None:
-            raise RuntimeError(
-                "CPU run completed without exit code (should not happen without limit)"
-            )
-        if print_stats:
-            stats = raw.get_stats()
-            if stats_sections is not None:
-                stats.print_sections(stats_sections)
-            else:
-                stats.print()
-        return exit_code
-    except Exception as e:
-        print(f"Simulation stopped: {e}")
-        if print_stats:
-            stats = raw.get_stats()
-            if stats_sections is not None:
-                stats.print_sections(stats_sections)
-            else:
-                stats.print()
-        raise
-
-
 class Simulator:
     """Fluent API for configuring and running the simulator."""
 
@@ -277,7 +296,7 @@ class Simulator:
             if os.path.exists(os.path.join(os.getcwd(), path)):
                 path = os.path.join(os.getcwd(), path)
             else:
-                print(f"Warning: Config file {path} not found.")
+                print(warn(f"Config file {path} not found."), file=sys.stderr)
                 return self
 
         self._config_path = path
@@ -292,25 +311,38 @@ class Simulator:
                     func = getattr(mod, name)
                     if callable(func):
                         self._config_obj = func()
-                        print(f"[Simulator] Loaded config from {name}() in {path}")
+                        print(
+                            info("Simulator", f"Loaded config from {name}() in {path}"),
+                            file=sys.stderr,
+                        )
                     else:
                         print(
-                            f"[Simulator] Found {name} in {path} but it is not callable."
+                            warn(f"Found {name} in {path} but it is not callable."),
+                            file=sys.stderr,
                         )
                 elif hasattr(mod, "config"):
                     c = getattr(mod, "config")
                     self._config_obj = c() if callable(c) else c
-                    print(f"[Simulator] Loaded config from 'config' in {path}")
+                    print(
+                        info("Simulator", f"Loaded config from 'config' in {path}"),
+                        file=sys.stderr,
+                    )
                 elif hasattr(mod, "get_config"):
                     self._config_obj = getattr(mod, "get_config")()
-                    print(f"[Simulator] Loaded config from get_config() in {path}")
+                    print(
+                        info("Simulator", f"Loaded config from get_config() in {path}"),
+                        file=sys.stderr,
+                    )
                 else:
                     print(
-                        f"[Simulator] Could not find config entry point in {path}. "
-                        f"Expected function '{name}' or 'get_config' or variable 'config'."
+                        warn(
+                            f"Could not find config entry point in {path}. "
+                            f"Expected function '{name}' or 'get_config' or variable 'config'."
+                        ),
+                        file=sys.stderr,
                     )
         except Exception as e:
-            print(f"Error loading config {path}: {e}")
+            print(error(f"Loading config {path}: {e}"), file=sys.stderr)
 
         return self
 
@@ -334,11 +366,35 @@ class Simulator:
         self._binary_path = path
         return self
 
-    def run(self) -> int:
-        """Build system and CPU from config, load binary or kernel, then run. Returns exit code."""
-        print("[Simulator] Setting up...")
+    _UNSET = object()
+
+    def run(
+        self,
+        limit: Optional[int] = None,
+        progress: int = 0,
+        stats_sections=_UNSET,
+        output_stats: Optional[str] = None,
+    ) -> int:
+        """Build system and CPU from config, load binary or kernel, then run.
+
+        Args:
+            limit: Maximum number of cycles. ``None`` means unlimited.
+            progress: Print progress every N cycles. 0 = silent.
+            stats_sections: Stats sections to print (``[]`` = all, ``None`` = suppress).
+                Defaults to ``[]`` (print all) for backward compatibility.
+            output_stats: Path to write JSON stats after simulation.
+
+        Returns:
+            Exit code (int).
+        """
+        if stats_sections is self._UNSET:
+            stats_sections = []  # backward compat: print all
+        print(info("Simulator", "Setting up...", stderr=True), file=sys.stderr)
         if self._config_obj is None:
-            print("[Simulator] No config loaded, using defaults.")
+            print(
+                info("Simulator", "No config loaded, using defaults.", stderr=True),
+                file=sys.stderr,
+            )
             self._config_obj = Config()
         if self._is_kernel_mode:
             self._config_obj.uart_to_stderr = True
@@ -349,11 +405,14 @@ class Simulator:
         # Load binary BEFORE creating CPU, because PyCpu consumes the system.
         # Kernel loading happens after CPU creation via cpu.load_kernel().
         if not self._is_kernel_mode and self._binary_path:
-            print(f"[Simulator] Loading binary: {self._binary_path}")
+            print(
+                info("Simulator", f"Loading binary: {self._binary_path}", stderr=True),
+                file=sys.stderr,
+            )
             with open(self._binary_path, "rb") as f:
                 sys_obj.rust_system.load_binary(f.read(), 0x80000000)
         elif not self._is_kernel_mode and not self._kernel_path:
-            print("Warning: No binary or kernel specified.")
+            print(warn("No binary or kernel specified."), file=sys.stderr)
 
         cpu = _create_cpu(sys_obj, config=self._config_obj)
 
@@ -362,23 +421,42 @@ class Simulator:
                 raise ValueError(
                     "Kernel mode requested but no kernel path provided via .kernel()"
                 )
-            print(f"[Simulator] Loading kernel: {self._kernel_path}")
+            print(
+                info("Simulator", f"Loading kernel: {self._kernel_path}", stderr=True),
+                file=sys.stderr,
+            )
             if self._dtb_path:
-                print(f"[Simulator] Loading DTB: {self._dtb_path}")
+                print(
+                    info("Simulator", f"Loading DTB: {self._dtb_path}", stderr=True),
+                    file=sys.stderr,
+                )
             cpu.load_kernel(self._kernel_path, self._dtb_path)
 
-        if self._is_kernel_mode:
-            print("Starting simulation (progress every 5M cycles; UART = stderr)...")
-            sys.stdout.flush()
-            try:
-                exit_code = run_with_progress(cpu, progress_interval_cycles=5_000_000)
-                print(file=sys.stderr)
-                raw_stats = cpu.raw.get_stats()
-                raw_stats.print()
-                return exit_code
-            except Exception as e:
-                print(file=sys.stderr)
-                print(f"Simulation stopped: {e}")
-                cpu.raw.get_stats().print()
-                raise
-        return simulate(cpu.raw)
+        exit_code = cpu.run(
+            limit=limit, progress=progress, stats_sections=stats_sections
+        )
+
+        # Write JSON stats if requested
+        if output_stats is not None:
+            import json
+
+            stats_dict = dict(cpu.stats)
+            with open(output_stats, "w") as f:
+                json.dump(stats_dict, f, indent=2)
+            print(
+                info("rvsim", f"Stats written to {output_stats}", stderr=True),
+                file=sys.stderr,
+            )
+
+        if exit_code is None:
+            print(
+                warn(f"Simulation did not exit within {limit:,} cycles."),
+                file=sys.stderr,
+            )
+            return 1
+
+        print(
+            info("rvsim", f"Exited with code {exit_code}", stderr=True),
+            file=sys.stderr,
+        )
+        return exit_code

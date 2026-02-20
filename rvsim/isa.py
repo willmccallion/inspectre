@@ -2,17 +2,15 @@
 RISC-V ABI register and CSR definitions.
 
 Provides callable namespace objects:
-- ``reg``: Register lookup (``reg.RA`` → 1, ``reg("ra")`` → 1, ``reg("x5")`` → 5)
-- ``csr``: CSR lookup (``csr.MSTATUS`` → 0x300, ``csr("mstatus")`` → 0x300)
-- ``reg_name(idx)``: Index to ABI name (``reg_name(5)`` → ``"t0"``)
-- ``csr_name(addr)``: Address to name (``csr_name(0x300)`` → ``"mstatus"``)
+- ``reg``: Register lookup (``reg.RA`` → 1, ``reg("ra")`` → 1, ``reg.name(5)`` → ``"t0"``)
+- ``csr``: CSR lookup (``csr.MSTATUS`` → 0x300, ``csr("mstatus")`` → 0x300, ``csr.name(0x300)`` → ``"mstatus"``)
 """
 
 import struct
 import sys
 from typing import List, Optional, Tuple
 
-from ._core import disassemble as disassemble  # noqa: F401
+from ._core import disassemble
 
 
 class Disassemble:
@@ -188,16 +186,15 @@ class _RegLookup:
             return name
         return _REG_BY_NAME[name.lower()]
 
+    def name(self, idx: int) -> str:
+        """Return the ABI name for a register index (e.g. ``reg.name(5)`` → ``"t0"``)."""
+        return _REG_NAMES[idx]
+
     def __repr__(self) -> str:
         return "reg"
 
 
 reg = _RegLookup()
-
-
-def reg_name(idx: int) -> str:
-    """Return the ABI name for a register index (e.g. ``reg_name(5)`` → ``"t0"``)."""
-    return _REG_NAMES[idx]
 
 
 # ── CSR name ↔ address helpers ───────────────────────────────────────────────
@@ -284,13 +281,12 @@ class _CsrLookup:
             return name
         return _CSR_BY_NAME[name.lower()]
 
+    def name(self, addr: int) -> str:
+        """Return the CSR name for an address (e.g. ``csr.name(0x300)`` → ``"mstatus"``)."""
+        return _CSR_BY_ADDR.get(addr, f"csr_{addr:#05x}")
+
     def __repr__(self) -> str:
         return "csr"
 
 
 csr = _CsrLookup()
-
-
-def csr_name(addr: int) -> str:
-    """Return the CSR name for an address (e.g. ``csr_name(0x300)`` → ``"mstatus"``)."""
-    return _CSR_BY_ADDR.get(addr, f"csr_{addr:#05x}")

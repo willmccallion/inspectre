@@ -19,11 +19,11 @@ import tarfile
 import urllib.request
 
 from rvsim import (
-    Config,
-    Cache,
     BranchPredictor,
-    ReplacementPolicy,
+    Cache,
+    Config,
     Prefetcher,
+    ReplacementPolicy,
     Simulator,
 )
 
@@ -341,7 +341,7 @@ def main():
         sim.dtb(dtb_path)
 
     try:
-        return sim.run()
+        return sim.run(limit=10_000_000_000, progress=5_000_000)
     except Exception as e:
         print(f"Simulation failed: {e}")
         return 1
