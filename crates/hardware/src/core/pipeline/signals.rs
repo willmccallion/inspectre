@@ -268,7 +268,6 @@ pub enum AluOp {
     Bset,
 
     // ── Zbkb: Bitwise operations for cryptography ────────────────────────
-
     /// Bit-reverse within each byte (brev8).
     Brev8,
 
@@ -282,7 +281,6 @@ pub enum AluOp {
     Packw,
 
     // ── Zbkx: Crossbar permutations for cryptography ─────────────────────
-
     /// 4-bit crossbar permutation (xperm4).
     Xperm4,
 
@@ -520,6 +518,10 @@ pub struct ControlSignals {
     /// Number of registers in the LMUL group (1, 2, 4, or 8).
     /// Derived from LMUL at decode time. 0 for non-vector instructions.
     pub vec_lmul_regs: u8,
+    /// `true` if the source LMUL is fractional (Mf2/Mf4/Mf8). Distinguishes
+    /// from M1, which `vec_lmul_regs` collapses to the same value of `1`.
+    /// Needed by `operand_groups` to compute the right widening group size.
+    pub vec_lmul_is_fractional: bool,
 }
 
 /// Vector operation type.
@@ -1107,9 +1109,25 @@ impl VectorOp {
     ///  - Sub-opcode in vs1 (UNARY0 families): vs1 = 0.
     ///  - Mask logical: all operands are single mask registers = 1.
     ///  - Whole-register moves/loads/stores: fixed group sizes independent of LMUL.
+    ///
+    /// `lmul` is the source register-group count (1/2/4/8 for both fractional
+    /// LMUL and M1 — they all share group=1). `lmul_is_fractional` distinguishes
+    /// fractional LMUL (Mf8/Mf4/Mf2) from M1: it matters for widening, where
+    /// `2*LMUL` for fractional still fits in 1 register but `2*M1 = M2` needs 2.
     #[allow(clippy::enum_glob_use)]
-    pub fn operand_groups(self, lmul: u8, src_enc: VecSrcEncoding, nf: u8) -> VecOperandGroups {
+    pub fn operand_groups(
+        self,
+        lmul: u8,
+        lmul_is_fractional: bool,
+        src_enc: VecSrcEncoding,
+        nf: u8,
+    ) -> VecOperandGroups {
         use VectorOp::*;
+
+        // Doubled register group for widening / narrowing. For fractional LMUL,
+        // `2*LMUL` is still ≤ 1 register (e.g. 2*Mf8 = Mf4), so emul_widened = 1
+        // even though `lmul == 1` would otherwise produce 2.
+        let emul_widened: u8 = if lmul_is_fractional { 1 } else { (lmul * 2).min(8) };
 
         // vs1 is only a vector register for VV encoding; for VX/VI/VF it's a
         // scalar or immediate, so group size = 0.
@@ -1174,25 +1192,16 @@ impl VectorOp {
             // FP widening
             VFWAdd | VFWSub | VFWMul |
             VFWMacc | VFWNMacc | VFWMSac | VFWNMSac
-            => {
-                let emul2 = (lmul * 2).min(8);
-                VecOperandGroups { vd: emul2, vs2: lmul, vs1: vs1_base }
-            }
+            => VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: vs1_base },
 
             // ── Widening with wide source (.wv/.wf: vd=2×LMUL, vs2=2×LMUL, vs1=LMUL)
             VWAddUW | VWAddW | VWSubUW | VWSubW |
             VFWAddW | VFWSubW
-            => {
-                let emul2 = (lmul * 2).min(8);
-                VecOperandGroups { vd: emul2, vs2: emul2, vs1: vs1_base }
-            }
+            => VecOperandGroups { vd: emul_widened, vs2: emul_widened, vs1: vs1_base },
 
             // ── Narrowing (vd=LMUL, vs2=2×LMUL) ────────────────────────
             VNSrl | VNSra | VNClipU | VNClip
-            => {
-                let emul2 = (lmul * 2).min(8);
-                VecOperandGroups { vd: lmul, vs2: emul2, vs1: vs1_base }
-            }
+            => VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: vs1_base },
 
             // ── Zero/sign extension (vd=LMUL, vs2=LMUL/factor) ─────────
             // These read narrower source elements; vs2 group is smaller.
@@ -1215,18 +1224,12 @@ impl VectorOp {
             // ── Widening FP conversions (vd=2×LMUL, vs2=LMUL) ──────────
             VFWCvtXuF | VFWCvtXF | VFWCvtFXu | VFWCvtFX |
             VFWCvtFF | VFWCvtRtzXuF | VFWCvtRtzXF
-            => {
-                let emul2 = (lmul * 2).min(8);
-                VecOperandGroups { vd: emul2, vs2: lmul, vs1: 0 }
-            }
+            => VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: 0 },
 
             // ── Narrowing FP conversions (vd=LMUL, vs2=2×LMUL) ─────────
             VFNCvtXuF | VFNCvtXF | VFNCvtFXu | VFNCvtFX |
             VFNCvtFF | VFNCvtRodFF | VFNCvtRtzXuF | VFNCvtRtzXF
-            => {
-                let emul2 = (lmul * 2).min(8);
-                VecOperandGroups { vd: lmul, vs2: emul2, vs1: 0 }
-            }
+            => VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: 0 },
 
             // ── Scalar-result ops (vd is a GPR/FPR, not a vreg) ─────────
             // vmv.x.s / vfmv.f.s read only element 0 from vs2, not a group.

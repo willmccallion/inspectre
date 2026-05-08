@@ -809,6 +809,7 @@ impl ExecutionEngine for O3Engine {
                 // Save vector destination info before execute_one consumes the entry.
                 let vec_grp = entry.ctrl.vec_op.operand_groups(
                     entry.ctrl.vec_lmul_regs,
+                    entry.ctrl.vec_lmul_is_fractional,
                     entry.ctrl.vec_src_encoding,
                     entry.ctrl.vec_nf,
                 );

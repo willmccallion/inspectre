@@ -82,7 +82,12 @@ pub fn rename_stage<E: ExecutionEngine>(
             // Must happen BEFORE vector destination rename (same principle
             // as scalar: capture old mappings before rename map update).
             let lmul = id.ctrl.vec_lmul_regs;
-            let grp = id.ctrl.vec_op.operand_groups(lmul, id.ctrl.vec_src_encoding, id.ctrl.vec_nf);
+            let grp = id.ctrl.vec_op.operand_groups(
+                lmul,
+                id.ctrl.vec_lmul_is_fractional,
+                id.ctrl.vec_src_encoding,
+                id.ctrl.vec_nf,
+            );
             let mut vs1_phys = [VecPhysReg::ZERO; 8];
             let mut vs2_phys = [VecPhysReg::ZERO; 8];
             let mut vs3_phys = [VecPhysReg::ZERO; 8];

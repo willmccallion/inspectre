@@ -210,6 +210,29 @@ impl Vlmul {
         }
     }
 
+    /// Returns true for fractional LMUL (Mf2/Mf4/Mf8). Distinguishes from
+    /// integer LMUL=M1 which `group_regs()` collapses to the same `1` register.
+    #[inline(always)]
+    pub const fn is_fractional(self) -> bool {
+        matches!(self, Self::Mf8 | Self::Mf4 | Self::Mf2)
+    }
+
+    /// Returns the register-group size for `EMUL = 2 * LMUL` (widening ops'
+    /// destination). For fractional LMUL the doubled EMUL is still ≤ 1
+    /// register (e.g. `2 * Mf8 = Mf4`), so this returns 1. For M8 the doubled
+    /// EMUL is illegal (16 registers); we cap at 8 here so callers don't
+    /// overflow — `vill` should already be set for that case.
+    #[inline(always)]
+    pub const fn widened_group_regs(self) -> u8 {
+        match self {
+            Self::Mf8 | Self::Mf4 | Self::Mf2 => 1,
+            Self::M1 => 2,
+            Self::M2 => 4,
+            Self::M4 => 8,
+            Self::M8 => 8,
+        }
+    }
+
     /// Returns the LMUL as a (numerator, denominator) fraction.
     #[inline(always)]
     pub const fn as_fraction(self) -> (usize, usize) {
