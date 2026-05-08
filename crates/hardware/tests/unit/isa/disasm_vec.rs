@@ -310,7 +310,7 @@ fn test_rvv_fp_compare() {
 
     // vmfgt.vf / vmfge.vf — only available as .vf
     assert!(disassemble(vec_arith(0b011101, 1, 2, 3, OPFVF, 1)).starts_with("vmfgt.vf"));
-    assert!(disassemble(vec_arith(0b011110, 1, 2, 3, OPFVF, 1)).starts_with("vmfge.vf"));
+    assert!(disassemble(vec_arith(0b011111, 1, 2, 3, OPFVF, 1)).starts_with("vmfge.vf"));
 }
 
 // ══════════════════════════════════════════════════════════

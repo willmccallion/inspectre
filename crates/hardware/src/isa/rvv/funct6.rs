@@ -266,7 +266,7 @@ pub const VMFNE: u32 = 0b011100;
 /// Vector FP mask set if greater than (`vmfgt`).
 pub const VMFGT: u32 = 0b011101;
 /// Vector FP mask set if greater than or equal (`vmfge`).
-pub const VMFGE: u32 = 0b011110;
+pub const VMFGE: u32 = 0b011111;
 
 // ── FP multiply/divide (OPFVV/OPFVF) ───────────────────────────────────────
 
