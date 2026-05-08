@@ -807,9 +807,13 @@ fn sm4_r(vd: [u32; 4], vs2: [u32; 4]) -> [u32; 4] {
 /// chunk to produce. Output: next 4 round keys.
 /// On the first call (rnd=0), vd should be MK ^ FK (caller responsibility?).
 /// Actually per spec: vd contains the previous 4 K-values; output is next 4.
+///
+/// Per Zvksed: rnd comes from a 5-bit immediate but only bits [2:0] are used
+/// (uimm[4:3] are reserved). Mask here so an out-of-spec encoding can't index
+/// past `SM4_CK[32]`.
 fn sm4_k(vd: [u32; 4], rnd: u32) -> [u32; 4] {
     let mut k = [vd[0], vd[1], vd[2], vd[3], 0, 0, 0, 0];
-    let base = (rnd * 4) as usize;
+    let base = ((rnd & 0x7) * 4) as usize;
     for i in 0..4 {
         let t = k[i + 1] ^ k[i + 2] ^ k[i + 3] ^ SM4_CK[base + i];
         k[i + 4] = k[i] ^ sm4_l_prime(sm4_tau(t));
