@@ -165,6 +165,27 @@ mod tests {
     }
 
     #[test]
+    fn test_vsetvli_mf8_e8_legal() {
+        // vsetvli e8, mf8 — encoding bit5:3=vsew=0(E8), bit2:0=vlmul=0b101(Mf8)
+        // This is a LEGAL configuration: SEW * lmul_den (8*8=64) <= ELEN * lmul_num (64*1=64).
+        // VLMAX = (128/8)*1/8 = 2
+        let vtype_bits: u64 = 0b101; // vsew=0, vlmul=0b101, vta=0, vma=0
+        let parsed = super::super::types::parse_vtype(vtype_bits);
+        assert!(!parsed.vill, "mf8/e8 should NOT set vill");
+        assert_eq!(parsed.vlmul, super::super::types::Vlmul::Mf8);
+        assert_eq!(parsed.vsew, super::super::types::Sew::E8);
+
+        // execute_vsetvl with AVL=0, rd!=0, rs1!=0
+        let (vl, vtype) = execute_vsetvl(0, vtype_bits, false, false, vlen128(), 0);
+        assert_eq!(vl, 0);
+        assert_eq!(vtype & (1u64 << 63), 0, "vill bit must not be set");
+
+        // AVL=12 → vl = min(12, VLMAX=2) = 2
+        let (vl, _) = execute_vsetvl(12, vtype_bits, false, false, vlen128(), 0);
+        assert_eq!(vl, 2);
+    }
+
+    #[test]
     fn test_vsetivli_uimm() {
         // vsetivli: rs1_is_zero is always false, avl comes from uimm
         let (vl, _) = execute_vsetvl(15, vtype_m1_e32(), false, false, vlen128(), 0);
