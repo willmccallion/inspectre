@@ -1147,7 +1147,7 @@ impl VectorOp {
             VSAddU | VSAdd | VSSubU | VSSub |
             VAAddU | VAAdd | VASubU | VASub |
             VSmul | VSSrl | VSSra |
-            VMerge | VIdV |
+            VMerge |
             // Slides, gather, compress read full groups
             VSlideUp | VSlideDown | VSlide1Up | VSlide1Down |
             VRgather | VRgatherEi16 | VCompress |
@@ -1255,6 +1255,11 @@ impl VectorOp {
             => VecOperandGroups { vd: 1, vs2: 1, vs1: 0 },
 
             VIotaM => VecOperandGroups { vd: lmul, vs2: 1, vs1: 0 },
+
+            // vid.v writes element index into vd; the vs2 field of the encoded
+            // instruction is part of the opcode (must be zero per spec) and is
+            // not a register operand, so the alignment check should not apply.
+            VIdV => VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 },
 
             // ── Mask logical (all operands are single mask registers) ────
             VMAndMM | VMNandMM | VMAndnMM | VMOrMM | VMNorMM | VMOrnMM |

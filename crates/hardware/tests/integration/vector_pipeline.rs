@@ -164,6 +164,20 @@ fn vwaddu_vv(vd: u32, vs2: u32, vs1: u32) -> u32 {
     (0b110000 << 26) | (1 << 25) | (vs2 << 20) | (vs1 << 15) | (0b010 << 12) | (vd << 7) | 0x57
 }
 
+/// Encode `vid.v vd` (VMUNARY0 funct6=0b010100 with vs1=0b10001, vm=1).
+/// The vs2 field is part of the opcode (must be 0 per spec) and is not a
+/// register operand. Optionally pass a non-zero `vs2_field` to verify the
+/// implementation tolerates non-canonical encodings (spike does).
+fn vid_v(vd: u32, vs2_field: u32) -> u32 {
+    (0b010100 << 26)
+        | (1 << 25)
+        | ((vs2_field & 0x1F) << 20)
+        | (0b10001 << 15)
+        | (0b010 << 12)
+        | (vd << 7)
+        | 0x57
+}
+
 /// `vwaddu.vv` at fractional LMUL (e8/mf8) must NOT raise an
 /// illegal-instruction trap purely because vd happens to be misaligned to a
 /// 2-register boundary. With mf8 the doubled EMUL is mf4 — still ≤ 1
@@ -192,4 +206,33 @@ fn vwaddu_vv_at_mf8_does_not_trap_for_odd_vd() {
     let mcause = ctx.cpu().csrs.mcause;
     assert_eq!(mcause, 0, "vwaddu.vv at e8/mf8 with vd=v27 must not trap (mcause={:#x})", mcause);
     assert_eq!(ctx.cpu().csrs.vl, 2);
+}
+
+/// `vid.v` does not read any vector source register — its vs2 field is part
+/// of the opcode (the spec requires it to be 0, but spike tolerates other
+/// values). The decode-time alignment check must NOT treat the vs2 field as
+/// a vector register operand, otherwise a non-canonical (yet harmless)
+/// encoding will fault as illegal-instruction.
+///
+/// Regression for the chipsalliance vid_v-0/-1 fails: rvsim's
+/// `operand_groups` was claiming `vs2: lmul` for VIdV, so the alignment
+/// check rejected encodings whose vs2 field happened to be non-zero
+/// (e.g. test programs setting vs2_field=1 with LMUL=m2).
+#[test]
+fn vid_v_does_not_check_vs2_alignment() {
+    let program: Vec<u32> = std::iter::empty()
+        .chain([
+            addi(5, 0, 4),                                      // li t0, 4
+            vsetvli(6, 5, vtype(SEW_E8, 0b001 /* m2 */, 0, 0)), // vl=4 at e8/m2
+            // Encode vid.v with non-canonical vs2_field=1; lmul=m2 means
+            // group=2, so vs2=1 would be misaligned IF treated as an operand.
+            vid_v(12, 1),
+        ])
+        .chain(std::iter::repeat(NOP).take(32))
+        .collect();
+
+    let ctx = run_program(wide_inorder_config(), &program, 96);
+
+    let mcause = ctx.cpu().csrs.mcause;
+    assert_eq!(mcause, 0, "vid.v with vs2_field=1 must not trap (mcause={:#x})", mcause);
 }
