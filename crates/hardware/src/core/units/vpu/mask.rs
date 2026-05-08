@@ -411,6 +411,40 @@ mod tests {
     // ── Mask logical tests ────────────────────────────────────────────────
 
     #[test]
+    fn test_vid_mf8_e8() {
+        // vid.v at SEW=E8, LMUL=mf8: VLMAX = (128/8)*1/8 = 2. With vl=2,
+        // expect vd[0]=0, vd[1]=1, and bytes 2..16 of vd preserved.
+        let mut vpr = test_vpr();
+        let vd = VRegIdx::new(2);
+        // Pre-fill v2 with sentinel.
+        for i in 0..16usize {
+            vpr.write_element(vd, ElemIdx::new(i), Sew::E8, 0xAA);
+        }
+        let ctx = VecExecCtx {
+            sew: Sew::E8,
+            vl: 2,
+            vstart: 0,
+            vma: MaskPolicy::Undisturbed,
+            vta: TailPolicy::Undisturbed,
+            vlmul: Vlmul::Mf8,
+            vm: true,
+            vxrm: Vxrm::RoundToNearestUp,
+            frm: RoundingMode::Rne,
+            zvfh: false,
+        };
+        let _ = exec_vid(&mut vpr, vd, &ctx);
+        assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E8), 0);
+        assert_eq!(vpr.read_element(vd, ElemIdx::new(1), Sew::E8), 1);
+        for i in 2..16 {
+            assert_eq!(
+                vpr.read_element(vd, ElemIdx::new(i), Sew::E8),
+                0xAA,
+                "tail byte {i} should be preserved (tu)"
+            );
+        }
+    }
+
+    #[test]
     fn test_vmand() {
         let mut vpr = test_vpr();
         let vd = VRegIdx::new(2);

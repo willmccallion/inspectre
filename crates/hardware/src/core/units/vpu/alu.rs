@@ -1360,6 +1360,50 @@ mod tests {
     }
 
     #[test]
+    fn test_vwaddu_mf8_widen() {
+        // vwaddu.vv at SEW=E8, LMUL=mf8 with vl=2.
+        // VLMAX = (128/8)*1/8 = 2 elements at E8. Widens to E16.
+        // Source elements vs2[0]=5, vs2[1]=7. Scalar = 3.
+        // Expected: vd[0]@E16 = 8, vd[1]@E16 = 10. Tail bytes unchanged (tu).
+        let mut vpr = make_vpr();
+        let vd = VRegIdx::new(4);
+        let vs2 = VRegIdx::new(8);
+        vpr.write_element(vs2, ElemIdx::new(0), Sew::E8, 5);
+        vpr.write_element(vs2, ElemIdx::new(1), Sew::E8, 7);
+        // Sentinel: pre-fill v4 with 0xAA to detect tail clobbering.
+        for i in 0..16usize {
+            vpr.write_element(vd, ElemIdx::new(i), Sew::E8, 0xAA);
+        }
+
+        let _ = vec_execute(
+            VectorOp::VWAddU,
+            &mut vpr,
+            vd,
+            vs2,
+            VecOperand::Scalar(3),
+            Sew::E8,
+            2,
+            0,
+            MaskPolicy::Undisturbed,
+            TailPolicy::Undisturbed,
+            Vlmul::Mf8,
+            true,
+            Vxrm::RoundToNearestUp,
+        );
+
+        assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E16), 0x0008);
+        assert_eq!(vpr.read_element(vd, ElemIdx::new(1), Sew::E16), 0x000a);
+        // Tail bytes [4..16] should still be 0xAA (Undisturbed)
+        for i in 4..16 {
+            assert_eq!(
+                vpr.read_element(vd, ElemIdx::new(i), Sew::E8),
+                0xAA,
+                "tail byte {i} clobbered"
+            );
+        }
+    }
+
+    #[test]
     fn test_vwadd_signed() {
         let mut vpr = make_vpr();
         let vd = VRegIdx::new(2);
