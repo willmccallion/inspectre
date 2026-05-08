@@ -598,12 +598,13 @@ fn compute_widening_macc(
             (prod as u64).wrapping_add(acc) & wmask
         }
         VectorOp::VWMaccSU => {
-            let prod = (sign_extend(vs2_val, sew) as i128) * (u1 as i128);
+            // signed(rs1/vs1) * unsigned(vs2)
+            let prod = (sign_extend(op1_val, sew) as i128) * (u2 as i128);
             (prod as u64).wrapping_add(acc) & wmask
         }
         VectorOp::VWMaccUS => {
-            // op1 is signed, vs2 is unsigned
-            let prod = (u2 as i128) * (sign_extend(op1_val, sew) as i128);
+            // unsigned(rs1) * signed(vs2)  (.vx form only)
+            let prod = (u1 as i128) * (sign_extend(vs2_val, sew) as i128);
             (prod as u64).wrapping_add(acc) & wmask
         }
         _ => unreachable!(),
@@ -1342,25 +1343,22 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E8), 155);
     }
 
-    /// vwmaccus.vx with rs1 sign-extended from a single-byte negative value.
-    /// vd[0] (e16) starts at 0; vs2[0] (e8 unsigned) = 0x80 = 128;
-    /// rs1 = 0xfffffffffffffff8 (i.e. -8 sign-extended from i8 0xf8).
-    /// Result = 0 + (-8) * 128 = -1024 = 0xfc00 (i16).
+    /// vwmaccus.vx: vd[i] += unsigned(rs1) * signed(vs2[i]).
+    /// vs2[0] = 0x80 (i8 = -128); rs1 = 0xfffffffffffffff8 (low 8 bits 0xf8 = u8 248).
+    /// Product = 248 * -128 = -31744 → 0x8400 in u16.
     #[test]
-    fn test_vwmaccus_vx_negative_rs1() {
+    fn test_vwmaccus_vx_signed_vs2() {
         let mut vpr = make_vpr();
         let vd = VRegIdx::new(1);
         let vs2 = VRegIdx::new(2);
         vpr.write_element(vs2, ElemIdx::new(0), Sew::E8, 0x80);
-        // rs1 already sign-extended to 64 bits (as a real GPR would be).
         let rs1: u64 = (-8_i64) as u64;
         let _ = run(VectorOp::VWMaccUS, &mut vpr, vd, vs2, VecOperand::Scalar(rs1), Sew::E8, 1);
-        assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E16), 0xfc00);
+        assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E16), 0x8400);
     }
 
-    /// vwmaccsu.vv: vd[0] (e16) = 0 + sext(vs2[0]) * zext(vs1[0]).
-    /// vs2[0] = 0x80 (i8 = -128), vs1[0] = 0x80 (u8 = 128). Product = -16384
-    /// = 0xc000 (i16).
+    /// vwmaccsu.vv: vd[i] += signed(vs1[i]) * unsigned(vs2[i]).
+    /// vs1[0] = 0x80 (i8 = -128), vs2[0] = 0x80 (u8 = 128). Product = -16384 = 0xc000.
     #[test]
     fn test_vwmaccsu_vv_signed_unsigned() {
         let mut vpr = make_vpr();
