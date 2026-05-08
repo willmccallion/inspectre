@@ -420,3 +420,48 @@ pub const VMNOR: u32 = 0b011110;
 pub const VMORN: u32 = 0b011100;
 /// Mask XNOR (`vmxnor.mm`).
 pub const VMXNOR: u32 = 0b011111;
+
+// ── Vector crypto extensions (opcode 0x77) ──────────────────────────────────
+// Funct6 values for Zvkn*/Zvks*/Zvkg/Zvknh* under OP-V-CRYPTO. The vs1 field
+// of OPMVV-encoded crypto ops is a sub-opcode; see the *_VS1 constants below.
+
+/// `vsm3me.vv` (Zvksh).
+pub const VSM3_ME: u32 = 0b100000; // 0x20
+/// `vsm4k.vi` (Zvksed) — round number from `uimm[3:0]` (vs1 field).
+pub const VSM4_K: u32 = 0b100001; // 0x21
+/// `vaeskf1.vi` (Zvkned) — round number from `uimm[3:0]` (vs1 field).
+pub const VAES_KF1: u32 = 0b100010; // 0x22
+/// `.vv` form of vaes{em,ef,dm,df}/vsm4r/vgmul (per-group key).
+pub const VCRYPTO_VV: u32 = 0b101000; // 0x28
+/// `.vs` form of vaes{em,ef,dm,df}/vsm4r and vaesz (broadcast vs2[0]).
+pub const VCRYPTO_VS: u32 = 0b101001; // 0x29
+/// `vaeskf2.vi` (Zvkned).
+pub const VAES_KF2: u32 = 0b101010; // 0x2A
+/// `vsm3c.vi` (Zvksh).
+pub const VSM3_C: u32 = 0b101011; // 0x2B
+/// `vghsh.vv` (Zvkg).
+pub const VGHSH: u32 = 0b101100; // 0x2C
+/// `vsha2ms.vv` (Zvknha/b).
+pub const VSHA2_MS: u32 = 0b101101; // 0x2D
+/// `vsha2ch.vv` (Zvknha/b).
+pub const VSHA2_CH: u32 = 0b101110; // 0x2E
+/// `vsha2cl.vv` (Zvknha/b).
+pub const VSHA2_CL: u32 = 0b101111; // 0x2F
+
+// vs1 sub-opcode values for the .vv (VCRYPTO_VV) and .vs (VCRYPTO_VS)
+// groups. These come from the 5-bit `vs1` field, returned as `u8` by
+// `v_enc::vs1`.
+/// AES decrypt middle round.
+pub const VAES_VS1_DM: u8 = 0x0;
+/// AES decrypt final round.
+pub const VAES_VS1_DF: u8 = 0x1;
+/// AES encrypt middle round.
+pub const VAES_VS1_EM: u8 = 0x2;
+/// AES encrypt final round.
+pub const VAES_VS1_EF: u8 = 0x3;
+/// AES round-zero (key XOR), only valid in the .vs group.
+pub const VAES_VS1_Z: u8 = 0x7;
+/// SM4 round.
+pub const VSM4_VS1_R: u8 = 0x10;
+/// GMUL (only valid in the .vv group).
+pub const VGMUL_VS1: u8 = 0x11;

@@ -767,10 +767,10 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             c.vs2 = VRegIdx::new(v_enc::vs2(inst));
             c.vec_src_encoding = VecSrcEncoding::VV;
             c.vec_reg_write = true;
-            // funct6=0x29 marks the `.vs` form (vaes*/vsm4r): vs2 element
-            // group 0 is broadcast across all destination groups. funct6=0x28
-            // is the `.vv` form (per-group key).
-            c.vec_broadcast_vs2 = f6 == 0x29;
+            // funct6 = VCRYPTO_VS marks the `.vs` form (vaes*/vsm4r): vs2
+            // element group 0 is broadcast across all destination groups.
+            // VCRYPTO_VV is the `.vv` form (per-group key).
+            c.vec_broadcast_vs2 = f6 == v_f6::VCRYPTO_VS;
             c.vec_op = decode_opcrypto(f6, inst)?;
         }
         _ => return Err(Trap::IllegalInstruction(inst)),
@@ -779,48 +779,42 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
 }
 
 /// Decode opcode 0x77 (Zvkn*/Zvks*/Zvkg crypto extensions).
+///
+/// All crypto ops use funct3=OPMVV; funct6 selects the family. The .vv
+/// (per-group key) and .vs (broadcast vs2[0]) variants of the AES/SM4
+/// rounds use distinct funct6 values and a shared vs1 sub-opcode set —
+/// the caller must inspect the original funct6 to set
+/// `vec_broadcast_vs2` accordingly.
 const fn decode_opcrypto(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
     let vs1 = v_enc::vs1(inst);
     Ok(match f6 {
-        // funct6=0x20 — Zvksh: vsm3me.vv
-        0x20 => VectorOp::VSm3Me,
-        // funct6=0x21 — Zvksed: vsm4k.vi (vs1 is zimm5 round number)
-        0x21 => VectorOp::VSm4K,
-        // funct6=0x22 — Zvkned: vaeskf1.vi (vs1 is zimm5 round number)
-        0x22 => VectorOp::VAesKf1,
-        // funct6=0x28 — Zvkned/Zvksed/Zvkg .vv-form ops (vs1 sub-field selects)
-        0x28 => match vs1 {
-            0x0 => VectorOp::VAesDm,
-            0x1 => VectorOp::VAesDf,
-            0x2 => VectorOp::VAesEm,
-            0x3 => VectorOp::VAesEf,
-            0x10 => VectorOp::VSm4R,    // vsm4r.vv
-            0x11 => VectorOp::VGmul,    // vgmul.vv
+        v_f6::VSM3_ME => VectorOp::VSm3Me,
+        v_f6::VSM4_K => VectorOp::VSm4K,
+        v_f6::VAES_KF1 => VectorOp::VAesKf1,
+        v_f6::VCRYPTO_VV => match vs1 {
+            v_f6::VAES_VS1_DM => VectorOp::VAesDm,
+            v_f6::VAES_VS1_DF => VectorOp::VAesDf,
+            v_f6::VAES_VS1_EM => VectorOp::VAesEm,
+            v_f6::VAES_VS1_EF => VectorOp::VAesEf,
+            v_f6::VSM4_VS1_R => VectorOp::VSm4R,
+            v_f6::VGMUL_VS1 => VectorOp::VGmul,
             _ => return Err(Trap::IllegalInstruction(inst)),
         },
-        // funct6=0x29 — Zvkned/Zvksed .vs-form ops (caller flips
-        // `vec_broadcast_vs2` for these so execute reads vs2 element 0 only).
-        0x29 => match vs1 {
-            0x0 => VectorOp::VAesDm,
-            0x1 => VectorOp::VAesDf,
-            0x2 => VectorOp::VAesEm,
-            0x3 => VectorOp::VAesEf,
-            0x7 => VectorOp::VAesZ,
-            0x10 => VectorOp::VSm4R,    // vsm4r.vs
+        v_f6::VCRYPTO_VS => match vs1 {
+            v_f6::VAES_VS1_DM => VectorOp::VAesDm,
+            v_f6::VAES_VS1_DF => VectorOp::VAesDf,
+            v_f6::VAES_VS1_EM => VectorOp::VAesEm,
+            v_f6::VAES_VS1_EF => VectorOp::VAesEf,
+            v_f6::VAES_VS1_Z => VectorOp::VAesZ,
+            v_f6::VSM4_VS1_R => VectorOp::VSm4R,
             _ => return Err(Trap::IllegalInstruction(inst)),
         },
-        // funct6=0x2A — Zvkned: vaeskf2.vi
-        0x2A => VectorOp::VAesKf2,
-        // funct6=0x2B — Zvksh: vsm3c.vi
-        0x2B => VectorOp::VSm3C,
-        // funct6=0x2C — Zvkg: vghsh.vv
-        0x2C => VectorOp::VGhsh,
-        // funct6=0x2D — Zvknha/b: vsha2ms.vv
-        0x2D => VectorOp::VSha2Ms,
-        // funct6=0x2E — Zvknha/b: vsha2ch.vv
-        0x2E => VectorOp::VSha2Ch,
-        // funct6=0x2F — Zvknha/b: vsha2cl.vv
-        0x2F => VectorOp::VSha2Cl,
+        v_f6::VAES_KF2 => VectorOp::VAesKf2,
+        v_f6::VSM3_C => VectorOp::VSm3C,
+        v_f6::VGHSH => VectorOp::VGhsh,
+        v_f6::VSHA2_MS => VectorOp::VSha2Ms,
+        v_f6::VSHA2_CH => VectorOp::VSha2Ch,
+        v_f6::VSHA2_CL => VectorOp::VSha2Cl,
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
