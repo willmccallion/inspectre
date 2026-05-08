@@ -1078,8 +1078,11 @@ pub struct PipelineConfig {
     #[serde(default = "PipelineConfig::default_elen")]
     pub elen: usize,
 
-    /// Enable Zvfh (half-precision vector FP) extension. Default: false.
-    #[serde(default)]
+    /// Enable Zvfh (half-precision vector FP) extension. Default: true —
+    /// the project ships a Zvfh implementation, so the simulated CPU
+    /// advertises support by default. Set false to model a non-Zvfh CPU
+    /// (e.g., for testing illegal-instruction trap behavior).
+    #[serde(default = "PipelineConfig::default_zvfh")]
     pub zvfh: bool,
 
     /// Number of vector execution lanes. Defaults to vlen/64 (min 1).
@@ -1180,6 +1183,11 @@ impl PipelineConfig {
     const fn default_vec_chaining() -> bool {
         true
     }
+
+    /// Returns the default Zvfh setting (the simulator ships a Zvfh impl).
+    const fn default_zvfh() -> bool {
+        true
+    }
 }
 
 impl Default for PipelineConfig {
@@ -1215,7 +1223,7 @@ impl Default for PipelineConfig {
             store_set: StoreSetConfig::default(),
             vlen: 128,
             elen: 64,
-            zvfh: false,
+            zvfh: true,
             num_vec_lanes: None,
             prf_vpr_size: 64,
             vec_chaining: true,
