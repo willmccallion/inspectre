@@ -687,6 +687,40 @@ fn f32_to_u32_frm(a: f32, frm: RoundingMode) -> (u32, FpFlags) {
     (result, nx)
 }
 
+/// FRM-aware f64 → i32 conversion with saturation (used by narrowing cvt).
+fn f64_to_i32_frm(a: f64, frm: RoundingMode) -> (i32, FpFlags) {
+    if a.is_nan() {
+        return (i32::MAX, FpFlags::NV);
+    }
+    let rounded = round_f64_to_int_per_frm(a, frm);
+    if rounded < i32::MIN as f64 {
+        return (i32::MIN, FpFlags::NV);
+    }
+    if rounded >= 2_147_483_648.0_f64 {
+        return (i32::MAX, FpFlags::NV);
+    }
+    let result = rounded as i32;
+    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    (result, nx)
+}
+
+/// FRM-aware f64 → u32 conversion with saturation (used by narrowing cvt).
+fn f64_to_u32_frm(a: f64, frm: RoundingMode) -> (u32, FpFlags) {
+    if a.is_nan() {
+        return (u32::MAX, FpFlags::NV);
+    }
+    let rounded = round_f64_to_int_per_frm(a, frm);
+    if rounded < 0.0 {
+        return (0, FpFlags::NV);
+    }
+    if rounded >= 4_294_967_296.0_f64 {
+        return (u32::MAX, FpFlags::NV);
+    }
+    let result = rounded as u32;
+    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    (result, nx)
+}
+
 /// FRM-aware f64 → i64 conversion with saturation.
 fn f64_to_i64_frm(a: f64, frm: RoundingMode) -> (i64, FpFlags) {
     if a.is_nan() {
@@ -1846,44 +1880,20 @@ fn exec_fp_narrowing(
                     }
                 }
                 VectorOp::VFNCvtXuF => {
-                    clear_host_fp_flags();
-                    let r = if a64.is_nan() {
-                        u32::MAX as u64
-                    } else {
-                        std::hint::black_box(a64) as u32 as u64
-                    };
-                    (r, read_host_fp_flags())
+                    let (r, f) = f64_to_u32_frm(a64, ctx.frm);
+                    (r as u64, f)
                 }
                 VectorOp::VFNCvtXF => {
-                    clear_host_fp_flags();
-                    let r = if a64.is_nan() {
-                        i32::MAX as u32 as u64
-                    } else {
-                        std::hint::black_box(a64) as i32 as u32 as u64
-                    };
-                    (r, read_host_fp_flags())
+                    let (r, f) = f64_to_i32_frm(a64, ctx.frm);
+                    (r as u32 as u64, f)
                 }
                 VectorOp::VFNCvtRtzXuF => {
-                    clear_host_fp_flags();
-                    let r = if a64.is_nan() {
-                        u32::MAX as u64
-                    } else {
-                        std::hint::black_box(std::hint::black_box(a64) as u32) as u64
-                    };
-                    let f = read_host_fp_flags()
-                        | if a64.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-                    (r, f)
+                    let (r, f) = f64_to_u32_frm(a64, RoundingMode::Rtz);
+                    (r as u64, f)
                 }
                 VectorOp::VFNCvtRtzXF => {
-                    clear_host_fp_flags();
-                    let r = if a64.is_nan() {
-                        i32::MAX as u32 as u64
-                    } else {
-                        std::hint::black_box(std::hint::black_box(a64) as i32) as u32 as u64
-                    };
-                    let f = read_host_fp_flags()
-                        | if a64.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-                    (r, f)
+                    let (r, f) = f64_to_i32_frm(a64, RoundingMode::Rtz);
+                    (r as u32 as u64, f)
                 }
                 VectorOp::VFNCvtFXu => {
                     // Convert full 2*SEW unsigned integer to SEW float.
