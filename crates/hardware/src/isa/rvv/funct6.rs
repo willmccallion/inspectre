@@ -276,6 +276,10 @@ pub const VFDIV: u32 = 0b100000;
 pub const VFRDIV: u32 = 0b100001;
 /// Vector FP multiply (`vfmul`).
 pub const VFMUL: u32 = 0b100100;
+/// Vector FP reverse subtract (`vfrsub`, OPFVF only). Spec places it in the
+/// 0b100xxx funct6 range alongside multiply/divide; OPIVV/OPMVV use the same
+/// value for vsmul/vmulh and disambiguate via funct3.
+pub const VFRSUB: u32 = 0b100111;
 
 // ── FP fused multiply-add (OPFVV/OPFVF) ────────────────────────────────────
 

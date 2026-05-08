@@ -1178,6 +1178,7 @@ const fn decode_opfvf(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         // FP arithmetic
         v_f6::VFADD => (VectorOp::VFAdd, true),
         v_f6::VFSUB => (VectorOp::VFSub, true),
+        v_f6::VFRSUB => (VectorOp::VFRSub, true),
         v_f6::VFMIN => (VectorOp::VFMin, true),
         v_f6::VFMAX => (VectorOp::VFMax, true),
         // FP sign injection
