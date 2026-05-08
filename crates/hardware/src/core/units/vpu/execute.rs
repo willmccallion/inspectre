@@ -60,6 +60,7 @@ fn execute_vec_crypto(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap>
         vstart,
         vl,
         id.inst,
+        id.ctrl.vec_broadcast_vs2,
     );
     cpu.csrs.vstart = 0;
     mark_vs_dirty(cpu);

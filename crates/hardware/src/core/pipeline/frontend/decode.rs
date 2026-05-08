@@ -767,6 +767,10 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             c.vs2 = VRegIdx::new(v_enc::vs2(inst));
             c.vec_src_encoding = VecSrcEncoding::VV;
             c.vec_reg_write = true;
+            // funct6=0x29 marks the `.vs` form (vaes*/vsm4r): vs2 element
+            // group 0 is broadcast across all destination groups. funct6=0x28
+            // is the `.vv` form (per-group key).
+            c.vec_broadcast_vs2 = f6 == 0x29;
             c.vec_op = decode_opcrypto(f6, inst)?;
         }
         _ => return Err(Trap::IllegalInstruction(inst)),
@@ -794,7 +798,8 @@ const fn decode_opcrypto(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
             0x11 => VectorOp::VGmul,    // vgmul.vv
             _ => return Err(Trap::IllegalInstruction(inst)),
         },
-        // funct6=0x29 — Zvkned/Zvksed .vs-form ops
+        // funct6=0x29 — Zvkned/Zvksed .vs-form ops (caller flips
+        // `vec_broadcast_vs2` for these so execute reads vs2 element 0 only).
         0x29 => match vs1 {
             0x0 => VectorOp::VAesDm,
             0x1 => VectorOp::VAesDf,

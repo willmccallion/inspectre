@@ -522,6 +522,11 @@ pub struct ControlSignals {
     /// from M1, which `vec_lmul_regs` collapses to the same value of `1`.
     /// Needed by `operand_groups` to compute the right widening group size.
     pub vec_lmul_is_fractional: bool,
+    /// `true` for `.vs`-form crypto ops where vs2 element group 0 is
+    /// broadcast across all destination element groups (vaesem/ef/dm/df.vs,
+    /// vaesz.vs, vsm4r.vs). Distinguishes from the `.vv` form which uses a
+    /// per-group key. Set at decode based on funct6 (0x29 vs 0x28).
+    pub vec_broadcast_vs2: bool,
 }
 
 /// Vector operation type.

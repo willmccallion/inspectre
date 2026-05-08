@@ -837,7 +837,12 @@ const _SM4_FK_USED: [u32; 4] = SM4_FK;
 /// Execute a vector crypto instruction. Iterates over each EGS-sized element
 /// group within `[vstart, vl)` and applies the round function.
 ///
+/// `broadcast_vs2` is set for the `.vs` forms (vaes*/vsm4r .vs, vaesz),
+/// which use vs2 element group 0 for every destination element group
+/// instead of a per-group key.
+///
 /// Returns nothing; results are written directly to `vd` in `vpr`.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_crypto(
     op: VectorOp,
     vpr: &mut impl VectorRegFile,
@@ -847,6 +852,7 @@ pub fn execute_crypto(
     vstart: usize,
     vl: usize,
     inst: u32,
+    broadcast_vs2: bool,
 ) {
     let egs = if matches!(op, VectorOp::VSm3Me | VectorOp::VSm3C) { EGS_SM3 } else { EGS_AES };
     let _ = EGS_SHA; // SHA-256 uses EGS_AES (=4); kept named for clarity.
@@ -856,37 +862,41 @@ pub fn execute_crypto(
         return;
     }
 
+    // For the .vs form, vs2 element group 0 is broadcast across all
+    // destination element groups. For the .vv form, key is per-group.
+    let key_base = |base: usize| if broadcast_vs2 { 0 } else { base };
+
     // Process groups starting at base elements 0, EGS, 2*EGS, ...
     let mut base = (vstart / egs) * egs;
     while base + egs <= vl {
         match op {
             VectorOp::VAesEm => {
                 let state = read_egs4_u32(vpr, vd_idx, base);
-                let key = read_egs4_u32(vpr, vs2_idx, base);
+                let key = read_egs4_u32(vpr, vs2_idx, key_base(base));
                 let r = aes_round_enc(state, key);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VAesEf => {
                 let state = read_egs4_u32(vpr, vd_idx, base);
-                let key = read_egs4_u32(vpr, vs2_idx, base);
+                let key = read_egs4_u32(vpr, vs2_idx, key_base(base));
                 let r = aes_round_enc_final(state, key);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VAesDm => {
                 let state = read_egs4_u32(vpr, vd_idx, base);
-                let key = read_egs4_u32(vpr, vs2_idx, base);
+                let key = read_egs4_u32(vpr, vs2_idx, key_base(base));
                 let r = aes_round_dec(state, key);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VAesDf => {
                 let state = read_egs4_u32(vpr, vd_idx, base);
-                let key = read_egs4_u32(vpr, vs2_idx, base);
+                let key = read_egs4_u32(vpr, vs2_idx, key_base(base));
                 let r = aes_round_dec_final(state, key);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VAesZ => {
+                // VAesZ is .vs-only per Zvkned, so vs2 always reads element 0.
                 let state = read_egs4_u32(vpr, vd_idx, base);
-                // For the .vs form, vs2 element group 0 is broadcast.
                 let key = read_egs4_u32(vpr, vs2_idx, 0);
                 let r = aes_round_zero(state, key);
                 write_egs4_u32(vpr, vd_idx, base, r);
@@ -941,8 +951,7 @@ pub fn execute_crypto(
             }
             VectorOp::VSm4R => {
                 let vd = read_egs4_u32(vpr, vd_idx, base);
-                let vs2_base = if is_vs_form_sm4(inst) { 0 } else { base };
-                let vs2 = read_egs4_u32(vpr, vs2_idx, vs2_base);
+                let vs2 = read_egs4_u32(vpr, vs2_idx, key_base(base));
                 let r = sm4_r(vd, vs2);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
@@ -970,13 +979,6 @@ pub fn execute_crypto(
         }
         base += egs;
     }
-}
-
-/// Returns true if the AES/SM4 instruction encoding is the `.vs` form (broadcast key).
-#[inline]
-const fn is_vs_form_sm4(inst: u32) -> bool {
-    // funct6 = bits[31:26]; .vs uses 0x29, .vv uses 0x28.
-    ((inst >> 26) & 0x3f) == 0x29
 }
 
 #[cfg(test)]
