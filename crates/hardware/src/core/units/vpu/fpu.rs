@@ -441,6 +441,105 @@ fn vfrsqrt7_64(bits: u64) -> (u64, FpFlags) {
     (result, FpFlags::NONE)
 }
 
+/// Compute vfrsqrt7 for an f16 value. Returns `(f16_result_bits, flags)`.
+fn vfrsqrt7_16(bits: u16) -> (u16, FpFlags) {
+    let sign = bits >> 15;
+    let mut exp = ((bits >> 10) & 0x1F) as i32;
+    let mut sig = (bits & 0x03FF) as u32;
+
+    // NaN: exp=31, sig != 0 (bit 9 of sig = quiet/signaling indicator).
+    if exp == 0x1F && sig != 0 {
+        let f = if sig & 0x0200 == 0 { FpFlags::NV } else { FpFlags::NONE };
+        return (CANONICAL_NAN_F16, f);
+    }
+    // +inf → +0; -inf → NaN (sqrt of negative).
+    if exp == 0x1F && sig == 0 {
+        if sign != 0 {
+            return (CANONICAL_NAN_F16, FpFlags::NV);
+        }
+        return (0, FpFlags::NONE);
+    }
+    // ±0 → ±inf, divide-by-zero.
+    if exp == 0 && sig == 0 {
+        let r: u16 = if sign != 0 { 0xFC00 } else { 0x7C00 };
+        return (r, FpFlags::DZ);
+    }
+    // sqrt of negative non-zero → NaN.
+    if sign != 0 {
+        return (CANONICAL_NAN_F16, FpFlags::NV);
+    }
+
+    // Subnormal: normalize, shift sig left until bit 9 is set.
+    if exp == 0 {
+        while sig & 0x0200 == 0 {
+            sig <<= 1;
+            exp -= 1;
+        }
+        sig &= !0x0200;
+    }
+
+    // Lookup: idx = {exp[0], sig[9:4]}.
+    let idx = (((exp & 1) << 6) | ((sig >> 4) as i32 & 0x3F)) as usize;
+    let out_sig = RSQRT7_TABLE[idx] as u16;
+
+    // Output exp = (3 * bias - 1 - exp) / 2  with bias = 15.
+    let out_exp = ((3 * 15 - 1 - exp) >> 1) as u16;
+
+    let result = (out_exp << 10) | (out_sig << 3);
+    (result, FpFlags::NONE)
+}
+
+/// Compute vfrec7 for an f16 value. Returns `(f16_result_bits, flags)`.
+fn vfrec7_16(bits: u16) -> (u16, FpFlags) {
+    let sign = bits >> 15;
+    let mut exp = ((bits >> 10) & 0x1F) as i32;
+    let mut sig = (bits & 0x03FF) as u32;
+
+    if exp == 0x1F && sig != 0 {
+        let f = if sig & 0x0200 == 0 { FpFlags::NV } else { FpFlags::NONE };
+        return (CANONICAL_NAN_F16, f);
+    }
+    // ±inf → ±0.
+    if exp == 0x1F && sig == 0 {
+        return (sign << 15, FpFlags::NONE);
+    }
+    // ±0 → ±inf, divide-by-zero.
+    if exp == 0 && sig == 0 {
+        return ((sign << 15) | 0x7C00, FpFlags::DZ);
+    }
+
+    // Subnormal: normalize.
+    if exp == 0 {
+        while sig & 0x0200 == 0 {
+            sig <<= 1;
+            exp -= 1;
+        }
+        sig &= !0x0200;
+    }
+
+    let idx = ((sig >> 3) & 0x7F) as usize;
+    let out_sig = REC7_TABLE[idx] as u32;
+
+    // Output exp = 2 * bias - 1 - exp = 29 - exp (bias = 15).
+    let out_exp = 29 - exp;
+
+    if out_exp <= 0 {
+        // Subnormal result: insert the implicit 1 (bit 7), shift right by
+        // (1 - out_exp) so the result fits, place at bits [9:2] of the f16
+        // mantissa (top 8 bits, since the implicit 1 becomes part of sig).
+        let shift = (1 - out_exp) as u32;
+        let mantissa = ((out_sig | 0x80) >> shift) << 2;
+        return ((sign << 15) | mantissa as u16, FpFlags::NONE);
+    }
+    if out_exp >= 0x1F {
+        // Overflow → ±inf, raise OF + NX.
+        return ((sign << 15) | 0x7C00, FpFlags::OF | FpFlags::NX);
+    }
+
+    let result = (sign << 15) | ((out_exp as u16) << 10) | ((out_sig as u16) << 3);
+    (result, FpFlags::NONE)
+}
+
 /// Compute vfrec7 for an f32 value. Returns `(result_bits, flags)`.
 ///
 /// Implements the RVV 1.0 §13.10 lookup-table algorithm for a 7-bit accurate
@@ -1103,6 +1202,14 @@ fn compute_f16(op: VectorOp, vs2_bits: u64, op1_bits: u64, rm: RoundingMode) -> 
         }
         VectorOp::VFCvtFXu => round(vs2_bits as u16 as f64, FpFlags::NONE),
         VectorOp::VFCvtFX => round(sign_extend(vs2_bits, Sew::E16) as i16 as f64, FpFlags::NONE),
+        VectorOp::VFRsqrt7 => {
+            let (r, f) = vfrsqrt7_16(ha);
+            (r as u64, f)
+        }
+        VectorOp::VFRec7 => {
+            let (r, f) = vfrec7_16(ha);
+            (r as u64, f)
+        }
         _ => (0, FpFlags::NONE),
     }
 }
