@@ -20,9 +20,15 @@ impl Default for TestContext {
 
 impl TestContext {
     pub fn new() -> Self {
+        Self::new_with_config(Config::default())
+    }
+
+    /// Construct a TestContext with a caller-supplied `Config` (e.g. to vary
+    /// pipeline width or backend type when reproducing pipeline-integration
+    /// bugs). Otherwise identical to `new()`.
+    pub fn new_with_config(config: Config) -> Self {
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let config = Config::default();
         let bus = Bus::new(8, 0);
 
         let system = System {
