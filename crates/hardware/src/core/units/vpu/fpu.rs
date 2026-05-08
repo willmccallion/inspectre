@@ -838,6 +838,38 @@ fn f64_to_i64_frm(a: f64, frm: RoundingMode) -> (i64, FpFlags) {
     (result, nx)
 }
 
+/// Round-to-odd narrowing of an f64 to an f32. Used by vfncvt.rod.f.f.w.
+///
+/// The semantic per RVV: "round to nearest, but if the result is inexact,
+/// produce the value with the odd LSB". Equivalently, **truncate** to f32
+/// precision and OR-jam the LSB to 1 if any bit was lost. This is *not*
+/// the same as Rust's RNE-then-jam: RNE can round UP across the mantissa
+/// boundary (e.g. 0x3FFFFFFFFFFFFFFF rounds to 2.0, not 1.999…),
+/// producing a value with the wrong LSB after jamming.
+fn f64_to_f32_round_to_odd(a: f64) -> f32 {
+    if a.is_nan() {
+        return f32::NAN;
+    }
+    if a.is_infinite() {
+        return if a.is_sign_positive() { f32::INFINITY } else { f32::NEG_INFINITY };
+    }
+    let bits = a.to_bits();
+    // f32 keeps the top 23 bits of the f64 mantissa (bits 51:29). The
+    // bottom 29 bits (28:0) are dropped during narrowing — we want to
+    // detect any non-zero bit there and jam.
+    const LOST_MASK: u64 = (1u64 << 29) - 1; // bits 28:0
+    let lost = bits & LOST_MASK;
+    let truncated_bits = bits & !LOST_MASK;
+    // The truncated f64 IS exactly representable in f32 (it has at most 23
+    // mantissa bits set), so the cast is lossless.
+    let truncated_f32 = f64::from_bits(truncated_bits) as f32;
+    if lost != 0 && !truncated_f32.is_nan() && !truncated_f32.is_infinite() {
+        f32::from_bits(truncated_f32.to_bits() | 1)
+    } else {
+        truncated_f32
+    }
+}
+
 /// FRM-aware f64 → u64 conversion with saturation.
 fn f64_to_u64_frm(a: f64, frm: RoundingMode) -> (u64, FpFlags) {
     if a.is_nan() {
@@ -1973,22 +2005,11 @@ fn exec_fp_narrowing(
                     (box_f32_canon(r) & 0xFFFF_FFFF, read_host_fp_flags())
                 }
                 VectorOp::VFNCvtRodFF => {
-                    // Round-to-odd (jamming): if the f64→f32 conversion is
-                    // inexact, set the LSB of the f32 mantissa to 1. This
-                    // prevents double-rounding errors in chained narrowing
-                    // (e.g. f64→f32→f16). Per SoftFloat semantics, round-to-odd
-                    // does not raise the inexact (NX) flag.
-                    clear_host_fp_flags();
-                    let r = std::hint::black_box(std::hint::black_box(a64) as f32);
-                    let hw_flags = read_host_fp_flags();
-                    if !r.is_nan() && !r.is_infinite() && (r as f64) != a64 {
-                        // Inexact: jam LSB to 1, suppress NX
-                        let jammed = f32::from_bits(r.to_bits() | 1);
-                        let flags_no_nx = FpFlags::from_bits(hw_flags.bits() & !FpFlags::NX.bits());
-                        (box_f32_canon(jammed) & 0xFFFF_FFFF, flags_no_nx)
-                    } else {
-                        (box_f32_canon(r) & 0xFFFF_FFFF, hw_flags)
-                    }
+                    // Round-to-odd: truncate to f32 precision and jam LSB to 1
+                    // if any bit was lost. Round-to-odd does not raise the
+                    // inexact flag (per Zvfh).
+                    let r = f64_to_f32_round_to_odd(a64);
+                    (box_f32_canon(r) & 0xFFFF_FFFF, FpFlags::NONE)
                 }
                 VectorOp::VFNCvtXuF => {
                     let (r, f) = f64_to_u32_frm(a64, ctx.frm);
