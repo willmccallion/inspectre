@@ -756,6 +756,23 @@ fn f64_to_u64_frm(a: f64, frm: RoundingMode) -> (u64, FpFlags) {
     (result, nx)
 }
 
+/// FRM-aware f32 → i64 conversion (used by widening vfwcvt). Promotes to
+/// f64 first (lossless for f32) and reuses `f64_to_i64_frm`.
+fn f32_to_i64_frm(a: f32, frm: RoundingMode) -> (i64, FpFlags) {
+    if a.is_nan() {
+        return (i64::MAX, FpFlags::NV);
+    }
+    f64_to_i64_frm(a as f64, frm)
+}
+
+/// FRM-aware f32 → u64 conversion (used by widening vfwcvt).
+fn f32_to_u64_frm(a: f32, frm: RoundingMode) -> (u64, FpFlags) {
+    if a.is_nan() {
+        return (u64::MAX, FpFlags::NV);
+    }
+    f64_to_u64_frm(a as f64, frm)
+}
+
 fn compute_f32(op: VectorOp, vs2_bits: u64, op1_bits: u64, frm: RoundingMode) -> (u64, FpFlags) {
     let a = elem_to_f32(vs2_bits);
     let b = elem_to_f32(op1_bits);
@@ -1591,46 +1608,33 @@ fn exec_fp_widening(
                     | VectorOp::VFWCvtFXu
                     | VectorOp::VFWCvtFX
             ) {
-                clear_host_fp_flags();
-                let bits = match op {
+                let (bits, f) = match op {
                     VectorOp::VFWCvtXuF => {
                         let a = elem_to_f32(vs2_raw);
-                        if a.is_nan() { u64::MAX } else { a as u64 }
+                        let (r, fl) = f32_to_u64_frm(a, ctx.frm);
+                        (r, fl)
                     }
                     VectorOp::VFWCvtXF => {
                         let a = elem_to_f32(vs2_raw);
-                        if a.is_nan() { i64::MAX as u64 } else { a as i64 as u64 }
+                        let (r, fl) = f32_to_i64_frm(a, ctx.frm);
+                        (r as u64, fl)
                     }
                     VectorOp::VFWCvtRtzXuF => {
                         let a = elem_to_f32(vs2_raw);
-                        if a.is_nan() {
-                            u64::MAX
-                        } else {
-                            std::hint::black_box(std::hint::black_box(a) as u64)
-                        }
+                        let (r, fl) = f32_to_u64_frm(a, RoundingMode::Rtz);
+                        (r, fl)
                     }
                     VectorOp::VFWCvtRtzXF => {
                         let a = elem_to_f32(vs2_raw);
-                        if a.is_nan() {
-                            i64::MAX as u64
-                        } else {
-                            std::hint::black_box(std::hint::black_box(a) as i64) as u64
-                        }
+                        let (r, fl) = f32_to_i64_frm(a, RoundingMode::Rtz);
+                        (r as u64, fl)
                     }
-                    VectorOp::VFWCvtFXu => (vs2_raw as u32 as f64).to_bits(),
-                    VectorOp::VFWCvtFX => (sign_extend(vs2_raw, ctx.sew) as i32 as f64).to_bits(),
-                    _ => 0,
+                    VectorOp::VFWCvtFXu => ((vs2_raw as u32 as f64).to_bits(), FpFlags::NONE),
+                    VectorOp::VFWCvtFX => {
+                        ((sign_extend(vs2_raw, ctx.sew) as i32 as f64).to_bits(), FpFlags::NONE)
+                    }
+                    _ => (0, FpFlags::NONE),
                 };
-                // RTZ variants previously skipped flag reporting. All float→int
-                // conversions must report NV for NaN/out-of-range and NX for inexact.
-                let nan_input = matches!(
-                    op,
-                    VectorOp::VFWCvtRtzXuF
-                        | VectorOp::VFWCvtRtzXF
-                        | VectorOp::VFWCvtXuF
-                        | VectorOp::VFWCvtXF
-                ) && elem_to_f32(vs2_raw).is_nan();
-                let f = read_host_fp_flags() | if nan_input { FpFlags::NV } else { FpFlags::NONE };
                 flags = flags | f;
                 vpr.write_element(vd_idx, ElemIdx::new(i), wsew, bits);
                 continue;
