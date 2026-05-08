@@ -341,16 +341,16 @@ const fn rot_word(w: u32) -> u32 {
 
 /// AES-128 forward key schedule round (Zvkned §vaeskf1).
 ///
-/// Per the RVV crypto spec, takes the previous round key (4 words) and a
-/// round number `rnd` (1–10). Out-of-range values: the spec normalises
-/// `rnd` by XOR with 0x8; if still out of range the behaviour is reserved
-/// (we clamp to keep the simulator deterministic).
+/// Per the RVV crypto spec, the round number comes from `uimm[3:0]`
+/// (uimm[4] is reserved/ignored). The valid range is 1..=10; if the
+/// 4-bit value falls outside that range, the spec says the round
+/// number is `uimm[3:0] XOR 0x8`.
 fn aes_kf1(prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
-    let mut r = rnd & 0x1f;
+    let mut r = rnd & 0xf;
     if !(1..=10).contains(&r) {
         r ^= 0x8;
     }
-    let r = (r as usize).min(AES_RCON.len() - 1);
+    let r = r as usize;
     let temp = sub_word(rot_word(prev_key[3])) ^ u32::from(AES_RCON[r]);
     let w0 = prev_key[0] ^ temp;
     let w1 = prev_key[1] ^ w0;
@@ -362,10 +362,14 @@ fn aes_kf1(prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
 /// AES-256 forward key schedule round (Zvkned §vaeskf2).
 ///
 /// Takes the current round key (vd, 4 words) and the previous round key
-/// (vs2, 4 words) and a round number `rnd` (2–14). Even rounds apply
-/// SubWord(RotWord) ⊕ Rcon, odd rounds just SubWord (no rotate, no Rcon).
+/// (vs2, 4 words) and a round number `rnd` (2–14). The round number comes
+/// from `uimm[3:0]` (uimm[4] is reserved). Out-of-range values are
+/// normalised by XOR with 0x8.
+///
+/// Even rounds apply SubWord(RotWord) ⊕ Rcon, odd rounds just SubWord
+/// (no rotate, no Rcon).
 fn aes_kf2(curr_key: [u32; 4], prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
-    let mut r = rnd & 0x1f;
+    let mut r = rnd & 0xf;
     if !(2..=14).contains(&r) {
         r ^= 0x8;
     }
