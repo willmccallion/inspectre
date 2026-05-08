@@ -161,6 +161,11 @@ const fn build_operand1(id: &RenameIssueEntry) -> VecOperand {
                     | VectorOp::VNClip
                     | VectorOp::VSSrl
                     | VectorOp::VSSra
+                    // Slides and gather take a zero-extended 5-bit
+                    // immediate, not a sign-extended one.
+                    | VectorOp::VSlideUp
+                    | VectorOp::VSlideDown
+                    | VectorOp::VRgather
                     // Zvbb shifts/rotates use unsigned immediates.
                     | VectorOp::VWsll
                     | VectorOp::VRor
