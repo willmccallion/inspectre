@@ -366,8 +366,133 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (result & mask, false)
         }
 
+        // ── Zvbb (Vector Bit-manipulation for Crypto) ───────────────────
+        VectorOp::VAndN => ((vs2 & !op1) & mask, false),
+
+        // Bit reverse within element: reverse all SEW bits.
+        VectorOp::VBrev => {
+            let v = vs2 & mask;
+            let r = bit_reverse(v, bits);
+            (r & mask, false)
+        }
+        // Bit reverse within each byte of the element.
+        VectorOp::VBrev8 => {
+            let mut out: u64 = 0;
+            let nbytes = bits / 8;
+            for i in 0..nbytes {
+                let b = ((vs2 >> (i * 8)) & 0xff) as u8;
+                out |= u64::from(b.reverse_bits()) << (i * 8);
+            }
+            (out & mask, false)
+        }
+        // Byte reverse within element.
+        VectorOp::VRev8 => {
+            let mut out: u64 = 0;
+            let nbytes = bits / 8;
+            for i in 0..nbytes {
+                let b = (vs2 >> (i * 8)) & 0xff;
+                let dst = nbytes - 1 - i;
+                out |= b << (dst * 8);
+            }
+            (out & mask, false)
+        }
+        // Count leading zeros at SEW width.
+        VectorOp::VClz => {
+            let v = vs2 & mask;
+            let lz = if v == 0 { bits as u32 } else {
+                v.leading_zeros() - (64 - bits as u32)
+            };
+            (u64::from(lz) & mask, false)
+        }
+        // Count trailing zeros at SEW width.
+        VectorOp::VCtz => {
+            let v = vs2 & mask;
+            let tz = if v == 0 { bits as u32 } else { v.trailing_zeros() };
+            (u64::from(tz) & mask, false)
+        }
+        // Per-element population count.
+        VectorOp::VCpopV => {
+            let v = vs2 & mask;
+            (u64::from(v.count_ones()) & mask, false)
+        }
+        // Rotate left (shift amount taken mod SEW).
+        VectorOp::VRol => {
+            let shamt = (op1 & (bits as u64 - 1)) as u32;
+            let v = vs2 & mask;
+            let r = if shamt == 0 {
+                v
+            } else {
+                ((v << shamt) | (v >> (bits as u32 - shamt))) & mask
+            };
+            (r, false)
+        }
+        // Rotate right.
+        VectorOp::VRor => {
+            let shamt = (op1 & (bits as u64 - 1)) as u32;
+            let v = vs2 & mask;
+            let r = if shamt == 0 {
+                v
+            } else {
+                ((v >> shamt) | (v << (bits as u32 - shamt))) & mask
+            };
+            (r, false)
+        }
+
+        // ── Zvbc carryless multiply (per-element GF(2) multiply) ────────
+        // Defined only for SEW=64 in the spec but the chipsalliance generator
+        // also exercises smaller SEW; the bit loop generalises naturally.
+        VectorOp::VClMul => {
+            let a = vs2 & mask;
+            let b = op1 & mask;
+            (clmul_low(a, b, bits) & mask, false)
+        }
+        VectorOp::VClMulH => {
+            let a = vs2 & mask;
+            let b = op1 & mask;
+            (clmul_high(a, b, bits) & mask, false)
+        }
+
         _ => unreachable!(),
     }
+}
+
+/// Reverse the low `bits` bits of `v`. (`u64::reverse_bits` reverses all 64.)
+#[inline]
+const fn bit_reverse(v: u64, bits: usize) -> u64 {
+    v.reverse_bits() >> (64 - bits)
+}
+
+/// Carry-less multiply (GF(2)): low SEW bits of the 2*SEW-bit product.
+///
+/// For each set bit `i` in `a`, XOR `b << i` into the accumulator.
+/// Equivalent to a polynomial multiply over GF(2).
+#[inline]
+const fn clmul_low(a: u64, b: u64, bits: usize) -> u64 {
+    let mut acc: u64 = 0;
+    let mut i = 0;
+    while i < bits {
+        if (a >> i) & 1 != 0 {
+            acc ^= b << i;
+        }
+        i += 1;
+    }
+    acc
+}
+
+/// Carry-less multiply (GF(2)): high SEW bits of the 2*SEW-bit product.
+#[inline]
+const fn clmul_high(a: u64, b: u64, bits: usize) -> u64 {
+    let mut acc: u64 = 0;
+    let mut i = 1; // bit 0 of high half corresponds to bit `bits` of full product
+    while i < bits {
+        if (a >> i) & 1 != 0 {
+            // b shifted left by `i`, then we want bits [bits .. 2*bits), so
+            // shift right by `bits - i` to land the high half in `acc`.
+            acc ^= b >> (bits - i);
+        }
+        i += 1;
+    }
+    acc
 }
 
 // ============================================================================
@@ -435,6 +560,15 @@ fn compute_widening(op: VectorOp, vs2_val: u64, op1_val: u64, sew: Sew, wsew: Se
             let prod = (sign_extend(vs2_val, sew) as i128) * (u1 as i128);
             prod as u64 & wmask
         }
+
+        // ── Zvbb widening shift left logical ────────────────────────────
+        // vd[i] (2*SEW) = zext(vs2[i]) << (op1[i] & (2*SEW - 1))
+        VectorOp::VWsll => {
+            let wbits = wsew.bits() as u64;
+            let shamt = (op1_val & (wbits - 1)) as u32;
+            (u2_narrow << shamt) & wmask
+        }
+
         _ => unreachable!(),
     }
 }
@@ -572,6 +706,7 @@ const fn is_widening(op: VectorOp) -> bool {
             | VectorOp::VWMulU
             | VectorOp::VWMul
             | VectorOp::VWMulSU
+            | VectorOp::VWsll
     )
 }
 

@@ -1058,7 +1058,20 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VMv1r
         | VectorOp::VMv2r
         | VectorOp::VMv4r
-        | VectorOp::VMv8r => cpu.stats.inst_vec_misc += 1,
+        | VectorOp::VMv8r
+        // Zvbb / Zvbc bit-manip and carryless multiply count as integer
+        | VectorOp::VAndN
+        | VectorOp::VBrev
+        | VectorOp::VBrev8
+        | VectorOp::VRev8
+        | VectorOp::VClz
+        | VectorOp::VCtz
+        | VectorOp::VCpopV
+        | VectorOp::VRol
+        | VectorOp::VRor
+        | VectorOp::VWsll
+        | VectorOp::VClMul
+        | VectorOp::VClMulH => cpu.stats.inst_vec_misc += 1,
     }
 }
 

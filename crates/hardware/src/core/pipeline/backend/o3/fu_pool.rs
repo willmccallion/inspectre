@@ -156,6 +156,7 @@ impl FuType {
 
             // Integer ALU: configuration + add/sub/logic/shift/compare/merge/ext/
             // widening-add/sub/narrowing-shift/saturating/averaging/fixed-point/reductions
+            // + Zvbb bit-manipulation (vandn/vbrev*/vrev8/vclz/vctz/vcpop.v/vrol/vror/vwsll)
             Vsetvli | Vsetivli | Vsetvl | VAdd | VSub | VRsub | VAnd | VOr | VXor | VSll | VSrl
             | VSra | VMinU | VMin | VMaxU | VMax | VMerge | VMSeq | VMSne | VMSltu | VMSlt
             | VMSleu | VMSle | VMSgtu | VMSgt | VAdc | VMadc | VSbc | VMsbc | VWAddU | VWAdd
@@ -163,11 +164,14 @@ impl FuType {
             | VNClip | VSAddU | VSAdd | VSSubU | VSSub | VAAddU | VAAdd | VASubU | VASub
             | VSmul | VSSrl | VSSra | VZextVf2 | VZextVf4 | VZextVf8 | VSextVf2 | VSextVf4
             | VSextVf8 | VRedSum | VRedAnd | VRedOr | VRedXor | VRedMinU | VRedMin | VRedMaxU
-            | VRedMax | VWRedSumU | VWRedSum | None => Self::VecIntAlu,
+            | VRedMax | VWRedSumU | VWRedSum
+            | VAndN | VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV | VRol | VRor | VWsll
+            | None => Self::VecIntAlu,
 
-            // Integer multiply: mul/mulh/macc/madd/widening mul
+            // Integer multiply: mul/mulh/macc/madd/widening mul + Zvbc carryless mul
             VMul | VMulh | VMulhu | VMulhsu | VMacc | VNMSac | VMadd | VNMSub | VWMulU | VWMul
-            | VWMulSU | VWMaccU | VWMacc | VWMaccSU | VWMaccUS => Self::VecIntMul,
+            | VWMulSU | VWMaccU | VWMacc | VWMaccSU | VWMaccUS
+            | VClMul | VClMulH => Self::VecIntMul,
 
             // Integer divide/remainder
             VDivU | VDiv | VRemU | VRem => Self::VecIntDiv,

@@ -711,6 +711,34 @@ pub enum VectorOp {
     /// `vsext.vf8` — sign-extend SEW/8 to SEW.
     VSextVf8,
 
+    // ── Bit-manipulation (Zvbb) ──────────────────────────────────────────
+    /// `vandn` — vector bitwise AND-NOT (vd[i] = vs2[i] & ~op1[i]).
+    VAndN,
+    /// `vbrev.v` — reverse all bits within each element.
+    VBrev,
+    /// `vbrev8.v` — reverse bits within each byte of each element.
+    VBrev8,
+    /// `vrev8.v` — reverse bytes within each element.
+    VRev8,
+    /// `vclz.v` — count leading zeros within each element (at SEW).
+    VClz,
+    /// `vctz.v` — count trailing zeros within each element (at SEW).
+    VCtz,
+    /// `vcpop.v` — per-element population count (Zvbb; distinct from `vcpop.m`).
+    VCpopV,
+    /// `vrol` — vector rotate left (vv/vx).
+    VRol,
+    /// `vror` — vector rotate right (vv/vx/vi with 6-bit imm).
+    VRor,
+    /// `vwsll` — widening shift left logical (vd is 2*SEW).
+    VWsll,
+
+    // ── Carry-less multiply (Zvbc) ───────────────────────────────────────
+    /// `vclmul` — carry-less multiply low (GF(2) multiply, low half).
+    VClMul,
+    /// `vclmulh` — carry-less multiply high (GF(2) multiply, high half).
+    VClMulH,
+
     // ── Vector memory — unit-stride ──────────────────────────────────────
     /// Unit-stride vector load (`vle8/16/32/64`).
     VLoadUnit,
@@ -1072,7 +1100,9 @@ impl VectorOp {
             // FP slides
             VFSlide1Up | VFSlide1Down |
             // Carry/borrow input ops (read v0 mask + full group operands)
-            VAdc | VSbc
+            VAdc | VSbc |
+            // Zvbb arithmetic (vandn/vrol/vror) and Zvbc carryless multiply
+            VAndN | VRol | VRor | VClMul | VClMulH
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base },
 
             // Reductions (standard + widening): vd and vs1 are single registers
@@ -1089,6 +1119,8 @@ impl VectorOp {
             VWAddU | VWAdd | VWSubU | VWSub |
             VWMulU | VWMul | VWMulSU |
             VWMaccU | VWMacc | VWMaccSU | VWMaccUS |
+            // Zvbb widening shift left
+            VWsll |
             // FP widening
             VFWAdd | VFWSub | VFWMul |
             VFWMacc | VFWNMacc | VFWMSac | VFWNMSac
@@ -1125,7 +1157,9 @@ impl VectorOp {
             VFCvtRtzXuF | VFCvtRtzXF |
             VFSqrt | VFRsqrt7 | VFRec7 | VFClass |
             VLoadIndexOrd | VLoadIndexUnord |
-            VStoreIndexOrd | VStoreIndexUnord
+            VStoreIndexOrd | VStoreIndexUnord |
+            // Zvbb unary bit-manip (vbrev/vbrev8/vrev8/vclz/vctz/vcpop.v)
+            VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
 
             // ── Widening FP conversions (vd=2×LMUL, vs2=LMUL) ──────────

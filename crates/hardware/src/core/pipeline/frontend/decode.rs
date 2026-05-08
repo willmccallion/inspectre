@@ -803,6 +803,11 @@ const fn decode_opivv(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         // vwaddu/vwadd in OPMVV (funct3=010) despite sharing the same funct6.
         v_f6::VWREDSUMU => VectorOp::VWRedSumU,
         v_f6::VWREDSUM => VectorOp::VWRedSum,
+        // Zvbb (Vector Bit-manipulation for Crypto)
+        v_f6::VANDN => VectorOp::VAndN,
+        v_f6::VROL => VectorOp::VRol,
+        v_f6::VROR => VectorOp::VRor,
+        v_f6::VWSLL => VectorOp::VWsll,
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
@@ -850,6 +855,11 @@ const fn decode_opivx(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VNSRA => VectorOp::VNSra,
         v_f6::VNCLIPU => VectorOp::VNClipU,
         v_f6::VNCLIP => VectorOp::VNClip,
+        // Zvbb
+        v_f6::VANDN => VectorOp::VAndN,
+        v_f6::VROL => VectorOp::VRol,
+        v_f6::VROR => VectorOp::VRor,
+        v_f6::VWSLL => VectorOp::VWsll,
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
@@ -896,6 +906,9 @@ const fn decode_opivi(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VNSRA => VectorOp::VNSra,
         v_f6::VNCLIPU => VectorOp::VNClipU,
         v_f6::VNCLIP => VectorOp::VNClip,
+        // Zvbb (.vi forms with split 6-bit / 5-bit imm)
+        v_f6::VROR => VectorOp::VRor,
+        v_f6::VWSLL => VectorOp::VWsll,
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
@@ -928,7 +941,7 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // Integer extension: vzext, vsext
+        // Integer extension: vzext, vsext; Zvbb bit-manip ops share funct6.
         v_f6::VXUNARY0 => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -938,6 +951,13 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 v_f6::VXUNARY0_VSEXT_VF4 => (VectorOp::VSextVf4, true),
                 v_f6::VXUNARY0_VZEXT_VF2 => (VectorOp::VZextVf2, true),
                 v_f6::VXUNARY0_VSEXT_VF2 => (VectorOp::VSextVf2, true),
+                // Zvbb
+                v_f6::VXUNARY0_VBREV => (VectorOp::VBrev, true),
+                v_f6::VXUNARY0_VBREV8 => (VectorOp::VBrev8, true),
+                v_f6::VXUNARY0_VREV8 => (VectorOp::VRev8, true),
+                v_f6::VXUNARY0_VCLZ => (VectorOp::VClz, true),
+                v_f6::VXUNARY0_VCTZ => (VectorOp::VCtz, true),
+                v_f6::VXUNARY0_VCPOP => (VectorOp::VCpopV, true),
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
@@ -998,6 +1018,9 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VWMACC => (VectorOp::VWMacc, true),
         v_f6::VWMACCSU => (VectorOp::VWMaccSU, true),
         v_f6::VWMACCUS => (VectorOp::VWMaccUS, true),
+        // Zvbc carryless multiply (OPMVV funct3=2)
+        v_f6::VCLMUL => (VectorOp::VClMul, true),
+        v_f6::VCLMULH => (VectorOp::VClMulH, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
@@ -1049,6 +1072,9 @@ const fn decode_opmvx(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VAADD => (VectorOp::VAAdd, true),
         v_f6::VASUBU => (VectorOp::VASubU, true),
         v_f6::VASUB => (VectorOp::VASub, true),
+        // Zvbc carryless multiply (OPMVX funct3=6)
+        v_f6::VCLMUL => (VectorOp::VClMul, true),
+        v_f6::VCLMULH => (VectorOp::VClMulH, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }

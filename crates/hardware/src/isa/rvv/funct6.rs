@@ -365,6 +365,43 @@ pub const VMUNARY0_VIOTA_M: u8 = 0b10000;
 /// vs1 for `vid.v` within VMUNARY0.
 pub const VMUNARY0_VID_V: u8 = 0b10001;
 
+// ── Zvbb sub-fields under VXUNARY0 (OPMVV funct6=0b010010) ─────────────
+//
+// Zvbb extends the VXUNARY0 group with bit-manipulation ops. They share
+// the funct6 with VZEXT/VSEXT and are disambiguated by the vs1 field.
+
+/// vs1 for `vbrev8.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VBREV8: u8 = 0b01000;
+/// vs1 for `vrev8.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VREV8: u8 = 0b01001;
+/// vs1 for `vbrev.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VBREV: u8 = 0b01010;
+/// vs1 for `vclz.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VCLZ: u8 = 0b01100;
+/// vs1 for `vctz.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VCTZ: u8 = 0b01101;
+/// vs1 for `vcpop.v` within VXUNARY0 (Zvbb).
+pub const VXUNARY0_VCPOP: u8 = 0b01110;
+
+// ── Zvbb / Zvbc funct6 constants (OPIVV/OPIVX/OPIVI) ──────────────────────
+
+/// `vandn.vv`/`vandn.vx` (Zvbb). Shares funct6 0b000001 with vredand (OPMVV)
+/// and vfredusum (OPFVV); disambiguated by funct3.
+pub const VANDN: u32 = 0b000001;
+/// `vclmul.vv`/`vclmul.vx` (Zvbc). Shares funct6 0b001100 with vrgather
+/// (different funct3).
+pub const VCLMUL: u32 = 0b001100;
+/// `vclmulh.vv`/`vclmulh.vx` (Zvbc).
+pub const VCLMULH: u32 = 0b001101;
+/// `vror.vv`/`vror.vx`/`vror.vi` (Zvbb). Shares funct6 0b010100 with VMUNARY0
+/// (different funct3).
+pub const VROR: u32 = 0b010100;
+/// `vrol.vv`/`vrol.vx` (Zvbb).
+pub const VROL: u32 = 0b010101;
+/// `vwsll.vv`/`vwsll.vx`/`vwsll.vi` (Zvbb). Shares funct6 0b110101 with
+/// VWADD_W (different funct3).
+pub const VWSLL: u32 = 0b110101;
+
 // ── Mask operations (OPMVV) ─────────────────────────────────────────────────
 
 /// Mask AND (`vmand.mm`).
