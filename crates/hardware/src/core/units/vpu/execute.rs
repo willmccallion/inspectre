@@ -18,7 +18,7 @@ use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::fpu::rounding_modes::RoundingMode;
 use crate::core::units::vpu::types::{Vxrm, parse_vtype_with_elen};
 use crate::core::units::vpu::vsetvl::execute_vsetvl;
-use crate::core::units::vpu::{fpu, mask, mem, permute, reduction};
+use crate::core::units::vpu::{crypto, fpu, mask, mem, permute, reduction};
 use crate::isa::rvv::encoding as v_enc;
 
 /// Execute a vector operation. Returns the scalar result (for vsetvl family)
@@ -41,8 +41,29 @@ pub fn execute_vec_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap>
         op if reduction::is_reduction(op) => execute_vec_reduction(cpu, id),
         op if mask::is_mask_op(op) => execute_vec_mask(cpu, id),
         op if permute::is_permute(op) => execute_vec_permute(cpu, id),
+        op if crypto::is_crypto(op) => execute_vec_crypto(cpu, id),
         _ => execute_vec_arith(cpu, id),
     }
+}
+
+/// Execute a vector crypto instruction (Zvkn*/Zvks*/Zvkg).
+fn execute_vec_crypto(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
+    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
+    let vstart = cpu.csrs.vstart as usize;
+    let vl = cpu.csrs.vl as usize;
+    crypto::execute_crypto(
+        id.ctrl.vec_op,
+        cpu.regs.vpr_mut(),
+        id.ctrl.vd,
+        id.ctrl.vs2,
+        id.ctrl.vs1,
+        vstart,
+        vl,
+        id.inst,
+    );
+    cpu.csrs.vstart = 0;
+    mark_vs_dirty(cpu);
+    Ok(0)
 }
 
 /// Execute `vsetvli`: AVL from rs1, vtype from immediate.

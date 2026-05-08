@@ -38,3 +38,6 @@ pub mod lane_model;
 
 /// Vector chaining model (element-group granularity scoreboarding).
 pub mod chaining;
+
+/// Vector cryptography (Zvkned/Zvknha/Zvksed/Zvksh/Zvkg).
+pub mod crypto;

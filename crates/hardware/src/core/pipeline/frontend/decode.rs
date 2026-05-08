@@ -753,9 +753,71 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
                 }
             }
         }
+        v_opcodes::OP_V_CRYPTO => {
+            // RVV crypto extensions (Zvkned/Zvknha/Zvksed/Zvksh/Zvkg).
+            // All Zvk* ops use opcode 0x77 with funct3=0b010 (OPMVV) and
+            // bit25=1 (vm always set; the masked encoding is reserved).
+            if d.funct3 != v_funct3::OPMVV {
+                return Err(Trap::IllegalInstruction(inst));
+            }
+            let f6 = v_enc::funct6(inst);
+            c.vm = v_enc::vm(inst);
+            c.vd = VRegIdx::new(v_enc::vd(inst));
+            c.vs1 = VRegIdx::new(v_enc::vs1(inst));
+            c.vs2 = VRegIdx::new(v_enc::vs2(inst));
+            c.vec_src_encoding = VecSrcEncoding::VV;
+            c.vec_reg_write = true;
+            c.vec_op = decode_opcrypto(f6, inst)?;
+        }
         _ => return Err(Trap::IllegalInstruction(inst)),
     }
     Ok(c)
+}
+
+/// Decode opcode 0x77 (Zvkn*/Zvks*/Zvkg crypto extensions).
+const fn decode_opcrypto(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
+    let vs1 = v_enc::vs1(inst);
+    Ok(match f6 {
+        // funct6=0x20 — Zvksh: vsm3me.vv
+        0x20 => VectorOp::VSm3Me,
+        // funct6=0x21 — Zvksed: vsm4k.vi (vs1 is zimm5 round number)
+        0x21 => VectorOp::VSm4K,
+        // funct6=0x22 — Zvkned: vaeskf1.vi (vs1 is zimm5 round number)
+        0x22 => VectorOp::VAesKf1,
+        // funct6=0x28 — Zvkned/Zvksed/Zvkg .vv-form ops (vs1 sub-field selects)
+        0x28 => match vs1 {
+            0x0 => VectorOp::VAesDm,
+            0x1 => VectorOp::VAesDf,
+            0x2 => VectorOp::VAesEm,
+            0x3 => VectorOp::VAesEf,
+            0x10 => VectorOp::VSm4R,    // vsm4r.vv
+            0x11 => VectorOp::VGmul,    // vgmul.vv
+            _ => return Err(Trap::IllegalInstruction(inst)),
+        },
+        // funct6=0x29 — Zvkned/Zvksed .vs-form ops
+        0x29 => match vs1 {
+            0x0 => VectorOp::VAesDm,
+            0x1 => VectorOp::VAesDf,
+            0x2 => VectorOp::VAesEm,
+            0x3 => VectorOp::VAesEf,
+            0x7 => VectorOp::VAesZ,
+            0x10 => VectorOp::VSm4R,    // vsm4r.vs
+            _ => return Err(Trap::IllegalInstruction(inst)),
+        },
+        // funct6=0x2A — Zvkned: vaeskf2.vi
+        0x2A => VectorOp::VAesKf2,
+        // funct6=0x2B — Zvksh: vsm3c.vi
+        0x2B => VectorOp::VSm3C,
+        // funct6=0x2C — Zvkg: vghsh.vv
+        0x2C => VectorOp::VGhsh,
+        // funct6=0x2D — Zvknha/b: vsha2ms.vv
+        0x2D => VectorOp::VSha2Ms,
+        // funct6=0x2E — Zvknha/b: vsha2ch.vv
+        0x2E => VectorOp::VSha2Ch,
+        // funct6=0x2F — Zvknha/b: vsha2cl.vv
+        0x2F => VectorOp::VSha2Cl,
+        _ => return Err(Trap::IllegalInstruction(inst)),
+    })
 }
 
 // ── Vector arithmetic decode helpers ──────────────────────────────────────────

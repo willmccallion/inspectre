@@ -203,6 +203,15 @@ impl FuType {
             | VRgather | VRgatherEi16 | VCompress | VMv1r | VMv2r | VMv4r | VMv8r => {
                 Self::VecPermute
             }
+
+            // Crypto ops live on the vector integer ALU (single-cycle ROM lookups
+            // and bitwise math; no separate FU is modelled for crypto).
+            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ
+            | VAesKf1 | VAesKf2
+            | VSha2Ms | VSha2Ch | VSha2Cl
+            | VSm3Me | VSm3C
+            | VSm4R | VSm4K
+            | VGhsh | VGmul => Self::VecIntAlu,
         }
     }
 }

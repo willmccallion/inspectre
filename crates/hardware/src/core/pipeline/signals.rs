@@ -739,6 +739,48 @@ pub enum VectorOp {
     /// `vclmulh` — carry-less multiply high (GF(2) multiply, high half).
     VClMulH,
 
+    // ── AES (Zvkned) ─────────────────────────────────────────────────────
+    /// `vaesem.vv`/`vaesem.vs` — AES single-round encryption (middle round).
+    VAesEm,
+    /// `vaesef.vv`/`vaesef.vs` — AES single-round encryption (final round).
+    VAesEf,
+    /// `vaesdm.vv`/`vaesdm.vs` — AES single-round decryption (middle round).
+    VAesDm,
+    /// `vaesdf.vv`/`vaesdf.vs` — AES single-round decryption (final round).
+    VAesDf,
+    /// `vaesz.vs` — AES round-zero (XOR with key).
+    VAesZ,
+    /// `vaeskf1.vi` — AES-128 forward key schedule.
+    VAesKf1,
+    /// `vaeskf2.vi` — AES-256 forward key schedule.
+    VAesKf2,
+
+    // ── SHA-2 (Zvknha/b) ─────────────────────────────────────────────────
+    /// `vsha2ms.vv` — SHA-2 message scheduling.
+    VSha2Ms,
+    /// `vsha2ch.vv` — SHA-2 compression (high half).
+    VSha2Ch,
+    /// `vsha2cl.vv` — SHA-2 compression (low half).
+    VSha2Cl,
+
+    // ── SM3 (Zvksh) ──────────────────────────────────────────────────────
+    /// `vsm3me.vv` — SM3 message expansion.
+    VSm3Me,
+    /// `vsm3c.vi` — SM3 compression.
+    VSm3C,
+
+    // ── SM4 (Zvksed) ─────────────────────────────────────────────────────
+    /// `vsm4r.vv`/`vsm4r.vs` — SM4 round.
+    VSm4R,
+    /// `vsm4k.vi` — SM4 key expansion.
+    VSm4K,
+
+    // ── GHASH / GMAC (Zvkg) ──────────────────────────────────────────────
+    /// `vghsh.vv` — vector GHASH add-multiply.
+    VGhsh,
+    /// `vgmul.vv` — vector GHASH multiply.
+    VGmul,
+
     // ── Vector memory — unit-stride ──────────────────────────────────────
     /// Unit-stride vector load (`vle8/16/32/64`).
     VLoadUnit,
@@ -1102,7 +1144,15 @@ impl VectorOp {
             // Carry/borrow input ops (read v0 mask + full group operands)
             VAdc | VSbc |
             // Zvbb arithmetic (vandn/vrol/vror) and Zvbc carryless multiply
-            VAndN | VRol | VRor | VClMul | VClMulH
+            VAndN | VRol | VRor | VClMul | VClMulH |
+            // Vector crypto (Zvkn*/Zvks*/Zvkg) — operate on EGS=4 element groups
+            // at SEW=32; group size for renaming purposes is LMUL.
+            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ |
+            VAesKf1 | VAesKf2 |
+            VSha2Ms | VSha2Ch | VSha2Cl |
+            VSm3Me | VSm3C |
+            VSm4R | VSm4K |
+            VGhsh | VGmul
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base },
 
             // Reductions (standard + widening): vd and vs1 are single registers

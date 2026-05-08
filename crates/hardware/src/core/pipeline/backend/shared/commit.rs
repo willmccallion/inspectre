@@ -1071,7 +1071,24 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VRor
         | VectorOp::VWsll
         | VectorOp::VClMul
-        | VectorOp::VClMulH => cpu.stats.inst_vec_misc += 1,
+        | VectorOp::VClMulH
+        // Crypto extensions
+        | VectorOp::VAesEm
+        | VectorOp::VAesEf
+        | VectorOp::VAesDm
+        | VectorOp::VAesDf
+        | VectorOp::VAesZ
+        | VectorOp::VAesKf1
+        | VectorOp::VAesKf2
+        | VectorOp::VSha2Ms
+        | VectorOp::VSha2Ch
+        | VectorOp::VSha2Cl
+        | VectorOp::VSm3Me
+        | VectorOp::VSm3C
+        | VectorOp::VSm4R
+        | VectorOp::VSm4K
+        | VectorOp::VGhsh
+        | VectorOp::VGmul => cpu.stats.inst_vec_misc += 1,
     }
 }
 

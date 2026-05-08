@@ -165,6 +165,21 @@ mod tests {
     }
 
     #[test]
+    fn test_vsetvli_m8_e32() {
+        // AVL=4, e32/m8: VLMAX=(128/32)*8=32, vl=min(4,32)=4
+        let bad_vtype = encode_vtype(&VtypeFields {
+            vsew: Sew::E32,
+            vlmul: Vlmul::M8,
+            vta: TailPolicy::Undisturbed,
+            vma: MaskPolicy::Undisturbed,
+            vill: false,
+        });
+        let (vl, vtype) = execute_vsetvl(4, bad_vtype, false, false, vlen128(), 0);
+        assert!(vtype & (1u64 << 63) == 0, "vill must not be set: vtype=0x{:x}", vtype);
+        assert_eq!(vl, 4, "expected vl=4 for AVL=4 e32/m8");
+    }
+
+    #[test]
     fn test_vsetvli_mf8_e8_legal() {
         // vsetvli e8, mf8 — encoding bit5:3=vsew=0(E8), bit2:0=vlmul=0b101(Mf8)
         // This is a LEGAL configuration: SEW * lmul_den (8*8=64) <= ELEN * lmul_num (64*1=64).
