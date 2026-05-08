@@ -664,26 +664,34 @@ fn exec_fault_first_load(
         return Ok(0);
     };
     let eew_bytes = eew.bytes() as u64;
+    let nf = (id.ctrl.vec_nf as usize) + 1;
     let vm = id.ctrl.vm;
+    let vtype = parse_vtype(cpu.csrs.vtype);
+    let emul = Emul::compute(eew, vtype.vsew, vtype.vlmul);
 
-    for i in vstart..vl {
+    'elements: for i in vstart..vl {
         if !is_element_active(cpu, i, vm) {
             continue;
         }
-        let addr = base.wrapping_add((i as u64).wrapping_mul(eew_bytes));
-        match mem_read_element(cpu, addr, eew) {
-            Ok(val) => {
-                cpu.regs.vpr_mut().write_element(vd, ElemIdx::new(i), eew, val);
-            }
-            Err(trap) => {
-                if i == 0 {
-                    // Element 0 faults propagate normally
-                    cpu.csrs.vstart = 0;
-                    return Err(trap);
+        for seg in 0..nf {
+            let addr = base.wrapping_add(((i * nf + seg) as u64).wrapping_mul(eew_bytes));
+            match mem_read_element(cpu, addr, eew) {
+                Ok(val) => {
+                    let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
+                    cpu.regs.vpr_mut().write_element(dest, ElemIdx::new(i), eew, val);
                 }
-                // Elements > 0: silently trim vl
-                cpu.csrs.vl = i as u64;
-                break;
+                Err(trap) => {
+                    if i == 0 && seg == 0 {
+                        // Very first element fault propagates normally.
+                        cpu.csrs.vstart = 0;
+                        return Err(trap);
+                    }
+                    // A fault on any element/segment past the first silently
+                    // trims vl to the index of the faulting element. The
+                    // entire segment for that element is dropped.
+                    cpu.csrs.vl = i as u64;
+                    break 'elements;
+                }
             }
         }
     }
