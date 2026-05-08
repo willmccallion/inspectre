@@ -140,9 +140,22 @@ const fn build_operand1(id: &RenameIssueEntry) -> VecOperand {
                     | VectorOp::VNClip
                     | VectorOp::VSSrl
                     | VectorOp::VSSra
+                    // Zvbb shifts/rotates use unsigned immediates.
+                    | VectorOp::VWsll
+                    | VectorOp::VRor
             );
             if uses_uimm {
-                VecOperand::Immediate(v_enc::uimm5(id.inst) as i64)
+                // vror.vi has a 6-bit immediate split as bit26 (zimm6hi) +
+                // bits[19:15] (zimm6lo); other shifts use the standard 5-bit
+                // uimm in bits[19:15].
+                let imm = if matches!(id.ctrl.vec_op, VectorOp::VRor) {
+                    let lo = v_enc::uimm5(id.inst) as u64;
+                    let hi = ((id.inst >> 26) & 1) as u64;
+                    ((hi << 5) | lo) as i64
+                } else {
+                    v_enc::uimm5(id.inst) as i64
+                };
+                VecOperand::Immediate(imm)
             } else {
                 VecOperand::Immediate(v_enc::simm5(id.inst))
             }
