@@ -1242,6 +1242,14 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
+                    // Override v0 mask with the rename-time physreg. Without
+                    // this, a younger instruction that re-renamed v0 (e.g. the
+                    // next subtest's `vle32.v v0`) makes our masked vec mem op
+                    // read the newer mapping, producing the wrong active-element
+                    // set. Mirrors the vec_arith path's mask override.
+                    if !saved.mask_phys.is_zero() {
+                        mapping[0] = saved.mask_phys;
+                    }
                     let micro_ops = {
                         let view = VecPrfView::new(&mut self.vec_prf, mapping);
                         generate_element_addrs_vrf(
