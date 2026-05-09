@@ -89,7 +89,9 @@ pub const fn f16_to_f32(h: u16) -> f32 {
         // has its MSB (bit 9) set, which becomes bit 22 in f32 — still quiet.
         (sign << 31) | (0xFF << 23) | (mant << 13)
     } else {
-        let new_exp = exp - 15 + 127;
+        // Re-bias the exponent through i32 because the f16 path can pass exp
+        // values below 15, which would underflow as u32.
+        let new_exp = (exp as i32 - 15 + 127) as u32;
         (sign << 31) | (new_exp << 23) | (mant << 13)
     };
 
