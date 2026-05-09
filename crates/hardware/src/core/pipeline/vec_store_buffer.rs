@@ -234,7 +234,11 @@ impl VecStoreBuffer {
 
             remaining -= take;
             cur_addr += take as u64;
-            cur_data >>= take * 8;
+            // Shifting a u64 by 64 is UB; the caller may pass an 8-byte element
+            // that fits inside one cache line (no split), in which case `take`
+            // is the full width and there is no remainder to shift in.
+            let shift_bits = take * 8;
+            cur_data = if shift_bits >= 64 { 0 } else { cur_data >> shift_bits };
         }
 
         entry.resolved_elements += 1;
