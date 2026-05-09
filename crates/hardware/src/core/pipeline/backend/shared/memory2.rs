@@ -114,8 +114,7 @@ pub fn memory2_stage(
                     // buffer and return 0 (success).  The commit stage will
                     // verify the reservation and, if invalid, cancel the
                     // store and flush the pipeline.
-                    let sb_elem = mem.vec_mem.as_ref().map(|vme| vme.elem_idx);
-                    store_buffer.resolve(mem.rob_tag, sb_elem, mem.vaddr, raw_paddr, mem.store_data);
+                    store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, mem.store_data);
                     ld = 0; // optimistic success
                     lr_sc = Some(LrScRecord::Sc { paddr: raw_paddr });
 
@@ -156,7 +155,7 @@ pub fn memory2_stage(
                     );
 
                     // Resolve store buffer with the computed new value
-                    store_buffer.resolve(mem.rob_tag, None, mem.vaddr, raw_paddr, new_val);
+                    store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, new_val);
 
                     // Check for memory ordering violation (same as regular stores).
                     if let Some(ref lq) = load_queue
@@ -348,15 +347,13 @@ pub fn memory2_stage(
             // Stores: resolve store buffer with paddr + data, NO memory write.
             //
             // Vector store element micro-ops route their data into the
-            // dedicated `VecStoreBuffer` instead of the side buffer. The
-            // scalar SB resolve still runs for compatibility while step 5
-            // removes per-element SB allocation entirely.
-            let sb_elem = mem.vec_mem.as_ref().map(|vme| vme.elem_idx);
-            store_buffer.resolve(mem.rob_tag, sb_elem, mem.vaddr, raw_paddr, mem.store_data);
-            if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store)
-                && let Some(vsb) = vec_store_buffer.as_deref_mut()
-            {
-                vsb.resolve_element(mem.rob_tag, raw_paddr, mem.store_data, mem.ctrl.width);
+            // dedicated `VecStoreBuffer`; scalar stores resolve their SB slot.
+            if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store) {
+                if let Some(vsb) = vec_store_buffer.as_deref_mut() {
+                    vsb.resolve_element(mem.rob_tag, raw_paddr, mem.store_data, mem.ctrl.width);
+                }
+            } else {
+                store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, mem.store_data);
             }
 
             // Check for memory ordering violation: did a younger load already
@@ -576,7 +573,7 @@ mod tests {
             width: crate::core::pipeline::signals::MemWidth::Word,
             ..Default::default()
         };
-        store_buffer.allocate(RobTag(2), crate::core::pipeline::signals::MemWidth::Word, None);
+        store_buffer.allocate(RobTag(2), crate::core::pipeline::signals::MemWidth::Word);
 
         let mut input_sc = vec![Mem1Mem2Entry {
             rob_tag: RobTag(2),
@@ -627,7 +624,7 @@ mod tests {
             ..Default::default()
         };
 
-        store_buffer.allocate(RobTag(2), crate::core::pipeline::signals::MemWidth::Word, None);
+        store_buffer.allocate(RobTag(2), crate::core::pipeline::signals::MemWidth::Word);
 
         let mut input = vec![Mem1Mem2Entry {
             rob_tag: RobTag(2), // Older store

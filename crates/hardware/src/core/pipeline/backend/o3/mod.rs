@@ -311,37 +311,28 @@ impl O3Engine {
     }
 
     /// Wave-based vec mem op issue: pump pending element micro-ops from each
-    /// in-flight vec mem op into `vec_mem_pending`, allocating LQ/SB slots as
-    /// they free up.
-    ///
-    /// Vector ops can have far more elements than the LQ/SB has slots (e.g.
-    /// e8/m8 at VLEN=128 = 128 elements, default LQ=32, SB=16). Allocating
-    /// the whole vec op up front would deadlock at issue. Instead each vec
-    /// op stages its micro-ops in `pending_micro_ops`; this function drains
-    /// them in program order, taking a fresh LQ/SB slot per element. Per-
-    /// element slots are released at writeback (`deallocate_elem`), so each
-    /// wave completes and frees capacity for the next.
+    /// in-flight vec mem op into `vec_mem_pending`. Loads allocate per-element
+    /// LQ slots so the wave is bounded by LQ capacity; stores write into the
+    /// dedicated `vec_store_buffer` and don't touch the scalar SB.
     fn issue_vec_mem_waves(&mut self) {
         use crate::core::pipeline::signals::MemWidth as MW;
-        // Iterate inflight entries in program order (Vec push order ==
-        // RobTag order in the absence of wraparound, which the ROB tag
-        // wrap window of u32 makes a non-issue here).
         for inflight in &mut self.vec_mem_inflight {
             while let Some(front) = inflight.pending_micro_ops.front() {
-                let w = match front.eew.bytes() {
-                    1 => MW::Byte, 2 => MW::Half,
-                    4 => MW::Word, 8 => MW::Double,
-                    _ => MW::Word,
-                };
-                let elem_idx = front.elem_idx;
-                let rob_tag = front.entry.rob_tag;
-                let is_store = front.is_store;
-                if is_store {
-                    if !self.store_buffer.allocate(rob_tag, w, Some(elem_idx)) {
+                if !front.is_store {
+                    let w = match front.eew.bytes() {
+                        1 => MW::Byte,
+                        2 => MW::Half,
+                        4 => MW::Word,
+                        8 => MW::Double,
+                        _ => MW::Word,
+                    };
+                    if !self.load_queue.allocate(
+                        front.entry.rob_tag,
+                        w,
+                        Some(front.elem_idx),
+                    ) {
                         break;
                     }
-                } else if !self.load_queue.allocate(rob_tag, w, Some(elem_idx)) {
-                    break;
                 }
                 let mop = inflight.pending_micro_ops.pop_front().unwrap();
                 self.vec_mem_pending.push_back(mop);
@@ -435,13 +426,10 @@ impl ExecutionEngine for O3Engine {
                             wb.load_data,
                         );
                     }
-                    // Wave-based reclaim: free this element's LQ/SB slot now.
-                    // Vec store data already lives in the VSB (written by
-                    // memory2); writeback only needs to release the per-element
-                    // SB slot. Step 5 stops allocating SB slots for vec stores.
-                    if vme.is_store {
-                        self.store_buffer.deallocate_elem(wb.rob_tag, vme.elem_idx);
-                    } else {
+                    // Wave-based reclaim: free this load element's LQ slot.
+                    // Vec stores no longer take SB slots — their data lives
+                    // in the VSB (written by memory2).
+                    if !vme.is_store {
                         self.load_queue.deallocate_elem(wb.rob_tag, vme.elem_idx);
                     }
                     // Decrement parent's outstanding count

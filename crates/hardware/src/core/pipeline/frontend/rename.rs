@@ -203,7 +203,7 @@ pub fn rename_stage<E: ExecutionEngine>(
             // Allocate store buffer entry if this is a store
             if id.ctrl.mem_write {
                 let width = id.ctrl.width;
-                if !engine.store_buffer_mut().allocate(rob_tag, width, None) {
+                if !engine.store_buffer_mut().allocate(rob_tag, width) {
                     input.push(id);
                     break;
                 }
@@ -337,7 +337,7 @@ pub fn rename_stage<E: ExecutionEngine>(
             // Allocate store buffer entry if this is a store
             if id.ctrl.mem_write {
                 let width = id.ctrl.width;
-                if !engine.store_buffer_mut().allocate(rob_tag, width, None) {
+                if !engine.store_buffer_mut().allocate(rob_tag, width) {
                     input.push(id);
                     break;
                 }
