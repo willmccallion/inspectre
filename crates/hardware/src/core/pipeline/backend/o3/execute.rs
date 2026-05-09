@@ -36,7 +36,6 @@ const JALR_ALIGNMENT_MASK: u64 = !1;
 /// the engine must flush younger instructions (misprediction, CSR,
 /// MRET/SRET, FENCE.I, etc.).
 pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem1Entry, bool) {
-    // Propagate traps from earlier stages
     if let Some(trap) = id.trap.clone() {
         trace_execute!(cpu.trace;
             rob_tag         = id.rob_tag.0,
@@ -66,7 +65,6 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         return (result, true);
     }
 
-    // ── Execute trigger check ────────────────────────────────────────────────
     if cpu.check_execute_trigger(id.pc) {
         let result = ExMem1Entry {
             rob_tag: id.rob_tag,
@@ -125,11 +123,11 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
     };
     let op_c = fwd_c;
 
-    // Vector operations: intercept before the system-instruction handler.
+    // Intercept vector ops before the system-instruction handler.
     if id.ctrl.vec_op != crate::core::pipeline::signals::VectorOp::None {
         use crate::core::pipeline::signals::VectorOp;
 
-        // vsetvl family: still serializing — modifies CSR state that affects decode.
+        // vsetvl family serializes: modifies CSR state that affects decode.
         if matches!(id.ctrl.vec_op, VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl) {
             match crate::core::units::vpu::execute::execute_vec_op(cpu, &id) {
                 Ok(scalar_result) => {
@@ -154,7 +152,6 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
                     return (result, true);
                 }
                 Err(trap) => {
-                    // vsetvl itself doesn't trap, but handle for completeness.
                     rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
                     cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                     cpu.redirect_pending = true;
@@ -179,18 +176,15 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             }
         }
 
-        // Non-vsetvl vector ops: do NOT execute here. Functional execution is
-        // deferred to O3Engine::tick() where VecPrfView is available.
-        // Return the entry with base address (alu) and stride/rs2 (store_data)
-        // for address generation by generate_element_addrs_vrf.
+        // Non-vsetvl vector ops are executed in O3Engine::tick() where VecPrfView is available.
         let result = ExMem1Entry {
             rob_tag: id.rob_tag,
             pc: id.pc,
             inst: id.inst,
             inst_size: id.inst_size,
             rd: id.rd,
-            alu: op_a,          // rs1 base address for vector memory ops
-            store_data: fwd_b,  // rs2 (stride for strided ops, index reg for indexed)
+            alu: op_a,
+            store_data: fwd_b,
             ctrl: id.ctrl,
             trap: None,
             exception_stage: None,
@@ -199,13 +193,10 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             sfence_vma: None,
             vec_mem: None,
         };
-        return (result, false); // no flush
+        return (result, false);
     }
 
-    // FENCE.I: flush the pipeline so younger instructions are squashed.
-    // The I-cache flush is deferred to COMMIT time (after store drain)
-    // to ensure that all prior stores are visible in RAM before the
-    // I-cache refills with the new data.
+    // I-cache flush deferred to commit so prior stores are visible before refill.
     if id.ctrl.system_op == SystemOp::FenceI {
         cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
         cpu.redirect_pending = true;
@@ -235,7 +226,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         return (result, true);
     }
 
-    // System instructions (FENCE is a NOP at execute — handled at commit only)
+    // FENCE is a NOP at execute — handled at commit only.
     if !matches!(id.ctrl.system_op, SystemOp::None | SystemOp::Fence) {
         return execute_system(cpu, id, rob, fwd_a, store_data);
     }
@@ -266,21 +257,10 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         }
     }
 
-    // ALU / FPU execution
-    // Resolve rounding mode: instruction-specified or dynamic from fcsr.frm.
-    let fp_rm = id
-        .ctrl
-        .fp_rm
-        .or_else(|| RoundingMode::from_bits(cpu.csrs.frm as u8));
-    let (alu_out, fp_flags) = compute_alu(
-        id.ctrl.alu,
-        op_a,
-        op_b,
-        op_c,
-        id.ctrl.is_f16,
-        id.ctrl.is_rv32,
-        fp_rm,
-    );
+    // Resolve FP rounding mode: instruction-specified or dynamic from fcsr.frm.
+    let fp_rm = id.ctrl.fp_rm.or_else(|| RoundingMode::from_bits(cpu.csrs.frm as u8));
+    let (alu_out, fp_flags) =
+        compute_alu(id.ctrl.alu, op_a, op_b, op_c, id.ctrl.is_f16, id.ctrl.is_rv32, fp_rm);
     trace_execute!(cpu.trace;
         rob_tag  = id.rob_tag.0,
         pc       = %crate::trace::Hex(id.pc),
@@ -293,7 +273,6 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
     let mut needs_flush = false;
 
-    // Branch resolution
     if id.ctrl.control_flow == ControlFlow::Branch {
         let taken = match (id.inst >> FUNCT3_SHIFT) & FUNCT3_MASK {
             funct3::BEQ => op_a == op_b,
@@ -312,8 +291,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
         let mispredicted = predicted_target != actual_next_pc;
 
-        // Defer branch predictor update to commit time to avoid
-        // polluting tables with speculative/wrong-path data.
+        // Defer BP update to commit so wrong-path data doesn't pollute the tables.
         rob.set_bp_update(
             id.rob_tag,
             id.pc,
@@ -334,8 +312,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             "EX: branch resolved"
         );
         if mispredicted {
-            // Restore GHR to the snapshot (pre-speculation state), then
-            // push the actual outcome so subsequent fetches see correct history.
+            // Restore GHR to pre-speculation state, then push the actual outcome.
             cpu.branch_predictor.repair_history(&id.ghr_snapshot);
             cpu.branch_predictor.speculate(id.pc, taken);
             cpu.branch_predictor.restore_ras(id.ras_snapshot);
@@ -348,7 +325,6 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         }
     }
 
-    // Jump resolution
     if id.ctrl.control_flow == ControlFlow::Jump {
         use crate::common::constants::OPCODE_MASK;
         let is_jalr = (id.inst & OPCODE_MASK) == opcodes::OP_JALR;
@@ -366,12 +342,9 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
         let mispredicted = actual_target != predicted_target;
 
-        // Store the jump target in the ROB for committed_next_pc tracking,
-        // but don't set bp_update — jumps are unconditional and should not
-        // train the direction predictor.
+        // Record target for committed_next_pc but skip bp_update: jumps don't train direction.
         rob.set_bp_target(id.rob_tag, actual_target);
 
-        // Update BTB directly — jumps are unconditional, don't train direction predictor.
         // Skip for calls — on_call already updates the BTB.
         if !rd_link {
             cpu.branch_predictor.update_btb(id.pc, actual_target);
@@ -400,18 +373,14 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.stats.speculative_branch_predictions += 1;
         }
 
-        // RAS management per RISC-V spec Table 2.1:
-        // Both x1 (ra) and x5 (t0) are link registers.
+        // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.
         let ret_addr = id.pc.wrapping_add(id.inst_size.as_u64());
         if rd_link && rs1_link && id.rd != id.rs1 {
-            // Coroutine swap: pop then push
             cpu.branch_predictor.on_return();
             cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
         } else if rd_link {
-            // Call (JAL/JALR with rd in {x1, x5})
             cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
         } else if rs1_link {
-            // Return (JALR with rs1 in {x1, x5}, rd not a link register)
             cpu.branch_predictor.on_return();
         }
     }
@@ -462,7 +431,6 @@ fn execute_system(
             vec_mem: None,
         };
 
-    // MRET: requires M-mode privilege (spec §3.3.2)
     if id.ctrl.system_op == SystemOp::Mret {
         if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
@@ -481,7 +449,6 @@ fn execute_system(
         return (make_result(0, id.ctrl), true);
     }
 
-    // SRET: requires at least S-mode privilege (spec §3.3.2)
     if id.ctrl.system_op == SystemOp::Sret {
         if cpu.privilege == crate::core::arch::mode::PrivilegeMode::User {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
@@ -513,7 +480,6 @@ fn execute_system(
         return (make_result(0, id.ctrl), true);
     }
 
-    // WFI: deferred to commit (like MRET/SRET), but check privilege here.
     if id.ctrl.system_op == SystemOp::Wfi {
         let tw = (cpu.csrs.mstatus >> 21) & 1;
         if cpu.privilege == crate::core::arch::mode::PrivilegeMode::User
@@ -531,16 +497,8 @@ fn execute_system(
         return (make_result(0, id.ctrl), true);
     }
 
-    // SFENCE.VMA
-    //
-    // Do absolutely nothing at execute time — no TLB flush, no redirect.
-    // Preceding PTE-modifying stores may still be in the store buffer,
-    // and flushing TLBs now would let in-flight instructions repopulate
-    // them with stale translations.  The instruction flows through the
-    // pipeline carrying its operands in SfenceVmaInfo.  At commit time,
-    // the commit stage stalls until the store buffer is fully drained,
-    // then flushes TLBs with proper ASID/vaddr granularity and triggers
-    // a full pipeline squash.
+    // SFENCE.VMA: do nothing at execute. Operands flow to commit which drains
+    // the store buffer first, then performs the TLB flush and pipeline squash.
     if id.ctrl.system_op == SystemOp::SfenceVma {
         let tvm = (cpu.csrs.mstatus >> 20) & 1;
         if cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tvm != 0 {
@@ -592,7 +550,6 @@ fn execute_system(
         );
     }
 
-    // ECALL
     if id.inst == sys_ops::ECALL {
         use crate::core::arch::mode::PrivilegeMode;
         let trap = match cpu.privilege {
@@ -614,12 +571,10 @@ fn execute_system(
         return (make_result(0, id.ctrl), true);
     }
 
-    // CSR operations
     if id.ctrl.csr_op != CsrOp::None {
         return execute_csr(cpu, id, rob, fwd_a, store_data);
     }
 
-    // Unknown system instruction — pass through
     (make_result(0, id.ctrl), true)
 }
 
@@ -632,7 +587,6 @@ fn execute_csr(
     fwd_a: u64,
     store_data: u64,
 ) -> (ExMem1Entry, bool) {
-    // SATP access check in S-mode with TVM=1
     if id.ctrl.csr_addr == crate::core::arch::csr::SATP
         && cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor
         && ((cpu.csrs.mstatus >> 20) & 1) != 0
@@ -659,16 +613,16 @@ fn execute_csr(
         );
     }
 
-    // Counter-enable check for CYCLE/TIME/INSTRET (and their high-word aliases)
+    // mcounteren / scounteren check for CYCLE/TIME/INSTRET.
     {
         use crate::core::arch::csr as csr_addrs;
         use crate::core::arch::mode::PrivilegeMode;
         let counter_bit = if id.ctrl.csr_addr == csr_addrs::CYCLE {
-            Some(0) // CY bit
+            Some(0)
         } else if id.ctrl.csr_addr == csr_addrs::TIME {
-            Some(1) // TM bit
+            Some(1)
         } else if id.ctrl.csr_addr == csr_addrs::INSTRET {
-            Some(2) // IR bit
+            Some(2)
         } else {
             None
         };
@@ -706,7 +660,6 @@ fn execute_csr(
         }
     }
 
-    // Existence check: non-existent CSRs must trap (spec §2.2).
     if !cpu.is_valid_csr(id.ctrl.csr_addr) {
         rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
         return (
@@ -730,7 +683,6 @@ fn execute_csr(
         );
     }
 
-    // Privilege check
     let csr_priv = id.ctrl.csr_addr.privilege_level() as u32;
     if (cpu.privilege.to_u8() as u32) < csr_priv {
         rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
@@ -755,7 +707,6 @@ fn execute_csr(
         );
     }
 
-    // Read-only check
     let read_only = id.ctrl.csr_addr.is_read_only();
     if read_only {
         let would_write = match id.ctrl.csr_op {
@@ -788,9 +739,7 @@ fn execute_csr(
         }
     }
 
-    // fp_flags are deferred to commit, but a CSR read of fflags/fcsr must
-    // see the accumulated flags from all older (completed) instructions.
-    // CSR instructions are serializing, so all older entries are complete.
+    // CSR read of fflags/fcsr must see deferred fp_flags from older completed insts.
     {
         use crate::core::arch::csr as csr_addrs;
         if id.ctrl.csr_addr == csr_addrs::FFLAGS
@@ -824,9 +773,7 @@ fn execute_csr(
         rd        = id.rd.as_usize(),
         "EX: CSR deferred write queued in ROB"
     );
-    // Only generate a CSR write if the operation actually writes.
-    // CSRRS/CSRRC with rs1=x0 and CSRRSI/CSRRCI with uimm=0 are
-    // pure reads and must not trigger write side effects (spec §2.8).
+    // CSRRS/CSRRC with rs1=x0 and CSRRSI/CSRRCI with uimm=0 must not write (spec §2.8).
     let would_write = match id.ctrl.csr_op {
         CsrOp::Rw | CsrOp::Rwi => true,
         CsrOp::Rs | CsrOp::Rc => !id.rs1.is_zero(),
@@ -840,16 +787,7 @@ fn execute_csr(
         );
     }
 
-    // Only flush the pipeline for CSR writes. CSR writes modify global
-    // architectural state that younger speculative instructions may have
-    // already observed, so a flush is required to re-fetch with the new
-    // CSR value visible.
-    //
-    // Pure CSR reads (CSRRS/CSRRC with rs1=x0, CSRRSI/CSRRCI with uimm=0)
-    // have no side effects. They are still serializing at issue time
-    // (all_before_completed gate in issue_queue.rs) which guarantees the
-    // read sees the latest committed CSR value, but they do NOT need to
-    // flush younger instructions.
+    // Only CSR writes need a flush; pure reads stay serialized at issue time.
     let needs_flush = would_write;
     if needs_flush {
         cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
@@ -863,7 +801,7 @@ fn execute_csr(
             inst: id.inst,
             inst_size: id.inst_size,
             rd: id.rd,
-            alu: old, // result = old CSR value for rd
+            alu: old,
             store_data,
             ctrl: id.ctrl,
             trap: None,
@@ -887,9 +825,7 @@ fn compute_alu(
     is_rv32: bool,
     fp_rm: Option<RoundingMode>,
 ) -> (u64, u8) {
-    // FP conversions and moves that need special handling.
-    // Int-to-float and float-to-float conversions can raise FP exception
-    // flags (INEXACT, OVERFLOW, etc.), so we use the host FPU to detect them.
+    // FP conversions go through the host FPU so we capture INEXACT / OVERFLOW etc.
     match alu_op {
         AluOp::FCvtSW
         | AluOp::FCvtSL
@@ -951,12 +887,10 @@ fn compute_alu(
                     canonicalize_f64_bits(val_d)
                 }
                 AluOp::FCvtSH => {
-                    // Half → single: lossless, just rebox.
                     let val_s = f16_to_f32(unbox_f16(op_a));
                     box_f32_canon(val_s)
                 }
                 AluOp::FCvtDH => {
-                    // Half → double: lossless.
                     use crate::core::units::fpu::nan_handling::canonicalize_f64_bits;
                     let val_s = f16_to_f32(unbox_f16(op_a));
                     canonicalize_f64_bits(std::hint::black_box(val_s) as f64)
@@ -968,7 +902,6 @@ fn compute_alu(
             return (val, fp_flags.bits());
         }
         AluOp::FMvToF => {
-            // Bit-level move — no FP exceptions possible.
             let val = if is_f16 {
                 use crate::core::units::fpu::half::box_f16;
                 box_f16(op_a as u16)

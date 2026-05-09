@@ -13,10 +13,6 @@ use rvsim_core::config::{
 };
 use rvsim_core::core::units::cache::CacheSim;
 
-// ──────────────────────────────────────────────────────────
-// Helper: build a simple test cache
-// ──────────────────────────────────────────────────────────
-
 /// Creates a small, deterministic test cache.
 ///
 /// Default: 256 bytes, 64-byte lines, 2-way set-associative, LRU,
@@ -47,10 +43,6 @@ fn test_config() -> CacheConfig {
 /// Next-level (e.g., L2/DRAM) latency for miss penalty calculations.
 const NEXT_LEVEL_LATENCY: u64 = 10;
 
-// ══════════════════════════════════════════════════════════
-// 1. Cold Miss
-// ══════════════════════════════════════════════════════════
-
 /// First access to any address is a compulsory (cold) miss.
 /// Returns (false, 0) because install_line has no dirty victim to write back.
 #[test]
@@ -61,10 +53,6 @@ fn cold_miss_returns_miss_no_penalty() {
     assert!(!hit, "First access should be a miss");
     assert_eq!(penalty, 0, "No dirty victim to write back on cold miss");
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. Warm Hit
-// ══════════════════════════════════════════════════════════
 
 /// Second access to the same address should be a hit with 0 penalty.
 #[test]
@@ -93,25 +81,13 @@ fn same_line_different_offset_hits() {
     assert!(hit, "Different offset in same line should hit");
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Set Conflict / Capacity Eviction
-// ══════════════════════════════════════════════════════════
-
 /// Fill both ways of a set, then access a third address mapping to the same set.
 /// The third access should miss (evicting the LRU line).
 #[test]
 fn set_conflict_eviction() {
     let mut cache = CacheSim::new(&test_config());
 
-    // Config: 2 sets, 2 ways, line_bytes=64.
-    // Set index = (addr / 64) % 2
-    // Tag       = addr / 128
-
-    // Three addresses that all map to set 0:
-    // addr=0:   set = (0/64) % 2 = 0,   tag = 0/128 = 0
-    // addr=128: set = (128/64) % 2 = 0,  tag = 128/128 = 1
-    // addr=256: set = (256/64) % 2 = 0,  tag = 256/128 = 2
-
+    // Config: 2 sets, 2 ways, line_bytes=64. All three addresses map to set 0.
     let addr_a = 0u64;
     let addr_b = 128u64;
     let addr_c = 256u64;
@@ -133,10 +109,6 @@ fn set_conflict_eviction() {
     assert!(cache.contains(addr_b), "Recently used address should survive");
     assert!(cache.contains(addr_c), "Newly installed address should be present");
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Dirty Write-back Penalty
-// ══════════════════════════════════════════════════════════
 
 /// Write to a line, then evict it. The eviction should incur a write-back
 /// penalty equal to next_level_latency.
@@ -174,10 +146,6 @@ fn dirty_bit_persists_across_reads() {
     assert_eq!(penalty, NEXT_LEVEL_LATENCY);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Clean Eviction
-// ══════════════════════════════════════════════════════════
-
 /// Evicting a clean (read-only) line incurs no write-back penalty.
 #[test]
 fn clean_eviction_no_penalty() {
@@ -192,10 +160,6 @@ fn clean_eviction_no_penalty() {
     assert!(!hit);
     assert_eq!(penalty, 0, "Evicting clean line should have 0 penalty");
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Flush
-// ══════════════════════════════════════════════════════════
 
 /// After flushing, previously cached dirty lines become misses.
 #[test]
@@ -229,10 +193,6 @@ fn flush_preserves_clean_lines() {
     assert!(cache.contains(0x1000), "Clean lines should survive flush");
 }
 
-// ══════════════════════════════════════════════════════════
-// 7. Disabled Cache
-// ══════════════════════════════════════════════════════════
-
 /// When cache is disabled, access always returns (false, 0) — no miss penalty,
 /// no hit tracking.
 #[test]
@@ -262,10 +222,6 @@ fn disabled_cache_contains_nothing() {
     assert!(!cache.contains(0x1000));
 }
 
-// ══════════════════════════════════════════════════════════
-// 8. Contains
-// ══════════════════════════════════════════════════════════
-
 /// `contains` mirrors the hit/miss status of the cache.
 #[test]
 fn contains_mirrors_hit_status() {
@@ -276,22 +232,12 @@ fn contains_mirrors_hit_status() {
     cache.access(0x2000, false, NEXT_LEVEL_LATENCY);
     assert!(cache.contains(0x2000), "Should contain after access");
 
-    // Evict by filling the set (2 ways).
-    // addr 0x2000: set = (0x2000/64) % 2 = 0, tag = 0x2000/128 = 64
-    // Need two more addresses mapping to the same set with different tags.
-    // set 0: addr where (addr/64) % 2 == 0 → addr/64 is even.
-    // 0x2000/64 = 128 (even) → set 0.
-    // 0x2000 + 128 = 0x2080 → (0x2080/64) = 130 (even) → set 0, tag = 0x2080/128 = 65.
+    // Fill both ways of set 0 with different tags to evict 0x2000.
     cache.access(0x2000 + 128, false, NEXT_LEVEL_LATENCY);
-    // 0x2000 + 256 = 0x2100 → (0x2100/64) = 132 (even) → set 0, tag = 66.
     cache.access(0x2000 + 256, false, NEXT_LEVEL_LATENCY);
 
     assert!(!cache.contains(0x2000), "Should not contain after eviction");
 }
-
-// ══════════════════════════════════════════════════════════
-// 9. Different Line Sizes
-// ══════════════════════════════════════════════════════════
 
 /// With 32-byte lines, offsets within 32 bytes should share a line.
 #[test]

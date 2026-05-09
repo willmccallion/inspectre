@@ -31,9 +31,7 @@ impl Vpr {
         vreg.as_usize() * self.vlen.bytes() + index.as_usize() * sew.bytes()
     }
 
-    /// Read a single element from a vector register.
-    ///
-    /// Returns the element zero-extended to u64.
+    /// Read a single element from a vector register, zero-extended to u64.
     pub fn read_element(&self, vreg: VRegIdx, index: ElemIdx, sew: Sew) -> u64 {
         let off = self.offset(vreg, index, sew);
         let bytes = sew.bytes();
@@ -51,9 +49,7 @@ impl Vpr {
         val
     }
 
-    /// Write a single element to a vector register.
-    ///
-    /// The value is truncated to SEW bits.
+    /// Write a single element to a vector register, truncating `val` to SEW bits.
     pub fn write_element(&mut self, vreg: VRegIdx, index: ElemIdx, sew: Sew, val: u64) {
         let off = self.offset(vreg, index, sew);
         let bytes = sew.bytes();
@@ -151,7 +147,6 @@ impl Vpr {
         let vlen_bytes = self.vlen.bytes();
         let src_start = src.as_usize() * vlen_bytes;
         let dst_start = dst.as_usize() * vlen_bytes;
-        // Use copy_within to handle the case where src and dst are in the same allocation.
         self.data.copy_within(src_start..src_start + vlen_bytes, dst_start);
     }
 
@@ -181,7 +176,7 @@ mod tests {
     #[test]
     fn test_new_zeroed() {
         let vpr = vpr128();
-        assert_eq!(vpr.data.len(), 32 * 16); // 32 regs * 16 bytes
+        assert_eq!(vpr.data.len(), 32 * 16);
         assert!(vpr.data.iter().all(|&b| b == 0));
     }
 
@@ -191,7 +186,6 @@ mod tests {
         let v1 = VRegIdx::new(1);
         vpr.write_element(v1, ElemIdx::new(0), Sew::E8, 0xAB);
         assert_eq!(vpr.read_element(v1, ElemIdx::new(0), Sew::E8), 0xAB);
-        // Other elements should be zero
         assert_eq!(vpr.read_element(v1, ElemIdx::new(1), Sew::E8), 0);
     }
 
@@ -215,7 +209,6 @@ mod tests {
     fn test_element_truncation() {
         let mut vpr = vpr128();
         let v0 = VRegIdx::new(0);
-        // Write a value larger than SEW=8 — only low 8 bits stored
         vpr.write_element(v0, ElemIdx::new(0), Sew::E8, 0x1FF);
         assert_eq!(vpr.read_element(v0, ElemIdx::new(0), Sew::E8), 0xFF);
     }
@@ -225,13 +218,11 @@ mod tests {
         let mut vpr = vpr128();
         let v0 = VRegIdx::new(0);
 
-        // Set bit 5
         vpr.write_mask_bit(v0, ElemIdx::new(5), true);
         assert!(vpr.read_mask_bit(v0, ElemIdx::new(5)));
         assert!(!vpr.read_mask_bit(v0, ElemIdx::new(4)));
         assert!(!vpr.read_mask_bit(v0, ElemIdx::new(6)));
 
-        // Clear bit 5
         vpr.write_mask_bit(v0, ElemIdx::new(5), false);
         assert!(!vpr.read_mask_bit(v0, ElemIdx::new(5)));
     }
@@ -251,11 +242,10 @@ mod tests {
         let group = Vlmul::M4.group_regs();
         let v0 = VRegIdx::new(0);
 
-        let data: Vec<u8> = (0..64).collect(); // 4 regs * 16 bytes
+        let data: Vec<u8> = (0..64).collect();
         vpr.write_group(v0, group, &data);
         assert_eq!(vpr.read_group(v0, group), &data[..]);
 
-        // Individual register reads should match
         assert_eq!(vpr.read_bytes(VRegIdx::new(0)), &data[0..16]);
         assert_eq!(vpr.read_bytes(VRegIdx::new(1)), &data[16..32]);
         assert_eq!(vpr.read_bytes(VRegIdx::new(2)), &data[32..48]);
@@ -267,7 +257,7 @@ mod tests {
     fn test_register_group_unaligned_panics() {
         let vpr = vpr128();
         let group = Vlmul::M4.group_regs();
-        let v1 = VRegIdx::new(1); // not aligned to 4
+        let v1 = VRegIdx::new(1);
         let _ = vpr.read_group(v1, group);
     }
 
@@ -295,14 +285,11 @@ mod tests {
     fn test_different_sew_same_data() {
         let mut vpr = vpr128();
         let v0 = VRegIdx::new(0);
-        // Write 0x04030201 at E32 element 0
         vpr.write_element(v0, ElemIdx::new(0), Sew::E32, 0x04030201);
-        // Read back as E8 elements
         assert_eq!(vpr.read_element(v0, ElemIdx::new(0), Sew::E8), 0x01);
         assert_eq!(vpr.read_element(v0, ElemIdx::new(1), Sew::E8), 0x02);
         assert_eq!(vpr.read_element(v0, ElemIdx::new(2), Sew::E8), 0x03);
         assert_eq!(vpr.read_element(v0, ElemIdx::new(3), Sew::E8), 0x04);
-        // Read as E16
         assert_eq!(vpr.read_element(v0, ElemIdx::new(0), Sew::E16), 0x0201);
         assert_eq!(vpr.read_element(v0, ElemIdx::new(1), Sew::E16), 0x0403);
     }

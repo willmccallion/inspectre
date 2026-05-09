@@ -11,16 +11,12 @@
 //! - [`shifts`]:     Sll, Srl, Sra
 //! - [`bitmanip`]:   Zba (address gen), Zbb (basic bitmanip), Zbc (clmul), Zbs (single-bit)
 
-/// Integer arithmetic operations (add, subtract, multiply, divide).
 pub mod arithmetic;
 
-/// Bit-manipulation operations (B extension: Zba, Zbb, Zbc, Zbs).
 pub mod bitmanip;
 
-/// Bitwise logical and comparison operations (or, and, xor, slt).
 pub mod logic;
 
-/// Shift operations (sll, srl, sra).
 pub mod shifts;
 
 use crate::core::pipeline::signals::AluOp;
@@ -80,7 +76,6 @@ impl Alu {
     /// ```
     pub const fn execute(op: AluOp, a: u64, b: u64, _c: u64, is32: bool) -> u64 {
         match op {
-            // Arithmetic: add, sub, mul*, div*, rem*
             AluOp::Add
             | AluOp::Sub
             | AluOp::Mul
@@ -92,15 +87,12 @@ impl Alu {
             | AluOp::Rem
             | AluOp::Remu => arithmetic::execute(op, a, b, is32),
 
-            // Logic / comparisons: or, and, xor, slt, sltu
             AluOp::Or | AluOp::And | AluOp::Xor | AluOp::Slt | AluOp::Sltu => {
                 logic::execute(op, a, b, is32)
             }
 
-            // Shifts: sll, srl, sra
             AluOp::Sll | AluOp::Srl | AluOp::Sra => shifts::execute(op, a, b, is32),
 
-            // B-extension: Zba, Zbb, Zbc, Zbs
             AluOp::Sh1Add
             | AluOp::Sh2Add
             | AluOp::Sh3Add
@@ -139,7 +131,6 @@ impl Alu {
             | AluOp::Xperm4
             | AluOp::Xperm8 => bitmanip::execute(op, a, b, is32),
 
-            // Non-integer operations (FP, etc.) are not handled here.
             _ => 0,
         }
     }

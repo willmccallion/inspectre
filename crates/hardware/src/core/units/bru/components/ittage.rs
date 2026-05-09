@@ -104,10 +104,8 @@ impl Ittage {
 
         let num_banks = self.banks.num_banks();
 
-        // Precompute all bank indices and tags once.
         let (indices, tags) = self.banks.snapshot_all(pc, ghr_snapshot);
 
-        // Find provider (longest matching bank).
         let mut provider = None;
         for i in (0..num_banks).rev() {
             if self.tables[i][indices[i]].tag == tags[i] {
@@ -128,7 +126,6 @@ impl Ittage {
             }
         }
 
-        // On misprediction, try to allocate in a longer-history bank.
         let mispredicted =
             provider.is_none_or(|bank| self.tables[bank][indices[bank]].target != target);
 

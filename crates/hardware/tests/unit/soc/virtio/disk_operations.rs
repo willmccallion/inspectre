@@ -19,10 +19,6 @@ fn make_virtio_with_ram() -> (VirtioBlock, Arc<DramBuffer>) {
     (virtio, ram)
 }
 
-// ══════════════════════════════════════════════════════════
-// Queue Address Configuration Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_queue_desc_low_write_and_read() {
     let mut vio = make_virtio();
@@ -61,10 +57,6 @@ fn virtio_queue_used_high_write() {
     vio.write_u32(0xa4, 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// Queue Selection Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_queue_sel_write() {
     let mut vio = make_virtio();
@@ -77,10 +69,6 @@ fn virtio_queue_sel_read_after_write() {
     vio.write_u32(0x30, 0);
     // Queue sel is typically write-only, but test the behavior
 }
-
-// ══════════════════════════════════════════════════════════
-// Queue Notification Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_queue_notify_triggers_processing() {
@@ -95,10 +83,6 @@ fn virtio_queue_notify_triggers_processing() {
     vio.write_u32(0x50, 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// Driver/Device Features Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_driver_features_write() {
     let mut vio = make_virtio();
@@ -112,10 +96,6 @@ fn virtio_driver_features_sel_write() {
     vio.write_u32(0x24, 1); // Select upper 32 bits
     vio.write_u32(0x20, 0); // Clear upper features
 }
-
-// ══════════════════════════════════════════════════════════
-// Disk Loading and Capacity Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_load_small_disk() {
@@ -149,15 +129,9 @@ fn virtio_load_large_disk() {
 #[test]
 fn virtio_capacity_high_word_for_large_disk() {
     let mut vio = make_virtio();
-    // Load a disk larger than 4GB (requires high word)
-    // For testing purposes, we'll just verify the read doesn't panic
     let capacity_high = vio.read_u32(0x104);
     assert_eq!(capacity_high, 0); // Should be 0 for small test disks
 }
-
-// ══════════════════════════════════════════════════════════
-// Status Register Transitions Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_status_acknowledge() {
@@ -220,10 +194,6 @@ fn virtio_status_full_initialization_sequence() {
     assert_eq!(vio.read_u32(0x70), 0x0F);
 }
 
-// ══════════════════════════════════════════════════════════
-// Read/Write Width Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_read_u8_magic() {
     let mut vio = make_virtio();
@@ -270,10 +240,6 @@ fn virtio_write_u64_queue_desc() {
     // Writes both low and high parts
 }
 
-// ══════════════════════════════════════════════════════════
-// Interrupt Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_interrupt_ack_specific_bit() {
     let mut vio = make_virtio();
@@ -285,10 +251,6 @@ fn virtio_interrupt_ack_multiple_bits() {
     let mut vio = make_virtio();
     vio.write_u32(0x64, 0x3); // Ack bits 0 and 1
 }
-
-// ══════════════════════════════════════════════════════════
-// Invalid/Edge Case Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_read_invalid_offset_returns_zero() {
@@ -328,10 +290,6 @@ fn virtio_unaligned_write() {
     vio.write_u32(0x71, 0x01);
 }
 
-// ══════════════════════════════════════════════════════════
-// Config Space Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_config_space_capacity_fields() {
     let mut vio = make_virtio();
@@ -352,10 +310,6 @@ fn virtio_config_space_read_beyond_capacity() {
     let _ = vio.read_u32(0x108);
     let _ = vio.read_u32(0x10C);
 }
-
-// ══════════════════════════════════════════════════════════
-// Multiple Operations Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_multiple_status_changes() {
@@ -397,10 +351,6 @@ fn virtio_queue_ready_toggle() {
     vio.write_u32(0x44, 1);
     assert_eq!(vio.read_u32(0x44), 1);
 }
-
-// ══════════════════════════════════════════════════════════
-// Device Feature Bit Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_device_features_bit_32() {

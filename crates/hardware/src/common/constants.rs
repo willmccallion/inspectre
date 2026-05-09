@@ -1,10 +1,4 @@
-//! Global System Constants.
-//!
-//! This module defines system-wide constants used across the simulator. It includes:
-//! 1. **Memory Constants:** Page sizes, masks, and shifts for memory management.
-//! 2. **Instruction Constants:** Opcode masks and field shifts for instruction decoding.
-//! 3. **Delegation Constants:** Bit positions for interrupt delegation.
-//! 4. **Simulation Constants:** Thresholds and intervals for simulation control.
+//! Global System Constants — memory, instruction encoding, delegation, simulation.
 
 /// Page size in bytes (4KB).
 pub const PAGE_SIZE: u64 = 4096;

@@ -5,8 +5,6 @@
 //!
 //! Encoding reference: RISC-V Bitmanip Extension v1.0.0, Chapter 2-5.
 
-// ── Zba: Address generation ──────────────────────────────────────────────────
-
 /// sh1add (funct3 for `OP_REG` with funct7 = `SH_ADD`).
 pub const SH1ADD: u32 = 0b010;
 
@@ -27,8 +25,6 @@ pub const SH2ADD_UW: u32 = 0b100;
 
 /// sh3add.uw (`OP_REG_32` with funct7 = `SH_ADD`).
 pub const SH3ADD_UW: u32 = 0b110;
-
-// ── Zbb: Basic bit manipulation ──────────────────────────────────────────────
 
 /// andn (funct3 for `OP_REG` with funct7 = `LOGICAL_NEG`).
 pub const ANDN: u32 = 0b111;
@@ -66,8 +62,6 @@ pub const ORC_REV_SEXT: u32 = 0b101;
 /// zext.h (funct3 for `OP_REG_32` with funct7 = `ZEXT_H`).
 pub const ZEXT_H: u32 = 0b100;
 
-// ── Zbc: Carry-less multiplication ───────────────────────────────────────────
-
 /// clmul (funct3 for `OP_REG` with funct7 = CLMUL).
 pub const CLMUL: u32 = 0b001;
 
@@ -76,8 +70,6 @@ pub const CLMULH: u32 = 0b011;
 
 /// clmulr (funct3 for `OP_REG` with funct7 = CLMUL).
 pub const CLMULR: u32 = 0b010;
-
-// ── Zbs: Single-bit operations ───────────────────────────────────────────────
 
 /// bclr / bclri (funct3 for `OP_REG/OP_IMM` with funct7 = BCLR).
 pub const BCLR: u32 = 0b001;
@@ -91,8 +83,6 @@ pub const BINV: u32 = 0b001;
 /// bset / bseti (funct3 for `OP_REG/OP_IMM` with funct7 = BSET).
 pub const BSET: u32 = 0b001;
 
-// ── Zbkb: Bitwise operations for cryptography ───────────────────────────────
-
 /// pack (funct3 for `OP_REG` with funct7 = PACK).
 pub const PACK: u32 = 0b100;
 
@@ -102,20 +92,11 @@ pub const PACKH: u32 = 0b111;
 /// packw (funct3 for `OP_REG_32` with funct7 = PACK).
 pub const PACKW: u32 = 0b100;
 
-// ── Zbkx: Crossbar permutations for cryptography ────────────────────────────
-
 /// xperm4 (funct3 for `OP_REG` with funct7 = XPERM).
 pub const XPERM4: u32 = 0b010;
 
 /// xperm8 (funct3 for `OP_REG` with funct7 = XPERM).
 pub const XPERM8: u32 = 0b100;
-
-// ── Full I-type immediate encodings for unary instructions ───────────────────
-//
-// Several B-extension instructions are encoded as I-type with a fixed
-// immediate (funct7 || rs2 = imm[11:0]). The spec defines these as
-// complete 12-bit immediates rather than separate funct7/rs2 fields.
-// We extract the unsigned imm[11:0] from the raw instruction at decode time.
 
 /// Mask to extract the unsigned I-type immediate (bits 31:20) from raw instruction.
 pub const I_IMM_MASK: u32 = 0xFFF0_0000;

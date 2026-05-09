@@ -1,11 +1,4 @@
-//! Unified Register File.
-//!
-//! This module provides the `RegisterFile` struct, which acts as a unified interface for
-//! accessing both General Purpose Registers (GPRs) and Floating-Point Registers (FPRs).
-//! It provides:
-//! 1. **Unified Storage:** Combined storage for all RISC-V architectural registers.
-//! 2. **Abstraction:** A single set of methods for reading and writing register values.
-//! 3. **Observability:** Debugging utilities for dumping register state during simulation.
+//! Unified register file combining GPR, FPR, and (optional) VPR.
 
 use crate::common::RegIdx;
 use crate::core::arch::fpr::Fpr;
@@ -73,48 +66,22 @@ impl RegisterFile {
         self.vpr.is_some()
     }
 
-    /// Reads a value from a general-purpose register.
-    ///
-    /// # Arguments
-    ///
-    /// * `idx` - Register index (x0-x31). Register `x0` always returns 0.
-    ///
-    /// # Returns
-    ///
-    /// The 64-bit value stored in the specified register.
+    /// Reads a value from a general-purpose register. Register `x0` always returns 0.
     pub const fn read(&self, idx: RegIdx) -> u64 {
         self.gpr.read(idx)
     }
 
-    /// Writes a value to a general-purpose register.
-    ///
-    /// # Arguments
-    ///
-    /// * `idx` - Register index (x0-x31). Writes to `x0` are ignored.
-    /// * `val` - The 64-bit value to write.
+    /// Writes a value to a general-purpose register. Writes to `x0` are ignored.
     pub const fn write(&mut self, idx: RegIdx, val: u64) {
         self.gpr.write(idx, val);
     }
 
     /// Reads a value from a floating-point register.
-    ///
-    /// # Arguments
-    ///
-    /// * `idx` - Floating-point register index (f0-f31).
-    ///
-    /// # Returns
-    ///
-    /// The 64-bit value stored in the specified floating-point register.
     pub const fn read_f(&self, idx: RegIdx) -> u64 {
         self.fpr.read(idx)
     }
 
     /// Writes a value to a floating-point register.
-    ///
-    /// # Arguments
-    ///
-    /// * `idx` - Floating-point register index (f0-f31).
-    /// * `val` - The 64-bit value to write.
     pub const fn write_f(&mut self, idx: RegIdx, val: u64) {
         self.fpr.write(idx, val);
     }

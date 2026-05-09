@@ -182,11 +182,7 @@ pub(crate) fn rmm_round_f64_to_f32(exact: f64) -> f32 {
     }
     // Midpoint is exact in f64 for two adjacent f32 values.
     let midpoint = (rne_d + other as f64) * 0.5;
-    if exact == midpoint {
-        if rne.abs() >= other.abs() { rne } else { other }
-    } else {
-        rne
-    }
+    if exact == midpoint { if rne.abs() >= other.abs() { rne } else { other } } else { rne }
 }
 
 /// Fixes a host-RNE f64 add/sub result for RMM tie cases.
@@ -378,31 +374,22 @@ impl Fpu {
             AluOp::FAdd => {
                 let fa = f16_to_f32(ha) as f64;
                 let fb = f16_to_f32(hb) as f64;
-                let nv = if is_snan_f16(ha) || is_snan_f16(hb) {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv =
+                    if is_snan_f16(ha) || is_snan_f16(hb) { FpFlags::NV } else { FpFlags::NONE };
                 arith(fa + fb, nv)
             }
             AluOp::FSub => {
                 let fa = f16_to_f32(ha) as f64;
                 let fb = f16_to_f32(hb) as f64;
-                let nv = if is_snan_f16(ha) || is_snan_f16(hb) {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv =
+                    if is_snan_f16(ha) || is_snan_f16(hb) { FpFlags::NV } else { FpFlags::NONE };
                 arith(fa - fb, nv)
             }
             AluOp::FMul => {
                 let fa = f16_to_f32(ha) as f64;
                 let fb = f16_to_f32(hb) as f64;
-                let nv = if is_snan_f16(ha) || is_snan_f16(hb) {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv =
+                    if is_snan_f16(ha) || is_snan_f16(hb) { FpFlags::NV } else { FpFlags::NONE };
                 arith(fa * fb, nv)
             }
             AluOp::FDiv => {
@@ -488,11 +475,7 @@ impl Fpu {
                 if is_snan_f16(ha) || is_snan_f16(hb) {
                     flags = flags | FpFlags::NV;
                 }
-                let r = if matches!(op, AluOp::FMin) {
-                    fmin_f32(fa, fb)
-                } else {
-                    fmax_f32(fa, fb)
-                };
+                let r = if matches!(op, AluOp::FMin) { fmin_f32(fa, fb) } else { fmax_f32(fa, fb) };
                 if r.is_nan() {
                     return (box_f16(CANONICAL_NAN_F16), flags);
                 }
@@ -501,11 +484,8 @@ impl Fpu {
             }
 
             AluOp::FEq => {
-                let nv = if is_snan_f16(ha) || is_snan_f16(hb) {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv =
+                    if is_snan_f16(ha) || is_snan_f16(hb) { FpFlags::NV } else { FpFlags::NONE };
                 let fa = f16_to_f32(ha);
                 let fb = f16_to_f32(hb);
                 ((fa == fb) as u64, nv)
@@ -513,21 +493,13 @@ impl Fpu {
             AluOp::FLt => {
                 let fa = f16_to_f32(ha);
                 let fb = f16_to_f32(hb);
-                let nv = if fa.is_nan() || fb.is_nan() {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv = if fa.is_nan() || fb.is_nan() { FpFlags::NV } else { FpFlags::NONE };
                 ((fa < fb) as u64, nv)
             }
             AluOp::FLe => {
                 let fa = f16_to_f32(ha);
                 let fb = f16_to_f32(hb);
-                let nv = if fa.is_nan() || fb.is_nan() {
-                    FpFlags::NV
-                } else {
-                    FpFlags::NONE
-                };
+                let nv = if fa.is_nan() || fb.is_nan() { FpFlags::NV } else { FpFlags::NONE };
                 ((fa <= fb) as u64, nv)
             }
 
@@ -610,16 +582,32 @@ impl Fpu {
             flags = flags | FpFlags::NV;
             let result = match op {
                 AluOp::FCvtWS => {
-                    if val > 0.0 { i32::MAX as i64 as u64 } else { i32::MIN as i64 as u64 }
+                    if val > 0.0 {
+                        i32::MAX as i64 as u64
+                    } else {
+                        i32::MIN as i64 as u64
+                    }
                 }
                 AluOp::FCvtWUS => {
-                    if val > 0.0 { u32::MAX as i32 as i64 as u64 } else { 0 }
+                    if val > 0.0 {
+                        u32::MAX as i32 as i64 as u64
+                    } else {
+                        0
+                    }
                 }
                 AluOp::FCvtLS => {
-                    if val > 0.0 { i64::MAX as u64 } else { i64::MIN as u64 }
+                    if val > 0.0 {
+                        i64::MAX as u64
+                    } else {
+                        i64::MIN as u64
+                    }
                 }
                 AluOp::FCvtLUS => {
-                    if val > 0.0 { u64::MAX } else { 0 }
+                    if val > 0.0 {
+                        u64::MAX
+                    } else {
+                        0
+                    }
                 }
                 _ => 0,
             };
@@ -641,14 +629,7 @@ impl Fpu {
                 if (0.0..U32_MAX_P1_F64).contains(&rounded) {
                     (false, rounded as u32 as i32 as i64 as u64)
                 } else {
-                    (
-                        true,
-                        if rounded > 0.0 {
-                            u32::MAX as i32 as i64 as u64
-                        } else {
-                            0
-                        },
-                    )
+                    (true, if rounded > 0.0 { u32::MAX as i32 as i64 as u64 } else { 0 })
                 }
             }
             AluOp::FCvtLS => {
@@ -916,10 +897,7 @@ impl Fpu {
             return Self::execute_f16(op, a, b, c, rm);
         }
         // Float-to-integer conversions need rounding-mode-aware handling.
-        if matches!(
-            op,
-            AluOp::FCvtWS | AluOp::FCvtWUS | AluOp::FCvtLS | AluOp::FCvtLUS
-        ) {
+        if matches!(op, AluOp::FCvtWS | AluOp::FCvtWUS | AluOp::FCvtLS | AluOp::FCvtLUS) {
             let val = if is32 { unbox_f32(a) as f64 } else { f64::from_bits(a) };
             let mut flags = FpFlags::NONE;
 
@@ -940,16 +918,32 @@ impl Fpu {
                 flags = flags | FpFlags::NV;
                 let result = match op {
                     AluOp::FCvtWS => {
-                        if val > 0.0 { i32::MAX as i64 as u64 } else { i32::MIN as i64 as u64 }
+                        if val > 0.0 {
+                            i32::MAX as i64 as u64
+                        } else {
+                            i32::MIN as i64 as u64
+                        }
                     }
                     AluOp::FCvtWUS => {
-                        if val > 0.0 { u32::MAX as i32 as i64 as u64 } else { 0 }
+                        if val > 0.0 {
+                            u32::MAX as i32 as i64 as u64
+                        } else {
+                            0
+                        }
                     }
                     AluOp::FCvtLS => {
-                        if val > 0.0 { i64::MAX as u64 } else { i64::MIN as u64 }
+                        if val > 0.0 {
+                            i64::MAX as u64
+                        } else {
+                            i64::MIN as u64
+                        }
                     }
                     AluOp::FCvtLUS => {
-                        if val > 0.0 { u64::MAX } else { 0 }
+                        if val > 0.0 {
+                            u64::MAX
+                        } else {
+                            0
+                        }
                     }
                     _ => unreachable!(),
                 };
@@ -973,14 +967,7 @@ impl Fpu {
                     if (0.0..U32_MAX_P1_F64).contains(&rounded) {
                         (false, rounded as u32 as i32 as i64 as u64)
                     } else {
-                        (
-                            true,
-                            if rounded > 0.0 {
-                                u32::MAX as i32 as i64 as u64
-                            } else {
-                                0
-                            },
-                        )
+                        (true, if rounded > 0.0 { u32::MAX as i32 as i64 as u64 } else { 0 })
                     }
                 }
                 AluOp::FCvtLS => {

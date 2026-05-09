@@ -48,10 +48,7 @@ pub fn fetch2_stage(
         return;
     }
 
-    // --- I-cache probe (before decoding) ---
-    // Probe each unique cache line. On a miss, record the penalty.
-    // `simulate_memory_access` installs the line on miss, so this is the
-    // only cache access for these lines — no retry needed.
+    // simulate_memory_access installs lines on miss, so a single probe is enough.
     let mut icache_penalty: u64 = 0;
     if cpu.l1_i_cache.enabled {
         let line_mask = !(cpu.i_cache_line_bytes as u64 - 1);
@@ -72,8 +69,7 @@ pub fn fetch2_stage(
         }
     }
 
-    // Determine destination: on a miss, decode into `pending` (delivered
-    // later when the stall expires). On a hit, decode straight into `output`.
+    // On miss, decode into pending so the caller delivers it after the stall.
     let dest = if icache_penalty > 0 {
         *stall_out += icache_penalty;
         pending
@@ -81,11 +77,9 @@ pub fn fetch2_stage(
         output
     };
 
-    // --- Consume input and decode ---
     let entries = std::mem::take(input);
 
     for f1 in entries {
-        // Propagate traps from Fetch1
         if let Some(ref trap) = f1.trap {
             trace_trap!(cpu.trace;
                 event   = "propagate",
@@ -110,7 +104,6 @@ pub fn fetch2_stage(
 
         let phys_addr = f1.paddr.val();
 
-        // Read the first half-word (functional — raw pointer for data)
         let half_word = if phys_addr >= cpu.ram_start && phys_addr < cpu.ram_end {
             let offset = (phys_addr - cpu.ram_start) as usize;
             unsafe {
@@ -134,10 +127,7 @@ pub fn fetch2_stage(
         } else {
             let upper_va = f1.pc.wrapping_add(2);
 
-            // Always re-translate the upper halfword. Even within the same
-            // page the MMU result holds, but a fine-grained PMP region
-            // boundary can fall between the two halves of a 4-byte
-            // instruction, so we re-check and accrue the cycle cost.
+            // Re-translate upper halfword: a fine-grained PMP boundary can split a 4-byte inst.
             let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch, 2);
             *stall_out += result.cycles;
             let (upper_phys, upper_fault) = (result.paddr, result.trap);

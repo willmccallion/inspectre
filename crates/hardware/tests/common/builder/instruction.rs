@@ -56,8 +56,6 @@ impl InstructionBuilder {
         self
     }
 
-    // --- Helpers for Common Instructions ---
-
     pub fn add(mut self, rd: u32, rs1: u32, rs2: u32) -> Self {
         self.opcode = OP_REG;
         self.rd = rd;
@@ -401,10 +399,6 @@ impl InstructionBuilder {
             }
             OP_BRANCH => {
                 // B-type: imm[12|10:5] | rs2 | rs1 | funct3 | imm[4:1|11] | opcode
-                // imm[12] -> bit 31
-                // imm[10:5] -> bits 30:25
-                // imm[4:1] -> bits 11:8
-                // imm[11] -> bit 7
                 let imm_val = self.imm as u32;
                 let bit_12 = ((imm_val >> 12) & 0x1) << 31;
                 let bits_10_5 = ((imm_val >> 5) & 0x3F) << 25;
@@ -413,14 +407,7 @@ impl InstructionBuilder {
                 bit_12 | bits_10_5 | rs2 | rs1 | funct3 | bits_4_1 | bit_11 | opcode
             }
             OP_LUI | OP_AUIPC => {
-                // U-type: imm[31:12] | rd | opcode
-                // The immediate for LUI/AUIPC is the upper 20 bits.
-                // Usually LUI accepts the raw 20-bit value or the shifted value?
-                // Given `lui(rd, imm)`, user likely provides the upper bits shifted or unshifted?
-                // Standard convention is usually the raw 20 bits or the full 32-bit value.
-                // If I pass 0x12345, LUI loads 0x12345 << 12.
-                // Let's assume the user passes the *value* they want in the register if possible, but LUI takes the upper 20 bits.
-                // Actually, let's assume `imm` passed to `lui` is the 20-bit immediate value itself (not shifted).
+                // U-type: imm is the raw 20-bit immediate (not pre-shifted).
                 let imm_val = (self.imm as u32) & 0xFFFFF;
                 (imm_val << 12) | rd | opcode
             }

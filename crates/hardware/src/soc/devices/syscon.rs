@@ -26,52 +26,36 @@ pub struct SysCon {
 
 impl SysCon {
     /// Creates a new `SysCon` device.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_addr` - The base physical address.
-    /// * `exit_signal` - Shared atomic for signaling exit codes.
     pub const fn new(base_addr: u64, exit_signal: Arc<AtomicU64>) -> Self {
         Self { base_addr, exit_signal }
     }
 }
 
 impl Device for SysCon {
-    /// Returns the device name.
     fn name(&self) -> &'static str {
         "SysCon"
     }
 
-    /// Returns the address range (Base, Size).
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x1000)
     }
 
-    /// Reads a byte (unimplemented, returns 0).
     fn read_u8(&mut self, _offset: u64) -> u8 {
         0
     }
-    /// Reads a half-word (unimplemented, returns 0).
     fn read_u16(&mut self, _offset: u64) -> u16 {
         0
     }
-    /// Reads a word (unimplemented, returns 0).
     fn read_u32(&mut self, _offset: u64) -> u32 {
         0
     }
-    /// Reads a double-word (unimplemented, returns 0).
     fn read_u64(&mut self, _offset: u64) -> u64 {
         0
     }
 
-    /// Writes a byte (unimplemented).
     fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    /// Writes a half-word (unimplemented).
     fn write_u16(&mut self, _offset: u64, _val: u16) {}
 
-    /// Writes a word (32-bit) to the device.
-    ///
-    /// Interprets specific magic values to trigger system events.
     fn write_u32(&mut self, offset: u64, val: u32) {
         if offset == 0 {
             match val {
@@ -92,7 +76,6 @@ impl Device for SysCon {
         }
     }
 
-    /// Writes a double-word (delegates to `write_u32`).
     fn write_u64(&mut self, offset: u64, val: u64) {
         self.write_u32(offset, val as u32);
     }

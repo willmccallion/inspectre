@@ -36,18 +36,14 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
     let c_enabled = (cpu.csrs.misa & csr::MISA_EXT_C) != 0;
     let align_mask: u64 = if c_enabled { 1 } else { 3 };
 
-    // Cache-line-aligned fetch: a real frontend fetches one cache line per cycle.
-    // If the PC is near the end of a line, only the remaining bytes are available.
-    // We track a byte budget and stop when the next instruction wouldn't fit.
+    // A real frontend fetches one cache line per cycle; bound the burst by line_end.
     let line_bytes = cpu.i_cache_line_bytes as u64;
-    let line_end = (current_pc | (line_bytes - 1)) + 1; // end of current cache line
+    let line_end = (current_pc | (line_bytes - 1)) + 1;
 
     for _ in 0..cpu.pipeline_width {
-        // Stop if fewer than 2 bytes remain in this cache line (minimum instruction size).
         if current_pc + 2 > line_end {
             break;
         }
-        // Check alignment
         let mut fetch_trap = None;
         if (current_pc & align_mask) != 0 {
             if output.is_empty() {
@@ -57,7 +53,6 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             }
         }
 
-        // I-TLB lookup
         let TranslationResult { paddr, cycles, trap, .. } = if fetch_trap.is_none() {
             cpu.translate(VirtAddr::new(current_pc), AccessType::Fetch, 2)
         } else {
@@ -88,7 +83,6 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
 
         let phys_addr = paddr.val();
 
-        // Read the first half-word to determine instruction type for prediction
         let half_word = if phys_addr >= cpu.ram_start && phys_addr < cpu.ram_end {
             let offset = (phys_addr - cpu.ram_start) as usize;
             unsafe {
@@ -104,7 +98,6 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
 
         let step = if is_compressed { InstSize::Compressed } else { InstSize::Standard };
 
-        // Branch prediction (peek at opcode from half_word for 32-bit instructions)
         let mut next_pc_calc = current_pc.wrapping_add(step.as_u64());
         let mut pred_taken = false;
         let mut pred_target = 0;
@@ -113,8 +106,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
         let ras_snapshot = cpu.branch_predictor.snapshot_ras();
 
         if is_compressed {
-            // Compressed branch prediction: detect C.BEQZ / C.BNEZ
-            // Quadrant 1 (bits 1:0 = 01), funct3 = 110 or 111
+            // C.BEQZ / C.BNEZ: quadrant 01, funct3 = 110 or 111.
             let quadrant = half_word & 0x3;
             let funct3_c = (half_word >> 13) & 0x7;
             if quadrant == 0x01 && (funct3_c == 0b110 || funct3_c == 0b111) {
@@ -137,14 +129,13 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                 );
             }
         } else {
-            // For 32-bit instructions, read full instruction for opcode extraction
             let upper_va = current_pc.wrapping_add(2);
             let crosses_page = (current_pc >> 12) != (upper_va >> 12);
             let upper_phys = if crosses_page {
                 let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch, 2);
                 *stall_out += result.cycles;
                 if result.trap.is_some() {
-                    // Page crossing fault; let fetch2 handle it
+                    // Defer page-crossing fault to fetch2.
                     trace_fetch!(cpu.trace;
                         pc           = %crate::trace::Hex(current_pc),
                         paddr        = %crate::trace::Hex(phys_addr),
@@ -222,11 +213,10 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     "F1: JAL prediction"
                 );
             } else if opcode == opcodes::OP_JALR {
-                // Per RISC-V spec Table 2.1: both x1 and x5 are link registers.
+                // RISC-V Table 2.1: both x1 and x5 are link registers.
                 let rd_link = rd == abi::REG_RA || rd == abi::REG_T0;
                 let rs1_link = rs1 == abi::REG_RA || rs1 == abi::REG_T0;
-                // Use RAS for returns and coroutine swaps (rs1 is link, but not
-                // a pure self-call where rd == rs1 both link).
+                // Use RAS for returns/coroutine swaps but not pure self-calls.
                 let use_ras = rs1_link && (!rd_link || rd != rs1);
                 if use_ras {
                     if let Some(tgt) = cpu.branch_predictor.predict_return() {

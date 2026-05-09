@@ -5,13 +5,10 @@
 //! paging scheme and includes Translation Lookaside Buffers (TLBs) for
 //! caching translations.
 
-/// Physical Memory Protection (PMP).
 pub mod pmp;
 
-/// Page table walker implementation for SV39 virtual memory.
 pub mod ptw;
 
-/// Translation Lookaside Buffer (TLB) for caching virtual-to-physical address translations.
 pub mod tlb;
 
 use crate::common::{AccessType, Asid, PhysAddr, TranslationResult, Trap, VirtAddr, Vpn};
@@ -177,9 +174,7 @@ impl Mmu {
         };
 
         if let Some(hit) = tlb_entry {
-            // If writing to a page with D=0, invalidate the TLB entry and
-            // fall through to the page table walk so the PTW sets the dirty
-            // bit in the PTE and re-caches with D=1.
+            // Invalidate so the PTW sets the dirty bit in the PTE and re-caches with D=1.
             if access == AccessType::Write && !hit.d {
                 self.dtlb.invalidate(vpn);
             } else {
@@ -218,25 +213,19 @@ impl Mmu {
             }
         }
 
-        // L1 TLB miss — check the shared L2 TLB before invoking the PTW.
         let l2_latency = self.l2_tlb.latency;
         if let Some((ppn, pte_bits, entry_asid)) = self.l2_tlb.lookup(vpn, asid) {
-            // Extract permission bits from cached PTE.
             let r = (pte_bits >> 1) & 1 != 0;
             let w = (pte_bits >> 2) & 1 != 0;
             let x = (pte_bits >> 3) & 1 != 0;
             let u = (pte_bits >> 4) & 1 != 0;
             let d = (pte_bits >> 7) & 1 != 0;
 
-            // Check dirty bit — if writing with D=0, fall through to PTW.
             if access == AccessType::Write && !d {
-                // Don't return; let the PTW set the dirty bit.
-                // Do NOT promote to L1 — the entry has D=0 and would
-                // cause a repeated fallthrough on the next L1 hit.
+                // Fall through to PTW so it sets the dirty bit.
+                // Do NOT promote to L1: a D=0 entry would re-fall on next hit.
             } else {
-                // Permission checks (must mirror the L1 TLB hit path).
-                // Run these BEFORE promoting to L1 so faulting entries
-                // never pollute the L1 cache.
+                // Run BEFORE promoting to L1 so faulting entries don't pollute L1.
                 if access == AccessType::Write && !w {
                     return TranslationResult::fault(Trap::StorePageFault(vaddr.val()), l2_latency);
                 }
@@ -275,7 +264,6 @@ impl Mmu {
                     }
                 }
 
-                // Permissions passed — promote to L1 TLB.
                 if access == AccessType::Fetch {
                     self.itlb.insert(vpn, ppn, pte_bits, entry_asid);
                 } else {

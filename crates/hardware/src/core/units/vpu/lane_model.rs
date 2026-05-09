@@ -50,10 +50,8 @@ pub fn compute_reduction_latency(
         return 1;
     }
     if is_ordered {
-        // Fully sequential: each element depends on previous
         vl as u64 * startup_latency
     } else {
-        // Intra-lane sequential + inter-lane tree reduction
         let intra = vl.div_ceil(num_lanes) as u64;
         let inter = if num_lanes > 1 { (num_lanes as f64).log2().ceil() as u64 } else { 0 };
         startup_latency + intra + inter

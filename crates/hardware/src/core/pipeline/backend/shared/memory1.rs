@@ -42,13 +42,11 @@ pub fn memory1_stage(
     let entries = std::mem::take(input);
     let has_mshrs = cpu.l1d_mshrs.capacity() > 0;
     let mut cancelled_wakeups: Vec<PhysReg> = Vec::new();
-    // Do NOT clear output — memory2 may have pushed stalled entries back
-    // into this latch. We append new entries after any stalled ones.
+    // Do not clear output — memory2 may have pushed stalled entries back here.
 
     let mut iter = entries.into_iter();
 
     while let Some(ex) = iter.next() {
-        // Propagate traps
         if let Some(ref trap) = ex.trap {
             trace_trap!(cpu.trace;
                 event   = "propagate",
@@ -78,8 +76,6 @@ pub fn memory1_stage(
                 sfence_vma: ex.sfence_vma,
                 vec_mem: ex.vec_mem,
             });
-            // Remaining entries go back to input — they'll be flushed when
-            // the trap reaches commit, but must not be silently dropped.
             input.extend(iter);
             return cancelled_wakeups;
         }
@@ -89,11 +85,7 @@ pub fn memory1_stage(
         if needs_translation {
             let mut per_entry_latency: u64 = 0;
 
-            // Check alignment.
-            //
-            // RISC-V spec Section 8.4: atomic operations (LR/SC/AMO)
-            // ALWAYS require natural alignment, even when the
-            // implementation supports misaligned regular accesses.
+            // RISC-V Section 8.4: atomics always require natural alignment.
             let size = unaligned::width_to_bytes(ex.ctrl.width);
             let is_atomic = ex.ctrl.atomic_op != AtomicOp::None;
             if !unaligned::is_aligned(ex.alu, size) {
@@ -141,7 +133,6 @@ pub fn memory1_stage(
                 per_entry_latency += latency_penalty;
             }
 
-            // ── Memory trigger check ──────────────────────────────────────────────────
             if ex.ctrl.mem_read && !is_atomic && cpu.check_load_trigger(ex.alu) {
                 output.push(Mem1Mem2Entry {
                     rob_tag: ex.rob_tag,
@@ -228,15 +219,11 @@ pub fn memory1_stage(
                     sfence_vma: ex.sfence_vma,
                     vec_mem: ex.vec_mem,
                 });
-                // Remaining entries go back to input.
                 input.extend(iter);
                 return cancelled_wakeups;
             }
 
-            // Check that the physical address is backed by a device.
-            // Unmapped regions generate access faults for S/U-mode (Linux
-            // device probing depends on this). M-mode firmware (OpenSBI)
-            // probes addresses expecting bus default (0), not faults.
+            // S/U-mode trap on unmapped paddr; M-mode firmware probing expects bus default.
             if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine
                 && !cpu.bus.bus.is_valid_address(paddr)
             {
@@ -295,7 +282,6 @@ pub fn memory1_stage(
                 "M1: address translated"
             );
 
-            // Fill load queue with translated address
             if ex.ctrl.mem_read
                 && let Some(ref mut lq) = load_queue
             {
@@ -303,11 +289,8 @@ pub fn memory1_stage(
                 lq.fill_address(ex.rob_tag, lq_elem, VirtAddr::new(ex.alu), paddr);
             }
 
-            // D-cache/bus latency: only cacheable addresses (RAM) go through
-            // the cache hierarchy. MMIO addresses (below cache_base) bypass
-            // caches entirely — they are uncacheable by nature.
+            // RAM goes through the cache hierarchy; MMIO bypasses it.
             if paddr.val() >= cpu.cache_base && has_mshrs {
-                // ── Non-blocking path (MSHRs available) ──
                 let is_write = ex.ctrl.mem_write;
                 let l1d_hit = cpu.l1_d_cache.access_check(paddr.val(), is_write);
 
@@ -344,7 +327,6 @@ pub fn memory1_stage(
                         vec_mem: ex.vec_mem,
                     });
                 } else {
-                    // L1D miss — compute miss latency from L2/L3/DRAM
                     cpu.stats.dcache_misses += 1;
                     let miss_latency =
                         cpu.l1_d_cache.latency + cpu.simulate_l1d_miss_latency(paddr, access_type);
@@ -362,8 +344,7 @@ pub fn memory1_stage(
                     let is_store_only = ex.ctrl.mem_write && !ex.ctrl.mem_read && !is_atomic;
 
                     if is_store_only {
-                        // Stores: allocate MSHR for write-allocate but proceed
-                        // immediately. The store buffer handles the actual write.
+                        // Allocate MSHR for write-allocate; store buffer does the write.
                         let waiter = MshrWaiter { rob_tag: ex.rob_tag, parked_entry: None };
                         let resp = cpu.l1d_mshrs.request(
                             paddr.val(),
@@ -380,11 +361,9 @@ pub fn memory1_stage(
                                 cpu.stats.mshr_coalesces += 1;
                             }
                             CacheResponse::MshrFull | CacheResponse::Hit => {
-                                // Store can proceed anyway — worst case the
-                                // write-allocate just doesn't happen.
+                                // Store proceeds; worst case write-allocate is skipped.
                             }
                         }
-                        // Store proceeds with just L1D tag-check latency
                         per_entry_latency += cpu.l1_d_cache.latency;
                         output.push(Mem1Mem2Entry {
                             rob_tag: ex.rob_tag,
@@ -407,7 +386,6 @@ pub fn memory1_stage(
                             vec_mem: ex.vec_mem,
                         });
                     } else {
-                        // Loads and atomics: park in MSHR
                         let parked = Mem1Mem2Entry {
                             rob_tag: ex.rob_tag,
                             pc: ex.pc,
@@ -439,7 +417,6 @@ pub fn memory1_stage(
                         match resp {
                             CacheResponse::MshrAllocated { .. } => {
                                 cpu.stats.mshr_allocations += 1;
-                                // Cancel speculative wakeup — load won't complete at L1D latency
                                 cancelled_wakeups.push(ex.rd_phys);
                                 cpu.stats.load_replays += 1;
                                 trace_mem!(cpu.trace;
@@ -452,11 +429,9 @@ pub fn memory1_stage(
                                     miss_latency,
                                     "M1: MSHR allocated — load parked, speculative wakeup cancelled"
                                 );
-                                // Load is parked — do not push to output
                             }
                             CacheResponse::MshrCoalesced { .. } => {
                                 cpu.stats.mshr_coalesces += 1;
-                                // Cancel speculative wakeup — load won't complete at L1D latency
                                 cancelled_wakeups.push(ex.rd_phys);
                                 cpu.stats.load_replays += 1;
                                 trace_mem!(cpu.trace;
@@ -468,7 +443,6 @@ pub fn memory1_stage(
                                     rd_phys     = ex.rd_phys.0,
                                     "M1: MSHR coalesced — load parked, speculative wakeup cancelled"
                                 );
-                                // Load is parked — do not push to output
                             }
                             CacheResponse::MshrFull => {
                                 cpu.stats.stalls_mshr_full += 1;
@@ -480,7 +454,6 @@ pub fn memory1_stage(
                                     mshr_action = "full-stall",
                                     "M1: MSHR full — load pushed back, retry next cycle"
                                 );
-                                // Push back to input for retry next cycle
                                 input.push(ex);
                                 input.extend(iter);
                                 return cancelled_wakeups;
@@ -490,7 +463,6 @@ pub fn memory1_stage(
                     }
                 }
             } else if paddr.val() >= cpu.cache_base {
-                // ── Blocking path (no MSHRs) ──
                 let lat = cpu.simulate_memory_access(paddr, access_type);
                 per_entry_latency += lat;
                 output.push(Mem1Mem2Entry {
@@ -514,7 +486,6 @@ pub fn memory1_stage(
                     vec_mem: ex.vec_mem,
                 });
             } else {
-                // MMIO: bypass caches entirely
                 output.push(Mem1Mem2Entry {
                     rob_tag: ex.rob_tag,
                     pc: ex.pc,
@@ -537,7 +508,6 @@ pub fn memory1_stage(
                 });
             }
         } else {
-            // Non-memory instruction: pass through (ready immediately)
             trace_mem!(cpu.trace;
                 stage   = "M1",
                 rob_tag = ex.rob_tag.0,

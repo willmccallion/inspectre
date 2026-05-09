@@ -33,28 +33,21 @@ impl GoldfishRtc {
 }
 
 impl Device for GoldfishRtc {
-    /// Returns the device name.
     fn name(&self) -> &'static str {
         "GoldfishRTC"
     }
 
-    /// Returns the address range (Base, Size).
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x1000)
     }
 
-    /// Reads a byte (unimplemented, returns 0).
     fn read_u8(&mut self, _offset: u64) -> u8 {
         0
     }
-    /// Reads a half-word (unimplemented, returns 0).
     fn read_u16(&mut self, _offset: u64) -> u16 {
         0
     }
 
-    /// Reads a word (32-bit) from the device.
-    ///
-    /// Returns the lower or upper 32 bits of the current nanosecond timestamp.
     fn read_u32(&mut self, offset: u64) -> u32 {
         let time = self.get_time_ns();
         match offset {
@@ -64,9 +57,6 @@ impl Device for GoldfishRtc {
         }
     }
 
-    /// Reads a double-word (64-bit) from the device.
-    ///
-    /// Returns the full 64-bit nanosecond timestamp.
     fn read_u64(&mut self, offset: u64) -> u64 {
         let time = self.get_time_ns();
         match offset {
@@ -75,16 +65,11 @@ impl Device for GoldfishRtc {
         }
     }
 
-    /// Writes a byte (unimplemented).
     fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    /// Writes a half-word (unimplemented).
     fn write_u16(&mut self, _offset: u64, _val: u16) {}
-    /// Writes a word (unimplemented).
     fn write_u32(&mut self, _offset: u64, _val: u32) {}
-    /// Writes a double-word (unimplemented).
     fn write_u64(&mut self, _offset: u64, _val: u64) {}
 
-    /// Returns the Interrupt Request (IRQ) ID associated with this device.
     fn get_irq_id(&self) -> Option<IrqId> {
         Some(IrqId::new(11))
     }

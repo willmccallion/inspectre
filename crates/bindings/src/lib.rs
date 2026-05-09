@@ -1,11 +1,4 @@
-//! Python bindings for the RISC-V system simulator.
-//!
-//! Exposes the simulator to Python via `PyO3`.
-//!
-//! Surface area:
-//! 1. **CPU:** `Cpu` — the sole public entry point for simulation.
-//! 2. **Views:** `Instruction`, `Registers`, `Csrs`, `Memory` for CPU introspection.
-//! 3. **Utilities:** `version()` and `disassemble()`.
+//! Python bindings for the RISC-V system simulator (`PyO3`).
 
 // PyO3 bindings — relax documentation and pedantic lints for binding-layer code.
 #![allow(

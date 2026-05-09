@@ -16,8 +16,6 @@
 use rvsim_core::core::pipeline::signals::AluOp;
 use rvsim_core::core::units::alu::Alu;
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 const ZERO: u64 = 0;
 const ONE: u64 = 1;
 const NEG1: u64 = u64::MAX; // 0xFFFF_FFFF_FFFF_FFFF
@@ -31,15 +29,9 @@ const ALTERNATING_5: u64 = 0x5555_5555_5555_5555;
 const LOW_BYTE: u64 = 0xFF;
 const HIGH_BYTE: u64 = 0xFF00_0000_0000_0000;
 
-// ─── Helper ──────────────────────────────────────────────────────────────────
-
 fn alu(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
     Alu::execute(op, a, b, 0, is32)
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  AND
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn and_identity() {
@@ -100,10 +92,6 @@ fn and_all_zeros() {
     assert_eq!(alu(AluOp::And, ZERO, ZERO, false), ZERO);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  OR
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn or_identity() {
     // x | 0 = x
@@ -155,10 +143,6 @@ fn or_all_zeros() {
 fn or_all_ones() {
     assert_eq!(alu(AluOp::Or, NEG1, NEG1, false), NEG1);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  XOR
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn xor_self_is_zero() {
@@ -224,10 +208,6 @@ fn xor_all_ones() {
     assert_eq!(alu(AluOp::Xor, NEG1, NEG1, false), ZERO);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  De Morgan's Laws (cross-operation verification)
-// ═════════════════════════════════════════════════════════════════════════════
-
 /// Verify: ~(a & b) == (~a) | (~b)
 #[test]
 fn de_morgan_and() {
@@ -247,10 +227,6 @@ fn de_morgan_or() {
     let and_nots = alu(AluOp::And, !a, !b, false);
     assert_eq!(not_or, and_nots);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SLT (Set Less Than — Signed)
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn slt_rv64_equal_values() {
@@ -345,10 +321,6 @@ fn slt_rv32_u32_max_is_negative_one() {
     assert_eq!(alu(AluOp::Slt, 0xFFFF_FFFF, ZERO, true), 1);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SLTU (Set Less Than — Unsigned)
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn sltu_rv64_equal_values() {
     assert_eq!(alu(AluOp::Sltu, 42, 42, false), 0);
@@ -427,10 +399,6 @@ fn sltu_rv32_u32_max() {
     assert_eq!(alu(AluOp::Sltu, ZERO, 0xFFFF_FFFF, true), 1);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SLT vs SLTU: Signed/Unsigned distinction
-// ═════════════════════════════════════════════════════════════════════════════
-
 /// The same bit pattern gives opposite results for SLT vs SLTU
 /// when one operand has the high bit set.
 #[test]
@@ -449,10 +417,6 @@ fn slt_vs_sltu_neg1_distinction() {
     // SLTU: u64::MAX < 0 → false
     assert_eq!(alu(AluOp::Sltu, NEG1, ZERO, false), 0);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  Bitwise operations: every bit position
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// Verify AND works correctly at every single bit position.
 #[test]

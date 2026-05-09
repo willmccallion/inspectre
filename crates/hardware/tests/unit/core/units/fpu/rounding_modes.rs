@@ -15,14 +15,9 @@ fn fadd_f32_rm(a: f32, b: f32, rm: RoundingMode) -> f32 {
     f32::from_bits(result as u32)
 }
 
-// ══════════════════════════════════════════════════════════
-// 1. RNE (Round to Nearest, ties to Even)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rounding_rne() {
-    // RNE is the default IEEE mode. Normal addition should produce
-    // the same result as Rust's default.
+    // RNE is the IEEE default; matches Rust's native f32 add for exact results.
     let result = fadd_f32_rm(1.0, 2.0, RoundingMode::Rne);
     assert_eq!(result, 3.0);
 
@@ -31,27 +26,18 @@ fn test_rounding_rne() {
     assert_eq!(result, 2.0e30);
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. RTZ (Round towards Zero)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rounding_rtz() {
     // For exactly representable results, RTZ and RNE agree
     let result = fadd_f32_rm(1.0, 2.0, RoundingMode::Rtz);
     assert_eq!(result, 3.0);
 
-    // RTZ should truncate towards zero for positive values
-    // The magnitude should be <= the RNE result
+    // RTZ truncates toward zero, so its magnitude must be ≤ the RNE result.
     let rtz_result = fadd_f32_rm(1.0e-38, 1.0e-38, RoundingMode::Rtz);
     let rne_result = fadd_f32_rm(1.0e-38, 1.0e-38, RoundingMode::Rne);
     assert!(rtz_result <= rne_result, "RTZ should produce result <= RNE for positive values");
     assert!(rtz_result >= 0.0, "RTZ of positive inputs should be non-negative");
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. RDN (Round Down, towards -infinity)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rounding_rdn() {
@@ -65,10 +51,6 @@ fn test_rounding_rdn() {
     assert!(rdn_result <= rup_result, "RDN result should be <= RUP result");
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. RUP (Round Up, towards +infinity)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rounding_rup() {
     let result = fadd_f32_rm(1.0, 2.0, RoundingMode::Rup);
@@ -79,10 +61,6 @@ fn test_rounding_rup() {
     let rdn_result = fadd_f32_rm(1.0e-38, 1.0e-38, RoundingMode::Rdn);
     assert!(rup_result >= rdn_result, "RUP result should be >= RDN result");
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. RMM (Round to Nearest, ties to Max Magnitude)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rounding_rmm() {
@@ -95,10 +73,6 @@ fn test_rounding_rmm() {
     let rne_result = fadd_f32_rm(1.0e10, 1.0, RoundingMode::Rne);
     assert_eq!(rmm_result, rne_result, "RMM and RNE should agree for non-ties");
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. RoundingMode::from_bits decoding
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn rounding_mode_from_bits_valid() {
@@ -120,10 +94,6 @@ fn rounding_mode_from_bits_dynamic() {
     // 0b111 = dynamic, should return None (caller resolves from fcsr.frm)
     assert_eq!(RoundingMode::from_bits(0b111), None);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. Non-arithmetic ops ignore rounding mode
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn rounding_mode_irrelevant_for_comparisons() {

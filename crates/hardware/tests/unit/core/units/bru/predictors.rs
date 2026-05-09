@@ -15,10 +15,6 @@ use rvsim_core::core::units::bru::predictors::tage::TagePredictor;
 use rvsim_core::core::units::bru::predictors::tournament::TournamentPredictor;
 use rvsim_core::core::units::bru::{BranchPredictor, Ghr};
 
-// ══════════════════════════════════════════════════════════
-// Helpers
-// ══════════════════════════════════════════════════════════
-
 fn default_tage() -> TagePredictor {
     let config = TageConfig {
         num_banks: 4,
@@ -65,10 +61,6 @@ fn train<P: BranchPredictor>(bp: &mut P, pc: u64, taken: bool, target: u64, n: u
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 1. Static Predictor
-// ══════════════════════════════════════════════════════════
-
 /// Static predictor always predicts not-taken.
 #[test]
 fn static_always_not_taken() {
@@ -94,10 +86,6 @@ fn static_updates_btb() {
     bp.update_branch(0x1000, true, Some(0x2000), &Ghr::default());
     assert_eq!(bp.predict_btb(0x1000), Some(0x2000));
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. GShare Predictor
-// ══════════════════════════════════════════════════════════
 
 /// GShare initial prediction — counters initialized to 1 (weakly not-taken).
 #[test]
@@ -155,15 +143,9 @@ fn gshare_context_sensitive() {
     bp2.update_branch(0x100, false, None, &snap2);
     let (pred_b, _) = bp2.predict_branch(pc);
 
-    // With different GHR states, the predictions may differ
-    // (or may not if both hash to same counter, but the point is the code path works).
-    // At minimum both should be valid booleans (no crash).
+    // Predictions may or may not differ; the test exercises the code path.
     let _ = (pred_a, pred_b);
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Perceptron Predictor
-// ══════════════════════════════════════════════════════════
 
 /// Perceptron initial prediction — all weights zero, output = 0 → taken (>= 0).
 #[test]
@@ -208,10 +190,6 @@ fn perceptron_retrains() {
     assert!(t1, "Should have learned taken first");
     assert!(!t2, "Should retrain to not-taken");
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. TAGE Predictor
-// ══════════════════════════════════════════════════════════
 
 /// TAGE initial prediction comes from base predictor (counters = 0 → taken).
 #[test]
@@ -261,10 +239,6 @@ fn tage_adapts_to_pattern_change() {
     assert!(t2, "Should adapt to taken after retraining");
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Tournament Predictor
-// ══════════════════════════════════════════════════════════
-
 /// Tournament initial prediction — choice counter starts at 1 → local,
 /// local PHT starts at 1 → not-taken (< 2).
 #[test]
@@ -303,8 +277,7 @@ fn tournament_adapts_choice() {
     let mut bp = default_tournament();
     let pc = 0x1000;
 
-    // Create a pattern where taken/not-taken alternates in a way
-    // that benefits global correlation. Train heavily.
+    // Alternating pattern benefits global correlation; train heavily.
     for i in 0..50 {
         let taken = i % 2 == 0;
         let tgt = if taken { Some(0x2000) } else { None };
@@ -316,10 +289,6 @@ fn tournament_adapts_choice() {
     let (taken, _) = bp.predict_branch(pc);
     let _ = taken; // No assertion on direction — just verifying correctness of logic.
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. BTB Integration (all predictors)
-// ══════════════════════════════════════════════════════════
 
 /// All predictors update and read the BTB correctly.
 #[test]
@@ -347,10 +316,6 @@ fn all_predictors_use_btb() {
     tournament.update_branch(pc, true, Some(target), &Ghr::default());
     assert_eq!(tournament.predict_btb(pc), Some(target));
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. RAS Integration (all predictors)
-// ══════════════════════════════════════════════════════════
 
 /// All predictors correctly push/pop the RAS via on_call/on_return/predict_return.
 #[test]

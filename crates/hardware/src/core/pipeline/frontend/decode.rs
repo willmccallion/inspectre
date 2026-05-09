@@ -20,14 +20,14 @@ use crate::isa::decode::decode as instruction_decode;
 use crate::isa::instruction::{Decoded, InstructionBits};
 use crate::isa::privileged::opcodes as sys_ops;
 
-use crate::isa::rv64a::{funct3 as a_funct3, funct5 as a_funct5, opcodes as a_opcodes};
 use crate::core::units::fpu::rounding_modes::RoundingMode;
+use crate::isa::rv64a::{funct3 as a_funct3, funct5 as a_funct5, opcodes as a_opcodes};
 use crate::isa::rv64bk::{funct3 as b_funct3, funct7 as b_funct7};
 use crate::isa::rv64d::{funct7 as d_funct7, opcodes as d_opcodes};
 use crate::isa::rv64f::{funct3 as f_funct3, funct7 as f_funct7, opcodes as f_opcodes};
-use crate::isa::rv64zfh::funct7 as h_funct7;
 use crate::isa::rv64i::{funct3 as i_funct3, funct7 as i_funct7, opcodes as i_opcodes};
 use crate::isa::rv64m::{funct3 as m_funct3, opcodes as m_opcodes};
+use crate::isa::rv64zfh::funct7 as h_funct7;
 use crate::isa::rvv::{
     encoding as v_enc, funct3 as v_funct3, funct6 as v_f6, opcodes as v_opcodes,
 };
@@ -281,8 +281,6 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
                     (i_funct3::OR, i_funct7::DEFAULT) => AluOp::Or,
                     (i_funct3::AND, i_funct7::DEFAULT) => AluOp::And,
 
-                    // ── Zba: Address generation ──────────────────────────────
-                    // sh1add / sh2add / sh3add (OP_REG only)
                     (b_funct3::SH1ADD, b_funct7::SH_ADD) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Sh1Add
                     }
@@ -311,21 +309,15 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
                         AluOp::Sh3AddUw
                     }
 
-                    // ── Zbb: Basic bit manipulation ──────────────────────────
-                    // andn, orn, xnor
                     (b_funct3::ANDN, b_funct7::LOGICAL_NEG) => AluOp::Andn,
                     (b_funct3::ORN, b_funct7::LOGICAL_NEG) => AluOp::Orn,
                     (b_funct3::XNOR, b_funct7::LOGICAL_NEG) => AluOp::Xnor,
-                    // max, maxu, min, minu
                     (b_funct3::MAX, b_funct7::MIN_MAX) => AluOp::Max,
                     (b_funct3::MAXU, b_funct7::MIN_MAX) => AluOp::Maxu,
                     (b_funct3::MIN, b_funct7::MIN_MAX) => AluOp::Min,
                     (b_funct3::MINU, b_funct7::MIN_MAX) => AluOp::Minu,
-                    // rol
                     (b_funct3::ROL, b_funct7::ROTATE) => AluOp::Rol,
-                    // ror
                     (b_funct3::ROR, b_funct7::ROTATE_RIGHT) => AluOp::Ror,
-                    // ── Zbc: Carry-less multiplication ───────────────────────
                     (b_funct3::CLMUL, b_funct7::CLMUL) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Clmul
                     }
@@ -336,38 +328,25 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
                         AluOp::Clmulr
                     }
 
-                    // ── Zbs: Single-bit operations ───────────────────────────
                     (b_funct3::BCLR, b_funct7::BCLR) => AluOp::Bclr,
                     (b_funct3::BEXT, b_funct7::BEXT) => AluOp::Bext,
                     (b_funct3::BINV, b_funct7::BINV) => AluOp::Binv,
                     (b_funct3::BSET, b_funct7::BSET) => AluOp::Bset,
 
-                    // ── Zbkb: Pack operations ────────────────────────────────
-                    (b_funct3::PACK, b_funct7::PACK)
-                        if d.opcode == i_opcodes::OP_REG =>
-                    {
+                    (b_funct3::PACK, b_funct7::PACK) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Pack
                     }
-                    (b_funct3::PACKH, b_funct7::PACK)
-                        if d.opcode == i_opcodes::OP_REG =>
-                    {
+                    (b_funct3::PACKH, b_funct7::PACK) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Packh
                     }
-                    (b_funct3::PACKW, b_funct7::PACK)
-                        if d.opcode == i_opcodes::OP_REG_32 =>
-                    {
+                    (b_funct3::PACKW, b_funct7::PACK) if d.opcode == i_opcodes::OP_REG_32 => {
                         AluOp::Packw
                     }
 
-                    // ── Zbkx: Crossbar permutations ──────────────────────────
-                    (b_funct3::XPERM4, b_funct7::XPERM)
-                        if d.opcode == i_opcodes::OP_REG =>
-                    {
+                    (b_funct3::XPERM4, b_funct7::XPERM) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Xperm4
                     }
-                    (b_funct3::XPERM8, b_funct7::XPERM)
-                        if d.opcode == i_opcodes::OP_REG =>
-                    {
+                    (b_funct3::XPERM8, b_funct7::XPERM) if d.opcode == i_opcodes::OP_REG => {
                         AluOp::Xperm8
                     }
 
@@ -405,70 +384,62 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             c.mem_write = c.atomic_op != AtomicOp::Lr;
             c.reg_write = true;
         }
-        f_opcodes::OP_LOAD_FP => {
-            match d.funct3 {
-                // Scalar FP loads
-                FP_WIDTH_HALF => {
-                    c.fp_reg_write = true;
-                    c.mem_read = true;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Half;
-                    c.is_f16 = true;
-                }
-                FP_WIDTH_WORD => {
-                    c.fp_reg_write = true;
-                    c.mem_read = true;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Word;
-                }
-                FP_WIDTH_DOUBLE => {
-                    c.fp_reg_write = true;
-                    c.mem_read = true;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Double;
-                }
-                // Vector loads (EEW encoded in funct3)
-                VEC_WIDTH_8 | VEC_WIDTH_16 | VEC_WIDTH_32 | VEC_WIDTH_64 => {
-                    decode_vec_load(inst, d.funct3, &mut c)?;
-                }
-                _ => return Err(Trap::IllegalInstruction(inst)),
+        f_opcodes::OP_LOAD_FP => match d.funct3 {
+            FP_WIDTH_HALF => {
+                c.fp_reg_write = true;
+                c.mem_read = true;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Half;
+                c.is_f16 = true;
             }
-        }
-        f_opcodes::OP_STORE_FP => {
-            match d.funct3 {
-                // Scalar FP stores
-                FP_WIDTH_HALF => {
-                    c.mem_write = true;
-                    c.rs1_fp = false;
-                    c.rs2_fp = true;
-                    c.b_src = OpBSrc::Imm;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Half;
-                    c.is_f16 = true;
-                }
-                FP_WIDTH_WORD => {
-                    c.mem_write = true;
-                    c.rs1_fp = false;
-                    c.rs2_fp = true;
-                    c.b_src = OpBSrc::Imm;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Word;
-                }
-                FP_WIDTH_DOUBLE => {
-                    c.mem_write = true;
-                    c.rs1_fp = false;
-                    c.rs2_fp = true;
-                    c.b_src = OpBSrc::Imm;
-                    c.alu = AluOp::Add;
-                    c.width = MemWidth::Double;
-                }
-                // Vector stores (EEW encoded in funct3)
-                VEC_WIDTH_8 | VEC_WIDTH_16 | VEC_WIDTH_32 | VEC_WIDTH_64 => {
-                    decode_vec_store(inst, d.funct3, &mut c)?;
-                }
-                _ => return Err(Trap::IllegalInstruction(inst)),
+            FP_WIDTH_WORD => {
+                c.fp_reg_write = true;
+                c.mem_read = true;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Word;
             }
-        }
+            FP_WIDTH_DOUBLE => {
+                c.fp_reg_write = true;
+                c.mem_read = true;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Double;
+            }
+            VEC_WIDTH_8 | VEC_WIDTH_16 | VEC_WIDTH_32 | VEC_WIDTH_64 => {
+                decode_vec_load(inst, d.funct3, &mut c)?;
+            }
+            _ => return Err(Trap::IllegalInstruction(inst)),
+        },
+        f_opcodes::OP_STORE_FP => match d.funct3 {
+            FP_WIDTH_HALF => {
+                c.mem_write = true;
+                c.rs1_fp = false;
+                c.rs2_fp = true;
+                c.b_src = OpBSrc::Imm;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Half;
+                c.is_f16 = true;
+            }
+            FP_WIDTH_WORD => {
+                c.mem_write = true;
+                c.rs1_fp = false;
+                c.rs2_fp = true;
+                c.b_src = OpBSrc::Imm;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Word;
+            }
+            FP_WIDTH_DOUBLE => {
+                c.mem_write = true;
+                c.rs1_fp = false;
+                c.rs2_fp = true;
+                c.b_src = OpBSrc::Imm;
+                c.alu = AluOp::Add;
+                c.width = MemWidth::Double;
+            }
+            VEC_WIDTH_8 | VEC_WIDTH_16 | VEC_WIDTH_32 | VEC_WIDTH_64 => {
+                decode_vec_store(inst, d.funct3, &mut c)?;
+            }
+            _ => return Err(Trap::IllegalInstruction(inst)),
+        },
         f_opcodes::OP_FP => {
             let fmt = d.funct7 & 0x3;
             c.is_rv32 = fmt == FP_FMT_SINGLE;
@@ -499,11 +470,13 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
                     f_funct3::FSGNJX => AluOp::FSgnJX,
                     _ => return Err(Trap::IllegalInstruction(inst)),
                 },
-                f_funct7::FMIN_MAX | d_funct7::FMIN_MAX_D | h_funct7::FMIN_MAX_H => match d.funct3 {
-                    f_funct3::FMIN => AluOp::FMin,
-                    f_funct3::FMAX => AluOp::FMax,
-                    _ => return Err(Trap::IllegalInstruction(inst)),
-                },
+                f_funct7::FMIN_MAX | d_funct7::FMIN_MAX_D | h_funct7::FMIN_MAX_H => {
+                    match d.funct3 {
+                        f_funct3::FMIN => AluOp::FMin,
+                        f_funct3::FMAX => AluOp::FMax,
+                        _ => return Err(Trap::IllegalInstruction(inst)),
+                    }
+                }
                 f_funct7::FCMP | d_funct7::FCMP_D | h_funct7::FCMP_H => {
                     c.fp_reg_write = false;
                     c.reg_write = true;
@@ -767,9 +740,7 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             c.vs2 = VRegIdx::new(v_enc::vs2(inst));
             c.vec_src_encoding = VecSrcEncoding::VV;
             c.vec_reg_write = true;
-            // funct6 = VCRYPTO_VS marks the `.vs` form (vaes*/vsm4r): vs2
-            // element group 0 is broadcast across all destination groups.
-            // VCRYPTO_VV is the `.vv` form (per-group key).
+            // VCRYPTO_VS = .vs form: broadcast vs2[0]; VCRYPTO_VV = .vv form: per-group key.
             c.vec_broadcast_vs2 = f6 == v_f6::VCRYPTO_VS;
             c.vec_op = decode_opcrypto(f6, inst)?;
         }
@@ -819,8 +790,6 @@ const fn decode_opcrypto(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
     })
 }
 
-// ── Vector arithmetic decode helpers ──────────────────────────────────────────
-
 /// Decode OPIVV funct3 (integer vector-vector) operations.
 const fn decode_opivv(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
     Ok(match f6 {
@@ -860,11 +829,9 @@ const fn decode_opivv(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VNSRA => VectorOp::VNSra,
         v_f6::VNCLIPU => VectorOp::VNClipU,
         v_f6::VNCLIP => VectorOp::VNClip,
-        // Widening integer reductions live in OPIVV (funct3=000), distinct from
-        // vwaddu/vwadd in OPMVV (funct3=010) despite sharing the same funct6.
+        // VWREDSUMU/VWREDSUM in OPIVV vs vwaddu/vwadd in OPMVV share funct6.
         v_f6::VWREDSUMU => VectorOp::VWRedSumU,
         v_f6::VWREDSUM => VectorOp::VWRedSum,
-        // Zvbb (Vector Bit-manipulation for Crypto)
         v_f6::VANDN => VectorOp::VAndN,
         v_f6::VROL => VectorOp::VRol,
         v_f6::VROR => VectorOp::VRor,
@@ -916,7 +883,6 @@ const fn decode_opivx(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VNSRA => VectorOp::VNSra,
         v_f6::VNCLIPU => VectorOp::VNClipU,
         v_f6::VNCLIP => VectorOp::VNClip,
-        // Zvbb
         v_f6::VANDN => VectorOp::VAndN,
         v_f6::VROL => VectorOp::VRol,
         v_f6::VROR => VectorOp::VRor,
@@ -936,7 +902,7 @@ const fn decode_opivi(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VRGATHER => VectorOp::VRgather,
         v_f6::VSLIDEUP => VectorOp::VSlideUp,
         v_f6::VSLIDEDOWN => VectorOp::VSlideDown,
-        // Whole-register move: funct6=0b100111 in OPIVI with simm5 encoding nregs
+        // VSMUL funct6 in OPIVI is whole-register move; simm5 encodes nregs.
         v_f6::VSMUL => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -967,7 +933,6 @@ const fn decode_opivi(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
         v_f6::VNSRA => VectorOp::VNSra,
         v_f6::VNCLIPU => VectorOp::VNClipU,
         v_f6::VNCLIP => VectorOp::VNClip,
-        // Zvbb (.vi forms with split 6-bit / 5-bit imm)
         v_f6::VROR => VectorOp::VRor,
         v_f6::VWSLL => VectorOp::VWsll,
         _ => return Err(Trap::IllegalInstruction(inst)),
@@ -978,7 +943,6 @@ const fn decode_opivi(f6: u32, inst: u32) -> Result<VectorOp, Trap> {
 /// Returns `(VectorOp, writes_vec_reg)`.
 const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
     Ok(match f6 {
-        // Integer reductions (funct6 0b000000..0b000111)
         v_f6::VREDSUM => (VectorOp::VRedSum, true),
         v_f6::VREDAND => (VectorOp::VRedAnd, true),
         v_f6::VREDOR => (VectorOp::VRedOr, true),
@@ -987,12 +951,10 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VREDMIN => (VectorOp::VRedMin, true),
         v_f6::VREDMAXU => (VectorOp::VRedMaxU, true),
         v_f6::VREDMAX => (VectorOp::VRedMax, true),
-        // Averaging add/sub
         v_f6::VAADDU => (VectorOp::VAAddU, true),
         v_f6::VAADD => (VectorOp::VAAdd, true),
         v_f6::VASUBU => (VectorOp::VASubU, true),
         v_f6::VASUB => (VectorOp::VASub, true),
-        // Unary ops: vmv.x.s, vcpop.m, vfirst.m
         v_f6::VWXUNARY0 => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -1002,7 +964,6 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // Integer extension: vzext, vsext; Zvbb bit-manip ops share funct6.
         v_f6::VXUNARY0 => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -1012,7 +973,6 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 v_f6::VXUNARY0_VSEXT_VF4 => (VectorOp::VSextVf4, true),
                 v_f6::VXUNARY0_VZEXT_VF2 => (VectorOp::VZextVf2, true),
                 v_f6::VXUNARY0_VSEXT_VF2 => (VectorOp::VSextVf2, true),
-                // Zvbb
                 v_f6::VXUNARY0_VBREV => (VectorOp::VBrev, true),
                 v_f6::VXUNARY0_VBREV8 => (VectorOp::VBrev8, true),
                 v_f6::VXUNARY0_VREV8 => (VectorOp::VRev8, true),
@@ -1022,7 +982,6 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // Mask-source unary: vmsbf, vmsof, vmsif, viota, vid
         v_f6::VMUNARY0 => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -1034,9 +993,8 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // Compress (funct6 = 0b010111, same value as VMERGE_VMV but in OPMVV)
+        // VMERGE_VMV in OPMVV decodes to vcompress.
         v_f6::VMERGE_VMV => (VectorOp::VCompress, true),
-        // Mask-register logical (funct6 0b011000..0b011111)
         v_f6::VMANDN => (VectorOp::VMAndnMM, true),
         v_f6::VMAND => (VectorOp::VMAndMM, true),
         v_f6::VMOR => (VectorOp::VMOrMM, true),
@@ -1045,24 +1003,19 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VMNAND => (VectorOp::VMNandMM, true),
         v_f6::VMNOR => (VectorOp::VMNorMM, true),
         v_f6::VMXNOR => (VectorOp::VMXnorMM, true),
-        // Integer multiply
         v_f6::VMUL => (VectorOp::VMul, true),
         v_f6::VMULH => (VectorOp::VMulh, true),
         v_f6::VMULHU => (VectorOp::VMulhu, true),
         v_f6::VMULHSU => (VectorOp::VMulhsu, true),
-        // Multiply-accumulate
         v_f6::VMACC => (VectorOp::VMacc, true),
         v_f6::VNMSAC => (VectorOp::VNMSac, true),
         v_f6::VMADD => (VectorOp::VMadd, true),
         v_f6::VNMSUB => (VectorOp::VNMSub, true),
-        // Integer divide
         v_f6::VDIVU => (VectorOp::VDivU, true),
         v_f6::VDIV => (VectorOp::VDiv, true),
         v_f6::VREMU => (VectorOp::VRemU, true),
         v_f6::VREM => (VectorOp::VRem, true),
-        // Widening integer add/sub (OPMVV funct3=010).
-        // Note: VWREDSUMU/VWREDSUM share the same funct6 values but live in
-        // OPIVV (funct3=000) and are decoded in decode_opivv().
+        // VWREDSUMU/VWREDSUM share funct6 with these but live in OPIVV (decode_opivv).
         v_f6::VWADDU => (VectorOp::VWAddU, true),
         v_f6::VWADD => (VectorOp::VWAdd, true),
         v_f6::VWSUBU => (VectorOp::VWSubU, true),
@@ -1071,7 +1024,6 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VWADD_W => (VectorOp::VWAddW, true),
         v_f6::VWSUBU_W => (VectorOp::VWSubUW, true),
         v_f6::VWSUB_W => (VectorOp::VWSubW, true),
-        // Widening multiply
         v_f6::VWMULU => (VectorOp::VWMulU, true),
         v_f6::VWMULSU => (VectorOp::VWMulSU, true),
         v_f6::VWMUL => (VectorOp::VWMul, true),
@@ -1079,7 +1031,6 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VWMACC => (VectorOp::VWMacc, true),
         v_f6::VWMACCSU => (VectorOp::VWMaccSU, true),
         v_f6::VWMACCUS => (VectorOp::VWMaccUS, true),
-        // Zvbc carryless multiply (OPMVV funct3=2)
         v_f6::VCLMUL => (VectorOp::VClMul, true),
         v_f6::VCLMULH => (VectorOp::VClMulH, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
@@ -1090,28 +1041,21 @@ const fn decode_opmvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
 /// Returns `(VectorOp, writes_vec_reg)`.
 const fn decode_opmvx(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
     Ok(match f6 {
-        // vmv.s.x — move scalar GPR to vector element 0
         0b010000 => (VectorOp::VMvSX, true),
-        // vslide1up.vx
         v_f6::VSLIDEUP => (VectorOp::VSlide1Up, true),
-        // vslide1down.vx
         v_f6::VSLIDEDOWN => (VectorOp::VSlide1Down, true),
-        // Integer multiply
         v_f6::VMUL => (VectorOp::VMul, true),
         v_f6::VMULH => (VectorOp::VMulh, true),
         v_f6::VMULHU => (VectorOp::VMulhu, true),
         v_f6::VMULHSU => (VectorOp::VMulhsu, true),
-        // Multiply-accumulate
         v_f6::VMACC => (VectorOp::VMacc, true),
         v_f6::VNMSAC => (VectorOp::VNMSac, true),
         v_f6::VMADD => (VectorOp::VMadd, true),
         v_f6::VNMSUB => (VectorOp::VNMSub, true),
-        // Integer divide
         v_f6::VDIVU => (VectorOp::VDivU, true),
         v_f6::VDIV => (VectorOp::VDiv, true),
         v_f6::VREMU => (VectorOp::VRemU, true),
         v_f6::VREM => (VectorOp::VRem, true),
-        // Widening integer add/sub
         v_f6::VWADDU => (VectorOp::VWAddU, true),
         v_f6::VWADD => (VectorOp::VWAdd, true),
         v_f6::VWSUBU => (VectorOp::VWSubU, true),
@@ -1120,7 +1064,6 @@ const fn decode_opmvx(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VWADD_W => (VectorOp::VWAddW, true),
         v_f6::VWSUBU_W => (VectorOp::VWSubUW, true),
         v_f6::VWSUB_W => (VectorOp::VWSubW, true),
-        // Widening multiply
         v_f6::VWMULU => (VectorOp::VWMulU, true),
         v_f6::VWMULSU => (VectorOp::VWMulSU, true),
         v_f6::VWMUL => (VectorOp::VWMul, true),
@@ -1128,32 +1071,26 @@ const fn decode_opmvx(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VWMACC => (VectorOp::VWMacc, true),
         v_f6::VWMACCSU => (VectorOp::VWMaccSU, true),
         v_f6::VWMACCUS => (VectorOp::VWMaccUS, true),
-        // Averaging add/sub
         v_f6::VAADDU => (VectorOp::VAAddU, true),
         v_f6::VAADD => (VectorOp::VAAdd, true),
         v_f6::VASUBU => (VectorOp::VASubU, true),
         v_f6::VASUB => (VectorOp::VASub, true),
-        // Zvbc carryless multiply (OPMVX funct3=6)
         v_f6::VCLMUL => (VectorOp::VClMul, true),
         v_f6::VCLMULH => (VectorOp::VClMulH, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
 
-// ── Vector FP decode helpers ──────────────────────────────────────────────────
-
 /// Decode `VFUNARY0` sub-operations (conversion ops) from the vs1 field.
 const fn decode_vfunary0(inst: u32) -> Result<VectorOp, Trap> {
     let vs1_field = v_enc::vs1(inst);
     Ok(match vs1_field {
-        // Single-width conversions
         0b00000 => VectorOp::VFCvtXuF,
         0b00001 => VectorOp::VFCvtXF,
         0b00010 => VectorOp::VFCvtFXu,
         0b00011 => VectorOp::VFCvtFX,
         0b00110 => VectorOp::VFCvtRtzXuF,
         0b00111 => VectorOp::VFCvtRtzXF,
-        // Widening conversions
         0b01000 => VectorOp::VFWCvtXuF,
         0b01001 => VectorOp::VFWCvtXF,
         0b01010 => VectorOp::VFWCvtFXu,
@@ -1161,7 +1098,6 @@ const fn decode_vfunary0(inst: u32) -> Result<VectorOp, Trap> {
         0b01100 => VectorOp::VFWCvtFF,
         0b01110 => VectorOp::VFWCvtRtzXuF,
         0b01111 => VectorOp::VFWCvtRtzXF,
-        // Narrowing conversions
         0b10000 => VectorOp::VFNCvtXuF,
         0b10001 => VectorOp::VFNCvtXF,
         0b10010 => VectorOp::VFNCvtFXu,
@@ -1191,24 +1127,19 @@ const fn decode_vfunary1(inst: u32) -> Result<VectorOp, Trap> {
 /// Returns `(VectorOp, writes_vec_reg)`.
 const fn decode_opfvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
     Ok(match f6 {
-        // FP arithmetic
         v_f6::VFADD => (VectorOp::VFAdd, true),
         v_f6::VFSUB => (VectorOp::VFSub, true),
         v_f6::VFMIN => (VectorOp::VFMin, true),
         v_f6::VFMAX => (VectorOp::VFMax, true),
-        // FP sign injection
         v_f6::VFSGNJ => (VectorOp::VFSgnj, true),
         v_f6::VFSGNJN => (VectorOp::VFSgnjn, true),
         v_f6::VFSGNJX => (VectorOp::VFSgnjx, true),
-        // FP comparison (write mask)
         v_f6::VMFEQ => (VectorOp::VMFEq, true),
         v_f6::VMFLE => (VectorOp::VMFLe, true),
         v_f6::VMFLT => (VectorOp::VMFLt, true),
         v_f6::VMFNE => (VectorOp::VMFNe, true),
-        // FP divide/multiply
         v_f6::VFDIV => (VectorOp::VFDiv, true),
         v_f6::VFMUL => (VectorOp::VFMul, true),
-        // FP fused multiply-add
         v_f6::VFMACC => (VectorOp::VFMacc, true),
         v_f6::VFNMACC => (VectorOp::VFNMacc, true),
         v_f6::VFMSAC => (VectorOp::VFMSac, true),
@@ -1217,18 +1148,15 @@ const fn decode_opfvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VFNMADD => (VectorOp::VFNMAdd, true),
         v_f6::VFMSUB => (VectorOp::VFMSub, true),
         v_f6::VFNMSUB => (VectorOp::VFNMSub, true),
-        // FP widening arithmetic
         v_f6::VFWADD => (VectorOp::VFWAdd, true),
         v_f6::VFWSUB => (VectorOp::VFWSub, true),
         v_f6::VFWADD_W => (VectorOp::VFWAddW, true),
         v_f6::VFWSUB_W => (VectorOp::VFWSubW, true),
         v_f6::VFWMUL => (VectorOp::VFWMul, true),
-        // FP widening FMA
         v_f6::VFWMACC => (VectorOp::VFWMacc, true),
         v_f6::VFWNMACC => (VectorOp::VFWNMacc, true),
         v_f6::VFWMSAC => (VectorOp::VFWMSac, true),
         v_f6::VFWNMSAC => (VectorOp::VFWNMSac, true),
-        // FP widening-unary0: vfmv.f.s (funct6 = 0b010000, vs1 = 00000)
         v_f6::VWFUNARY0 => {
             let vs1_field = v_enc::vs1(inst);
             match vs1_field {
@@ -1236,22 +1164,18 @@ const fn decode_opfvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // FP unary: conversion (VFUNARY0)
         v_f6::VFUNARY0 => match decode_vfunary0(inst) {
             Ok(op) => (op, true),
             Err(e) => return Err(e),
         },
-        // FP unary: sqrt/class/rec (VFUNARY1)
         v_f6::VFUNARY1 => match decode_vfunary1(inst) {
             Ok(op) => (op, true),
             Err(e) => return Err(e),
         },
-        // FP reductions
         v_f6::VFREDUSUM => (VectorOp::VFRedUSum, true),
         v_f6::VFREDOSUM => (VectorOp::VFRedOSum, true),
         v_f6::VFREDMIN => (VectorOp::VFRedMin, true),
         v_f6::VFREDMAX => (VectorOp::VFRedMax, true),
-        // FP widening reductions
         v_f6::VFWREDUSUM => (VectorOp::VFWRedUSum, true),
         v_f6::VFWREDOSUM => (VectorOp::VFWRedOSum, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
@@ -1262,28 +1186,23 @@ const fn decode_opfvv(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
 /// Returns `(VectorOp, writes_vec_reg)`.
 const fn decode_opfvf(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
     Ok(match f6 {
-        // FP arithmetic
         v_f6::VFADD => (VectorOp::VFAdd, true),
         v_f6::VFSUB => (VectorOp::VFSub, true),
         v_f6::VFRSUB => (VectorOp::VFRSub, true),
         v_f6::VFMIN => (VectorOp::VFMin, true),
         v_f6::VFMAX => (VectorOp::VFMax, true),
-        // FP sign injection
         v_f6::VFSGNJ => (VectorOp::VFSgnj, true),
         v_f6::VFSGNJN => (VectorOp::VFSgnjn, true),
         v_f6::VFSGNJX => (VectorOp::VFSgnjx, true),
-        // FP comparison (write mask)
         v_f6::VMFEQ => (VectorOp::VMFEq, true),
         v_f6::VMFLE => (VectorOp::VMFLe, true),
         v_f6::VMFLT => (VectorOp::VMFLt, true),
         v_f6::VMFNE => (VectorOp::VMFNe, true),
         v_f6::VMFGT => (VectorOp::VMFGt, true),
         v_f6::VMFGE => (VectorOp::VMFGe, true),
-        // FP divide/multiply (OPFVF includes reverse variants)
         v_f6::VFDIV => (VectorOp::VFDiv, true),
         v_f6::VFRDIV => (VectorOp::VFRDiv, true),
         v_f6::VFMUL => (VectorOp::VFMul, true),
-        // FP fused multiply-add
         v_f6::VFMACC => (VectorOp::VFMacc, true),
         v_f6::VFNMACC => (VectorOp::VFNMacc, true),
         v_f6::VFMSAC => (VectorOp::VFMSac, true),
@@ -1292,21 +1211,17 @@ const fn decode_opfvf(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
         v_f6::VFNMADD => (VectorOp::VFNMAdd, true),
         v_f6::VFMSUB => (VectorOp::VFMSub, true),
         v_f6::VFNMSUB => (VectorOp::VFNMSub, true),
-        // FP widening arithmetic
         v_f6::VFWADD => (VectorOp::VFWAdd, true),
         v_f6::VFWSUB => (VectorOp::VFWSub, true),
         v_f6::VFWADD_W => (VectorOp::VFWAddW, true),
         v_f6::VFWSUB_W => (VectorOp::VFWSubW, true),
         v_f6::VFWMUL => (VectorOp::VFWMul, true),
-        // FP widening FMA
         v_f6::VFWMACC => (VectorOp::VFWMacc, true),
         v_f6::VFWNMACC => (VectorOp::VFWNMacc, true),
         v_f6::VFWMSAC => (VectorOp::VFWMSac, true),
         v_f6::VFWNMSAC => (VectorOp::VFWNMSac, true),
-        // FP slides (OPFVF only)
         v_f6::VFSLIDE1UP => (VectorOp::VFSlide1Up, true),
         v_f6::VFSLIDE1DOWN => (VectorOp::VFSlide1Down, true),
-        // FP reverse-unary0: vfmv.s.f (funct6 = 0b010000, vs2 = 00000)
         v_f6::VRFUNARY0 => {
             let vs2_field = v_enc::vs2(inst);
             match vs2_field {
@@ -1314,14 +1229,11 @@ const fn decode_opfvf(f6: u32, inst: u32) -> Result<(VectorOp, bool), Trap> {
                 _ => return Err(Trap::IllegalInstruction(inst)),
             }
         }
-        // FP merge/move (funct6 = 0b010111 in OPFVF)
-        // vm=0: vfmerge.vfm, vm=1: vfmv.v.f
+        // VMERGE_VMV: vm=0 vfmerge.vfm, vm=1 vfmv.v.f.
         v_f6::VMERGE_VMV => (VectorOp::VFMerge, true),
         _ => return Err(Trap::IllegalInstruction(inst)),
     })
 }
-
-// ── Vector load/store decode helpers ──────────────────────────────────────────
 
 /// Map funct3 width encoding to `Sew` for vector loads/stores.
 const fn funct3_to_eew(funct3: u32) -> Sew {
@@ -1329,7 +1241,6 @@ const fn funct3_to_eew(funct3: u32) -> Sew {
         VEC_WIDTH_8 => Sew::E8,
         VEC_WIDTH_16 => Sew::E16,
         VEC_WIDTH_32 => Sew::E32,
-        // VEC_WIDTH_64 and any other value
         _ => Sew::E64,
     }
 }
@@ -1446,7 +1357,6 @@ const fn decode_vec_store(inst: u32, funct3: u32, c: &mut ControlSignals) -> Res
 pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<IdExEntry>) {
     let mut consumed_count = 0;
     let mut bundle_writes: Vec<(RegIdx, bool)> = Vec::with_capacity(cpu.pipeline_width);
-    let mut broke_on_trap = false;
 
     for if_entry in input.iter() {
         if let Some(trap) = &if_entry.trap {
@@ -1459,7 +1369,6 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                 ..Default::default()
             });
             consumed_count += 1;
-            broke_on_trap = true;
             break;
         }
 
@@ -1477,9 +1386,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
             Err(t) => (ControlSignals::default(), Some(t), Some(ExceptionStage::Decode)),
         };
 
-        // Set vec_lmul_regs from the current vtype CSR for vector data ops.
-        // vsetvl family instructions are config ops and don't use LMUL groups.
-        // Since vsetvl is serializing, vtype is always up-to-date at decode.
+        // vsetvl is serializing, so vtype is up-to-date at decode for non-vsetvl vec ops.
         if ctrl.vec_op != VectorOp::None
             && !matches!(ctrl.vec_op, VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl)
         {
@@ -1489,12 +1396,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                 ctrl.vec_lmul_regs = lmul;
                 ctrl.vec_lmul_is_fractional = vtype.vlmul.is_fractional();
 
-                // RVV 1.0 §3.4.2: vector register operands must be aligned to
-                // their effective group size and the group must fit within
-                // v0-v31.  The per-operand group sizes come from the single
-                // source of truth: VectorOp::operand_groups(), with vec mem
-                // ops re-sized for `nf × EMUL_data` and indexed loads also
-                // for the index vector's EMUL.
+                // RVV 1.0 §3.4.2: vec operands must be group-aligned and fit within v0..v31.
                 if trap.is_none() {
                     let g = ctrl.vec_op.operand_groups(
                         lmul,
@@ -1513,10 +1415,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                     let bad_aligned = |reg: u8, grp: u8| -> bool {
                         grp > 1 && (!reg.is_multiple_of(grp) || reg.saturating_add(grp) > 32)
                     };
-                    // Memory ops: each segment field is its own EMUL-aligned
-                    // group; only the per-field alignment is required, but all
-                    // NF × EMUL registers must fit. Non-memory ops keep the
-                    // single-group rule.
+                    // Memory ops align per-field; all nf × EMUL regs must still fit.
                     let mem_misaligned = if is_mem && !vtype.vill {
                         let total = crate::core::units::vpu::mem::vec_mem_dst_count(
                             ctrl.vec_op,
@@ -1525,18 +1424,16 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                             vtype.vlmul,
                             ctrl.vec_nf,
                         );
-                        let (data_emul, idx_emul) =
-                            crate::core::units::vpu::mem::vec_mem_emul_regs(
-                                ctrl.vec_op,
-                                ctrl.vec_eew,
-                                vtype.vsew,
-                                vtype.vlmul,
-                            );
+                        let (data_emul, idx_emul) = crate::core::units::vpu::mem::vec_mem_emul_regs(
+                            ctrl.vec_op,
+                            ctrl.vec_eew,
+                            vtype.vsew,
+                            vtype.vlmul,
+                        );
                         let vd_misaligned = data_emul > 1 && !vd.is_multiple_of(data_emul);
                         let vd_overflows = vd.saturating_add(total) > 32;
                         let vs2_misaligned = idx_emul > 1
-                            && (!vs2.is_multiple_of(idx_emul)
-                                || vs2.saturating_add(idx_emul) > 32);
+                            && (!vs2.is_multiple_of(idx_emul) || vs2.saturating_add(idx_emul) > 32);
                         vd_misaligned || vd_overflows || vs2_misaligned
                     } else {
                         false
@@ -1555,11 +1452,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
             }
         }
 
-        // Check for intra-bundle hazards (superscalar, in-order only).
-        // With register renaming (O3 backend), rename resolves all RAW hazards
-        // by mapping source operands to physical registers before updating the
-        // rename map for the destination. Splitting the bundle here would
-        // create unnecessary 1-cycle bubbles.
+        // O3 rename resolves RAW hazards via PRF, so this check applies only in-order.
         let rs3_idx = inst.rs3();
         if !cpu.has_register_renaming {
             let hazard = ((!d.rs1.is_zero() || ctrl.rs1_fp)
@@ -1610,16 +1503,9 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
         consumed_count += 1;
 
         if has_trap {
-            broke_on_trap = true;
             break;
         }
     }
 
-    // Remove consumed entries from input, keeping unconsumed ones
-    if broke_on_trap || consumed_count >= input.len() {
-        let _ = input.drain(..consumed_count);
-    } else {
-        // Intra-bundle hazard stopped us early — drain consumed entries
-        let _ = input.drain(..consumed_count);
-    }
+    let _ = input.drain(..consumed_count);
 }

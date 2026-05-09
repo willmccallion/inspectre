@@ -120,7 +120,6 @@ impl MshrFile {
     ) -> CacheResponse {
         let line_addr = self.line_align(addr);
 
-        // Check for existing MSHR (coalesce)
         if let Some(idx) = self.find_line(line_addr) {
             let complete_cycle = self.entries[idx].complete_cycle;
             self.entries[idx].waiters.push(waiter);
@@ -130,7 +129,6 @@ impl MshrFile {
             return CacheResponse::MshrCoalesced { complete_cycle };
         }
 
-        // Allocate new MSHR
         if self.count >= self.cap {
             return CacheResponse::MshrFull;
         }

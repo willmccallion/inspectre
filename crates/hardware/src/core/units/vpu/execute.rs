@@ -1,7 +1,7 @@
 //! Vector instruction execution dispatch.
 //!
 //! Bridges the pipeline (which carries scalar values in latches) to the VPU
-//! execution modules (which operate on the architectural VPR or VecPrfView).
+//! execution modules (which operate on the architectural VPR or `VecPrfView`).
 //!
 //! Two execution paths:
 //! - **In-order / serializing:** `execute_vec_op()` — writes results to arch VPR
@@ -13,9 +13,9 @@ use crate::common::Trap;
 use crate::core::Cpu;
 use crate::core::pipeline::latches::RenameIssueEntry;
 use crate::core::pipeline::signals::{VecSrcEncoding, VectorOp};
+use crate::core::units::fpu::rounding_modes::RoundingMode;
 use crate::core::units::vpu::alu::{VecExecCtx, VecOperand, vec_execute};
 use crate::core::units::vpu::regfile::VectorRegFile;
-use crate::core::units::fpu::rounding_modes::RoundingMode;
 use crate::core::units::vpu::types::{Vlmul, Vxrm, parse_vtype_with_elen};
 use crate::core::units::vpu::vsetvl::execute_vsetvl;
 use crate::core::units::vpu::{crypto, fpu, mask, mem, permute, reduction};
@@ -172,9 +172,7 @@ const fn build_operand1(id: &RenameIssueEntry) -> VecOperand {
                     | VectorOp::VRor
             );
             if uses_uimm {
-                // vror.vi has a 6-bit immediate split as bit26 (zimm6hi) +
-                // bits[19:15] (zimm6lo); other shifts use the standard 5-bit
-                // uimm in bits[19:15].
+                // vror.vi splits a 6-bit imm as bit26 (zimm6hi) + bits[19:15] (zimm6lo).
                 let imm = if matches!(id.ctrl.vec_op, VectorOp::VRor) {
                     let lo = v_enc::uimm5(id.inst);
                     let hi = ((id.inst >> 26) & 1) as u64;
@@ -247,11 +245,7 @@ const fn op_uses_widened_emul(op: VectorOp) -> bool {
 /// Widening reductions are excluded: their destination is a single-register
 /// scalar accumulator, so the EMUL ≤ 8 ceiling does not apply.
 #[inline]
-const fn check_widening_lmul(
-    inst: u32,
-    op: VectorOp,
-    vlmul: Vlmul,
-) -> Result<(), Trap> {
+const fn check_widening_lmul(inst: u32, op: VectorOp, vlmul: Vlmul) -> Result<(), Trap> {
     if matches!(vlmul, Vlmul::M8) && op_uses_widened_emul(op) {
         return Err(Trap::IllegalInstruction(inst));
     }
@@ -310,7 +304,6 @@ fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
         &ctx,
     );
 
-    // Accumulate FP exception flags
     cpu.csrs.fflags |= result.fp_flags.bits() as u64;
     cpu.csrs.vstart = 0;
     mark_vs_dirty(cpu);
@@ -399,10 +392,6 @@ fn execute_vec_store(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> 
     mark_vs_dirty(cpu);
     Ok(result)
 }
-
-// ──────────────────────────────────────────────────────────────────────
-// O3 deferred execution path: operates on VecPrfView, returns side effects
-// ──────────────────────────────────────────────────────────────────────
 
 /// Side effects produced by a deferred vector execution.
 ///
@@ -503,7 +492,8 @@ pub fn execute_vec_op_on<V: VectorRegFile>(
 
     if reduction::is_reduction(vec_op) {
         let operand1_ref = VecOperand::Vector(id.ctrl.vs1);
-        let result = reduction::vec_reduce(vec_op, vpr, id.ctrl.vd, id.ctrl.vs2, &operand1_ref, &ctx);
+        let result =
+            reduction::vec_reduce(vec_op, vpr, id.ctrl.vd, id.ctrl.vs2, &operand1_ref, &ctx);
         return Ok(VecOpResult {
             scalar_result: result.scalar_result.unwrap_or(0),
             fp_flags: result.fp_flags.bits() as u8,
@@ -521,7 +511,8 @@ pub fn execute_vec_op_on<V: VectorRegFile>(
     }
 
     if permute::is_permute(vec_op) {
-        let result = permute::vec_permute_execute(vec_op, vpr, id.ctrl.vd, id.ctrl.vs2, &operand1, &ctx);
+        let result =
+            permute::vec_permute_execute(vec_op, vpr, id.ctrl.vd, id.ctrl.vs2, &operand1, &ctx);
         return Ok(VecOpResult {
             scalar_result: result.scalar_result.unwrap_or(0),
             fp_flags: 0,
@@ -541,14 +532,9 @@ pub fn execute_vec_op_on<V: VectorRegFile>(
             id.inst,
             id.ctrl.vec_broadcast_vs2,
         );
-        return Ok(VecOpResult {
-            scalar_result: 0,
-            fp_flags: 0,
-            vxsat: false,
-        });
+        return Ok(VecOpResult { scalar_result: 0, fp_flags: 0, vxsat: false });
     }
 
-    // Integer arithmetic (default)
     let result = vec_execute(
         vec_op,
         vpr,

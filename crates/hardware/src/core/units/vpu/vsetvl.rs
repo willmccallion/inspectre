@@ -26,7 +26,6 @@ pub fn execute_vsetvl(
 ) -> (u64, u64) {
     let fields = parse_vtype(requested_vtype);
 
-    // If vtype is illegal, set vill=1, vl=0
     if fields.vill {
         return (0, 1u64 << 63);
     }
@@ -35,18 +34,10 @@ pub fn execute_vsetvl(
     let new_vtype = encode_vtype(&fields);
 
     let new_vl = if rd_is_zero && rs1_is_zero {
-        // Keep current vl, just change vtype.
-        // Per spec: "The vl register is not modified."
         current_vl
     } else if rs1_is_zero {
-        // rd != x0, rs1 == x0 → set vl = VLMAX
         vlmax.as_u64()
     } else {
-        // Normal case: vl = min(avl, vlmax)
-        // This satisfies the spec constraints:
-        //   - AVL <= VLMAX → vl = AVL
-        //   - AVL > VLMAX → vl = VLMAX (which is >= ceil(AVL/2) when AVL < 2*VLMAX)
-        //   - AVL >= 2*VLMAX → vl = VLMAX
         avl.min(vlmax.as_u64())
     };
 

@@ -56,23 +56,15 @@ impl<E: ExecutionEngine> Frontend<E> {
         engine: &mut E,
         rename_output: &mut Vec<RenameIssueEntry>,
     ) {
-        // Rename: decode_rename -> engine (ROB alloc)
         rename::rename_stage(cpu, &mut self.decode_rename, engine, rename_output);
 
-        // Decode: fetch2_decode -> decode_rename
-        // Only run decode when rename has consumed the previous output;
-        // otherwise decode would keep appending to decode_rename while
-        // rename can't drain it (e.g. ROB full), causing unbounded growth
-        // and O(n²) behaviour as rename re-scans the growing vec each cycle.
+        // Gate decode on rename draining to avoid O(n²) regrowth of decode_rename.
         if self.decode_rename.is_empty() {
             decode::decode_stage(cpu, &mut self.fetch2_decode, &mut self.decode_rename);
         }
 
-        // Fetch2: fetch1_fetch2 -> fetch2_decode (gated by fetch2_stall or backpressure)
         if self.fetch2_stall > 0 {
             self.fetch2_stall -= 1;
-            // When the stall expires, deliver pending instructions (from an
-            // I-cache miss that already decoded but couldn't deliver).
             if self.fetch2_stall == 0 && !self.fetch2_pending.is_empty() {
                 self.fetch2_decode.append(&mut self.fetch2_pending);
             }
@@ -86,13 +78,9 @@ impl<E: ExecutionEngine> Frontend<E> {
             );
         }
 
-        // Fetch1: PC gen -> fetch1_fetch2 (gated by fetch1_stall or backpressure)
         if self.fetch1_stall > 0 {
             self.fetch1_stall -= 1;
         } else if self.fetch1_fetch2.is_empty() {
-            // Only run F1 when F2 has consumed the previous output;
-            // otherwise F1 would clear the latch and overwrite entries
-            // that F2 still needs to process.
             fetch1::fetch1_stage(cpu, &mut self.fetch1_fetch2, &mut self.fetch1_stall);
         }
     }

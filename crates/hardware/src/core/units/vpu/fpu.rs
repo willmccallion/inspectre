@@ -1192,11 +1192,7 @@ fn compute_f64(op: VectorOp, vs2_bits: u64, op1_bits: u64, frm: RoundingMode) ->
             // FE_DOWNWARD/FE_UPWARD produces a signed zero with the wrong
             // sign (the software fallback used when CVTUSI2SD_q is unavailable
             // doesn't short-circuit the zero case). Treat val=0 explicitly.
-            let r = if vs2_bits == 0 {
-                0.0
-            } else {
-                std::hint::black_box(vs2_bits as f64)
-            };
+            let r = if vs2_bits == 0 { 0.0 } else { std::hint::black_box(vs2_bits as f64) };
             (canonicalize_f64_bits(r), read_host_fp_flags())
         }
         VectorOp::VFCvtFX => {
@@ -1903,10 +1899,18 @@ fn exec_fp_widening(
                 let a_f = f16_to_f32(a16);
                 let bits = match op {
                     VectorOp::VFWCvtXuF | VectorOp::VFWCvtRtzXuF => {
-                        if a_f.is_nan() { u32::MAX as u64 } else { a_f as u32 as u64 }
+                        if a_f.is_nan() {
+                            u32::MAX as u64
+                        } else {
+                            a_f as u32 as u64
+                        }
                     }
                     VectorOp::VFWCvtXF | VectorOp::VFWCvtRtzXF => {
-                        if a_f.is_nan() { i32::MAX as u64 } else { a_f as i32 as u32 as u64 }
+                        if a_f.is_nan() {
+                            i32::MAX as u64
+                        } else {
+                            a_f as i32 as u32 as u64
+                        }
                     }
                     VectorOp::VFWCvtFXu => (vs2_raw as u16 as f32).to_bits() as u64,
                     VectorOp::VFWCvtFX => {
@@ -1921,8 +1925,7 @@ fn exec_fp_widening(
                         | VectorOp::VFWCvtRtzXuF
                         | VectorOp::VFWCvtRtzXF
                 ) && a_f.is_nan();
-                let f =
-                    read_host_fp_flags() | if nan_input { FpFlags::NV } else { FpFlags::NONE };
+                let f = read_host_fp_flags() | if nan_input { FpFlags::NV } else { FpFlags::NONE };
                 flags = flags | f;
                 vpr.write_element(vd_idx, ElemIdx::new(i), wsew, bits);
                 continue;
@@ -1960,12 +1963,7 @@ fn exec_fp_widening(
             } else {
                 r_f64 as f32
             };
-            vpr.write_element(
-                vd_idx,
-                ElemIdx::new(i),
-                wsew,
-                box_f32_canon(r_f32),
-            );
+            vpr.write_element(vd_idx, ElemIdx::new(i), wsew, box_f32_canon(r_f32));
         }
     }
 
@@ -2172,11 +2170,7 @@ fn exec_fp_narrowing(
                 }
                 VectorOp::VFNCvtXF => {
                     clear_host_fp_flags();
-                    let r = if a32.is_nan() {
-                        i16::MAX as u64
-                    } else {
-                        a32 as i16 as u16 as u64
-                    };
+                    let r = if a32.is_nan() { i16::MAX as u64 } else { a32 as i16 as u16 as u64 };
                     let f = read_host_fp_flags()
                         | if a32.is_nan() { FpFlags::NV } else { FpFlags::NONE };
                     (r, f)

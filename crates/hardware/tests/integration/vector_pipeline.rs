@@ -189,8 +189,6 @@ fn vid_v(vd: u32, vs2_field: u32) -> u32 {
 /// odd-numbered vd registers like v27.
 #[test]
 fn vwaddu_vv_at_mf8_does_not_trap_for_odd_vd() {
-    // Set vtype = e8/mf8/tu/mu, AVL=2 (≤ vlmax=2 → vl=2)
-    // Then vwaddu.vv v27, v26, v1 — must not raise illegal.
     let program: Vec<u32> = std::iter::empty()
         .chain([
             addi(5, 0, 2),                                // li t0, 2
@@ -224,8 +222,7 @@ fn vid_v_does_not_check_vs2_alignment() {
         .chain([
             addi(5, 0, 4),                                      // li t0, 4
             vsetvli(6, 5, vtype(SEW_E8, 0b001 /* m2 */, 0, 0)), // vl=4 at e8/m2
-            // Encode vid.v with non-canonical vs2_field=1; lmul=m2 means
-            // group=2, so vs2=1 would be misaligned IF treated as an operand.
+            // Non-canonical vs2_field=1 would be misaligned at lmul=m2 if treated as an operand.
             vid_v(12, 1),
         ])
         .chain(std::iter::repeat(NOP).take(32))

@@ -23,10 +23,6 @@ use crate::core::units::vpu::types::{
     ElemIdx, MaskPolicy, Sew, TailPolicy, VRegIdx, Vlmax, Vlmul, Vxrm,
 };
 
-// ============================================================================
-// Public types
-// ============================================================================
-
 /// Source for the first vector operand.
 #[derive(Debug, Clone, Copy)]
 pub enum VecOperand {
@@ -76,10 +72,6 @@ pub struct VecExecCtx {
     /// Whether the Zvfh (half-precision vector FP) extension is enabled.
     pub zvfh: bool,
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 /// Sign-extend a SEW-width value stored in a `u64` to a full `i64`.
 #[inline]
@@ -141,26 +133,18 @@ const fn rounding_incr(v: u64, d: u32, vxrm: Vxrm) -> u64 {
         Vxrm::RoundToNearestUp => (v >> (d - 1)) & 1,
         Vxrm::RoundToNearestEven => {
             let r = (v >> (d - 1)) & 1;
-            // "sticky" = OR of bits below the rounding position
             let sticky = if d >= 2 { v & ((1u64 << (d - 1)) - 1) } else { 0 };
-            // round to nearest even: r & (sticky | lsb_of_result)
             let lsb = (v >> d) & 1;
             r & (sticky | lsb)
         }
         Vxrm::RoundDown => 0,
         Vxrm::RoundToOdd => {
-            // Set the result LSB to 1 iff any dropped bit is nonzero AND the
-            // truncated result is already even (i.e. r = dropped_nonzero & !result_lsb).
             let dropped = v & ((1u64 << d) - 1);
             let result_lsb = (v >> d) & 1;
             if dropped != 0 && result_lsb == 0 { 1 } else { 0 }
         }
     }
 }
-
-// ============================================================================
-// Standard element computation
-// ============================================================================
 
 /// Compute one element for standard (non-widening, non-narrowing) integer ops.
 #[inline]
@@ -171,17 +155,14 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
     let s1 = sign_extend(op1, sew);
 
     match op {
-        // ── Arithmetic ──────────────────────────────────────────────────
         VectorOp::VAdd => (vs2.wrapping_add(op1) & mask, false),
         VectorOp::VSub => (vs2.wrapping_sub(op1) & mask, false),
         VectorOp::VRsub => (op1.wrapping_sub(vs2) & mask, false),
 
-        // ── Bitwise ─────────────────────────────────────────────────────
         VectorOp::VAnd => (vs2 & op1, false),
         VectorOp::VOr => (vs2 | op1, false),
         VectorOp::VXor => (vs2 ^ op1, false),
 
-        // ── Shifts ──────────────────────────────────────────────────────
         VectorOp::VSll => {
             let shamt = (op1 & (bits as u64 - 1)) as u32;
             ((vs2 << shamt) & mask, false)
@@ -196,16 +177,13 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (result & mask, false)
         }
 
-        // ── Min / Max ───────────────────────────────────────────────────
         VectorOp::VMin => ((if s2 < s1 { vs2 } else { op1 }) & mask, false),
         VectorOp::VMinU => (if vs2 < op1 { vs2 } else { op1 }, false),
         VectorOp::VMax => ((if s2 > s1 { vs2 } else { op1 }) & mask, false),
         VectorOp::VMaxU => (if vs2 > op1 { vs2 } else { op1 }, false),
 
-        // ── Multiply low ────────────────────────────────────────────────
         VectorOp::VMul => (vs2.wrapping_mul(op1) & mask, false),
 
-        // ── Multiply high ───────────────────────────────────────────────
         VectorOp::VMulh => {
             let prod = (s2 as i128).wrapping_mul(s1 as i128);
             let hi = (prod >> bits) as u64;
@@ -222,7 +200,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (hi & mask, false)
         }
 
-        // ── Division ────────────────────────────────────────────────────
         VectorOp::VDivU => {
             if op1 == 0 {
                 (mask, false)
@@ -236,7 +213,7 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
                 (mask, false)
             } else {
                 let min_int = 1u64 << (bits - 1);
-                let neg_one = mask; // all 1s at SEW width
+                let neg_one = mask;
                 if vs2 == min_int && op1 == neg_one {
                     // signed overflow: MIN_INT / -1 = MIN_INT
                     (min_int & mask, false)
@@ -269,13 +246,11 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             }
         }
 
-        // ── Saturating add/sub ──────────────────────────────────────────
         VectorOp::VSAddU => {
             let sum = vs2.wrapping_add(op1) & mask;
             if sum < vs2 { (mask, true) } else { (sum, false) }
         }
         VectorOp::VSAdd => {
-            // Use i128 to avoid overflow at any SEW width.
             let sum = s2 as i128 + s1 as i128;
             if sum > sew.signed_max() as i128 {
                 ((sew.signed_max() as u64) & mask, true)
@@ -293,7 +268,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             }
         }
         VectorOp::VSSub => {
-            // Use i128 to avoid overflow at any SEW width.
             let diff = s2 as i128 - s1 as i128;
             if diff > sew.signed_max() as i128 {
                 ((sew.signed_max() as u64) & mask, true)
@@ -304,7 +278,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             }
         }
 
-        // ── Averaging add/sub ───────────────────────────────────────────
         VectorOp::VAAddU => {
             let sum = (vs2 as u128) + (op1 as u128);
             let r = rounding_incr(sum as u64, 1, vxrm);
@@ -330,7 +303,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (result & mask, false)
         }
 
-        // ── Fractional multiply (vsmul) ─────────────────────────────────
         VectorOp::VSmul => {
             let prod = (s2 as i128) * (s1 as i128);
             let shift = bits - 1;
@@ -352,7 +324,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (clamped & mask, sat)
         }
 
-        // ── Scaling shifts ──────────────────────────────────────────────
         VectorOp::VSSrl => {
             let shamt = (op1 & (bits as u64 - 1)) as u32;
             let r = rounding_incr(vs2, shamt, vxrm);
@@ -366,16 +337,13 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             (result & mask, false)
         }
 
-        // ── Zvbb (Vector Bit-manipulation for Crypto) ───────────────────
         VectorOp::VAndN => ((vs2 & !op1) & mask, false),
 
-        // Bit reverse within element: reverse all SEW bits.
         VectorOp::VBrev => {
             let v = vs2 & mask;
             let r = bit_reverse(v, bits);
             (r & mask, false)
         }
-        // Bit reverse within each byte of the element.
         VectorOp::VBrev8 => {
             let mut out: u64 = 0;
             let nbytes = bits / 8;
@@ -385,7 +353,6 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             }
             (out & mask, false)
         }
-        // Byte reverse within element.
         VectorOp::VRev8 => {
             let mut out: u64 = 0;
             let nbytes = bits / 8;
@@ -396,51 +363,36 @@ fn compute_standard(op: VectorOp, vs2: u64, op1: u64, sew: Sew, vxrm: Vxrm) -> (
             }
             (out & mask, false)
         }
-        // Count leading zeros at SEW width.
         VectorOp::VClz => {
             let v = vs2 & mask;
-            let lz = if v == 0 { bits as u32 } else {
-                v.leading_zeros() - (64 - bits as u32)
-            };
+            let lz = if v == 0 { bits as u32 } else { v.leading_zeros() - (64 - bits as u32) };
             (u64::from(lz) & mask, false)
         }
-        // Count trailing zeros at SEW width.
         VectorOp::VCtz => {
             let v = vs2 & mask;
             let tz = if v == 0 { bits as u32 } else { v.trailing_zeros() };
             (u64::from(tz) & mask, false)
         }
-        // Per-element population count.
         VectorOp::VCpopV => {
             let v = vs2 & mask;
             (u64::from(v.count_ones()) & mask, false)
         }
-        // Rotate left (shift amount taken mod SEW).
         VectorOp::VRol => {
             let shamt = (op1 & (bits as u64 - 1)) as u32;
             let v = vs2 & mask;
-            let r = if shamt == 0 {
-                v
-            } else {
-                ((v << shamt) | (v >> (bits as u32 - shamt))) & mask
-            };
+            let r =
+                if shamt == 0 { v } else { ((v << shamt) | (v >> (bits as u32 - shamt))) & mask };
             (r, false)
         }
-        // Rotate right.
         VectorOp::VRor => {
             let shamt = (op1 & (bits as u64 - 1)) as u32;
             let v = vs2 & mask;
-            let r = if shamt == 0 {
-                v
-            } else {
-                ((v >> shamt) | (v << (bits as u32 - shamt))) & mask
-            };
+            let r =
+                if shamt == 0 { v } else { ((v >> shamt) | (v << (bits as u32 - shamt))) & mask };
             (r, false)
         }
 
-        // ── Zvbc carryless multiply (per-element GF(2) multiply) ────────
-        // Defined only for SEW=64 in the spec but the chipsalliance generator
-        // also exercises smaller SEW; the bit loop generalises naturally.
+        // Zvbc: defined only for SEW=64 in the spec; the bit loop generalises.
         VectorOp::VClMul => {
             let a = vs2 & mask;
             let b = op1 & mask;
@@ -495,10 +447,6 @@ const fn clmul_high(a: u64, b: u64, bits: usize) -> u64 {
     acc
 }
 
-// ============================================================================
-// Comparison helpers
-// ============================================================================
-
 /// Evaluate a comparison for one element, returning a bool for the mask bit.
 #[inline]
 fn compute_compare(op: VectorOp, vs2: u64, op1: u64, sew: Sew) -> bool {
@@ -516,10 +464,6 @@ fn compute_compare(op: VectorOp, vs2: u64, op1: u64, sew: Sew) -> bool {
         _ => unreachable!(),
     }
 }
-
-// ============================================================================
-// Widening element computation
-// ============================================================================
 
 /// Compute one widening element. Reads sources at `sew`, writes at `wsew`.
 /// For `.w` variants, vs2 is already at `wsew`.
@@ -561,8 +505,6 @@ fn compute_widening(op: VectorOp, vs2_val: u64, op1_val: u64, sew: Sew, wsew: Se
             prod as u64 & wmask
         }
 
-        // ── Zvbb widening shift left logical ────────────────────────────
-        // vd[i] (2*SEW) = zext(vs2[i]) << (op1[i] & (2*SEW - 1))
         VectorOp::VWsll => {
             let wbits = wsew.bits() as u64;
             let shamt = (op1_val & (wbits - 1)) as u32;
@@ -611,10 +553,6 @@ fn compute_widening_macc(
     }
 }
 
-// ============================================================================
-// Narrowing element computation
-// ============================================================================
-
 /// Compute one narrowing element. Reads vs2 at `wsew` (2*SEW), shift amount
 /// from op1 at `sew`, writes result at `sew`.
 #[inline]
@@ -662,10 +600,6 @@ fn compute_narrowing(
         _ => unreachable!(),
     }
 }
-
-// ============================================================================
-// Category detection helpers
-// ============================================================================
 
 #[inline]
 const fn is_comparison(op: VectorOp) -> bool {
@@ -745,10 +679,6 @@ const fn is_extension(op: VectorOp) -> bool {
     )
 }
 
-// ============================================================================
-// Main entry point
-// ============================================================================
-
 /// Execute a vector integer ALU operation.
 ///
 /// Iterates over all elements up to VLMAX, applying prestart/tail/mask
@@ -786,9 +716,19 @@ pub fn vec_execute(
     vm: bool,
     vxrm: Vxrm,
 ) -> VecExecResult {
-    let ctx = VecExecCtx { sew, vl, vstart, vma, vta, vlmul, vm, vxrm, frm: RoundingMode::Rne, zvfh: false };
+    let ctx = VecExecCtx {
+        sew,
+        vl,
+        vstart,
+        vma,
+        vta,
+        vlmul,
+        vm,
+        vxrm,
+        frm: RoundingMode::Rne,
+        zvfh: false,
+    };
 
-    // ── Dispatch by category ────────────────────────────────────────────
     if is_comparison(op) {
         return exec_comparison(op, vpr, vd_idx, vs2_idx, operand1, &ctx);
     }
@@ -814,13 +754,8 @@ pub fn vec_execute(
         return exec_merge(vpr, vd_idx, vs2_idx, operand1, &ctx);
     }
 
-    // ── Standard element-wise operations ────────────────────────────────
     exec_standard(op, vpr, vd_idx, vs2_idx, operand1, &ctx)
 }
-
-// ============================================================================
-// Execution loops
-// ============================================================================
 
 /// Standard (non-widening, non-narrowing) element-wise loop.
 fn exec_standard(
@@ -1286,10 +1221,6 @@ fn exec_extension(
     }
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1330,8 +1261,6 @@ mod tests {
         )
     }
 
-    // ── Basic add at all SEW widths ─────────────────────────────────────
-
     #[test]
     fn test_vadd_e8() {
         let mut vpr = make_vpr();
@@ -1367,8 +1296,7 @@ mod tests {
         let vs2 = VRegIdx::new(3);
         vpr.write_element(vs2, ElemIdx::new(0), Sew::E8, 0x80);
         vpr.write_element(vs1, ElemIdx::new(0), Sew::E8, 0x80);
-        let _ =
-            run(VectorOp::VWMaccSU, &mut vpr, vd, vs2, VecOperand::Vector(vs1), Sew::E8, 1);
+        let _ = run(VectorOp::VWMaccSU, &mut vpr, vd, vs2, VecOperand::Vector(vs1), Sew::E8, 1);
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E16), 0xc000);
     }
 
@@ -1403,8 +1331,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E64), 1);
     }
 
-    // ── Vector-vector add ───────────────────────────────────────────────
-
     #[test]
     fn test_vadd_vv_multiple_elements() {
         let mut vpr = make_vpr();
@@ -1422,8 +1348,6 @@ mod tests {
             assert_eq!(vpr.read_element(vd, ElemIdx::new(i), Sew::E32), expected);
         }
     }
-
-    // ── Signed comparison ───────────────────────────────────────────────
 
     #[test]
     fn test_vmslt_signed() {
@@ -1448,8 +1372,6 @@ mod tests {
         assert!(vpr.read_mask_bit(vd, ElemIdx::new(0)));
         assert!(!vpr.read_mask_bit(vd, ElemIdx::new(1)));
     }
-
-    // ── Division by zero ────────────────────────────────────────────────
 
     #[test]
     fn test_vdivu_by_zero() {
@@ -1494,8 +1416,6 @@ mod tests {
             run(VectorOp::VDiv, &mut vpr, vd, vs2, VecOperand::Scalar(0xFFFF_FFFF), Sew::E32, 1);
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E32), 0x8000_0000);
     }
-
-    // ── Widening add ────────────────────────────────────────────────────
 
     #[test]
     fn test_vwaddu() {
@@ -1596,8 +1516,6 @@ mod tests {
         assert_eq!(result, 0xFFFD);
     }
 
-    // ── Saturating add ──────────────────────────────────────────────────
-
     #[test]
     fn test_vsaddu_saturation() {
         let mut vpr = make_vpr();
@@ -1620,8 +1538,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E8), 150);
         assert!(!res.vxsat);
     }
-
-    // ── Masking ─────────────────────────────────────────────────────────
 
     #[test]
     fn test_masked_operation() {
@@ -1663,8 +1579,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(1), Sew::E32), 0xBEEF);
     }
 
-    // ── Tail handling ───────────────────────────────────────────────────
-
     #[test]
     fn test_tail_agnostic() {
         let mut vpr = make_vpr();
@@ -1695,8 +1609,6 @@ mod tests {
         // Tail element with agnostic: written with all-1s per RVV 1.0
         assert_eq!(vpr.read_element(vd, ElemIdx::new(1), Sew::E32), Sew::E32.ones());
     }
-
-    // ── Merge ───────────────────────────────────────────────────────────
 
     #[test]
     fn test_vmerge() {
@@ -1733,8 +1645,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(1), Sew::E32), 0xCCCC);
     }
 
-    // ── Multiply-accumulate ─────────────────────────────────────────────
-
     #[test]
     fn test_vmacc() {
         let mut vpr = make_vpr();
@@ -1748,8 +1658,6 @@ mod tests {
         let _ = run(VectorOp::VMacc, &mut vpr, vd, vs2, VecOperand::Scalar(3), Sew::E32, 1);
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E32), 121);
     }
-
-    // ── Extension ───────────────────────────────────────────────────────
 
     #[test]
     fn test_vsext_vf2() {
@@ -1802,8 +1710,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E16), 0x00FF);
     }
 
-    // ── Carry operations ────────────────────────────────────────────────
-
     #[test]
     fn test_vadc() {
         let mut vpr = make_vpr();
@@ -1833,8 +1739,6 @@ mod tests {
         // 10 + 20 + 1 (carry) = 31
         assert_eq!(vpr.read_element(vd, ElemIdx::new(0), Sew::E32), 31);
     }
-
-    // ── Narrowing shift ─────────────────────────────────────────────────
 
     #[test]
     fn test_vnsrl() {

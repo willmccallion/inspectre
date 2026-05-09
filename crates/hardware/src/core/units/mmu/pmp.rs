@@ -128,7 +128,6 @@ impl Pmp {
     /// Sets the configuration byte for entry `idx`.
     pub fn set_cfg(&mut self, idx: usize, cfg: u8) {
         if idx < self.entries.len() {
-            // Locked entries cannot be modified.
             if self.entries[idx].cfg & PMP_L != 0 {
                 return;
             }
@@ -164,17 +163,13 @@ impl Pmp {
     /// The region size is `2^(trailing_ones + 3)` bytes and the base
     /// is the address with those trailing bits cleared.
     const fn napot_range(pmpaddr: u64) -> (u64, u64) {
-        // Count trailing ones in pmpaddr
         let trailing = (!pmpaddr).trailing_zeros() as u64;
         let size_bits = trailing + 3;
-        // If the region covers the entire address space (or more), return the
-        // full u64 range. This avoids overflow when shifting by >= 64.
+        // Avoid overflow when size_bits >= 64 (region would cover full address space).
         if size_bits >= 64 {
             return (0, u64::MAX);
         }
-        // Region size = 2^(trailing + 3) bytes
         let size = 1u64 << size_bits;
-        // Mask the trailing bits + the implicit bit above them
         let mask = size - 1;
         let base = (pmpaddr << 2) & !mask;
         (base, base.wrapping_add(size))
@@ -211,9 +206,8 @@ impl Pmp {
         is_exec: bool,
         is_machine_mode: bool,
     ) -> PmpResult {
-        // Saturate on overflow: an access that runs past u64::MAX can't
-        // physically fit in the address space, so clamping to u64::MAX still
-        // gives the correct partial-overlap / no-match behavior downstream.
+        // Saturate: an access past u64::MAX can't physically fit, and
+        // clamping still gives correct partial-overlap / no-match behavior.
         let access_end = byte_addr.saturating_add(size);
 
         for i in 0..self.entries.len() {
@@ -235,25 +229,20 @@ impl Pmp {
                 PmpAddrMatch::Off => continue,
             };
 
-            // Per spec §3.7.1: the lowest-numbered PMP entry that matches
-            // *any byte* of the access determines the outcome.  If that entry
-            // does not cover *all bytes*, the access fails regardless of
-            // permissions (partial-match denial).
+            // Spec §3.7.1: lowest-numbered entry matching any byte decides;
+            // partial overlap denies regardless of permissions.
             let any_byte_match = byte_addr < hi && access_end > lo;
             if any_byte_match {
                 let all_bytes_match = byte_addr >= lo && access_end <= hi;
 
                 if !all_bytes_match {
-                    // Partial overlap — spec mandates denial.
                     return PmpResult::Deny;
                 }
 
-                // M-mode: if the entry is NOT locked, M-mode bypasses PMP.
                 if is_machine_mode && !entry.is_locked() {
                     return PmpResult::Allow;
                 }
 
-                // Check permissions
                 let permitted = (!is_read || entry.is_readable())
                     && (!is_write || entry.is_writable())
                     && (!is_exec || entry.is_executable());
@@ -262,8 +251,7 @@ impl Pmp {
             }
         }
 
-        // No entry matched.
-        // M-mode: if no entries match, M-mode has full access (spec §3.7.1).
+        // M-mode bypasses PMP when no entry matches (spec §3.7.1).
         if is_machine_mode { PmpResult::Allow } else { PmpResult::NoMatch }
     }
 }

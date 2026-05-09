@@ -53,22 +53,18 @@ pub fn commit_stage(
     mut checkpoints: Option<&mut CheckpointTable>,
     mut vec_prf: Option<&mut VecPhysRegFile>,
     mut vec_free_list: Option<&mut FreeList<VecPhysReg>>,
-    mut vec_store_buffer: Option<
-        &mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer,
-    >,
+    mut vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) -> Option<(Trap, u64)> {
     let mut trap_event: Option<(Trap, u64)> = None;
 
-    // Check for interrupts before committing.
-    // Always check — even with an empty ROB (e.g., timer fired during a stall
-    // with no instructions in-flight). Use cpu.pc as EPC when ROB is empty.
+    // Always check, even with empty ROB (timer firing during a stall).
     {
         let epc = if cpu.wfi_waiting {
             cpu.wfi_pc
         } else if let Some(head) = rob.peek_head() {
             head.pc
         } else {
-            cpu.committed_next_pc // ROB empty: use last committed PC + size
+            cpu.committed_next_pc
         };
 
         let interrupt = check_interrupts(cpu);
@@ -86,15 +82,7 @@ pub fn commit_stage(
             );
             trap_event = Some((interrupt_trap, epc));
         } else if cpu.wfi_waiting {
-            // WFI active: never fall through to the commit loop.
-            // The ROB may contain wrong-path instructions fetched
-            // speculatively past the WFI function (the frontend predicted
-            // past the ret and kept fetching). Committing those would
-            // corrupt architectural state.
-            //
-            // If an interrupt is pending & enabled (but not taken as a
-            // trap — e.g., delegated to a mode we're not in), this is a
-            // non-trap wakeup: resume at wfi_pc and let the caller flush.
+            // Block commit while WFI is active so wrong-path post-WFI ops can't retire.
             let pending = cpu.csrs.mip;
             let enabled = cpu.csrs.mie;
             if (pending & enabled) != 0 {
@@ -109,21 +97,18 @@ pub fn commit_stage(
         }
     }
 
-    // If interrupt detected, don't commit — flush everything
     if trap_event.is_some() {
         cpu.stats.retire_histogram[0] += 1;
         return trap_event;
     }
 
-    // Commit up to `width` entries from ROB head
     let mut retired_count: usize = 0;
     let rob_empty_at_start = rob.peek_head().is_none();
     for _ in 0..width {
         let Some(head) = rob.peek_head() else { break };
 
-        // Safety guard: a load must not retire while older stores have unresolved
-        // addresses. Without this, a bypassed load's LQ entry gets deallocated
-        // before memory2 can detect a violation against a later-resolving store.
+        // Block load retirement while older stores have unresolved addresses,
+        // so memory2 can still flag a violation against a later-resolving store.
         if head.state == RobState::Completed
             && head.ctrl.mem_read
             && store_buffer.has_unresolved_store_before(head.tag)
@@ -132,11 +117,10 @@ pub fn commit_stage(
         }
 
         if head.state == RobState::Issued {
-            break; // Not ready yet
+            break;
         }
 
         if head.state == RobState::Faulted {
-            // Synchronous exception: take the trap
             if let Some(entry) = rob.commit_head()
                 && let Some(ref the_trap) = entry.trap
             {
@@ -144,10 +128,7 @@ pub fn commit_stage(
                 if let Some(ref mut log) = cpu.commit_log {
                     use crate::common::Trap;
                     use std::io::Write;
-                    // Log all faulting instructions except fetch-stage page/access
-                    // faults (spike doesn't log those because they have no valid
-                    // instruction bits). Illegal instructions detected at fetch
-                    // ARE logged because they have valid encoding bits.
+                    // Spike skips fetch-stage page/access faults (no valid bits).
                     let skip = matches!(
                         the_trap,
                         Trap::InstructionPageFault(_)
@@ -168,17 +149,10 @@ pub fn commit_stage(
                     mstatus   = %crate::trace::Hex(cpu.csrs.mstatus),
                     "CM: synchronous exception at commit"
                 );
-                // Reclaim the faulting instruction's physical register.
-                // The instruction produced no result, so its phys_dst is
-                // orphaned — the committed rename map still holds the old
-                // mapping (old_phys_dst). The post-trap pipeline flush will
-                // reclaim all *remaining* ROB entries' phys_dst, but this
-                // entry has already been popped from the ROB, so its
-                // phys_dst would leak without this explicit reclaim.
+                // Faulting entry was popped before the post-trap flush, so reclaim its phys_dst here.
                 if entry.phys_dst.0 != 0 {
                     free_list.reclaim(entry.phys_dst);
                 }
-                // Reclaim faulting instruction's vector physical registers.
                 if let Some(ref mut vfl) = vec_free_list {
                     for i in 0..entry.vec_dst_count as usize {
                         if !entry.vec_phys_dst[i].is_zero() {
@@ -191,30 +165,15 @@ pub fn commit_stage(
             break;
         }
 
-        // SFENCE.VMA serialization barrier: refuse to commit until all
-        // committed stores have drained to RAM.  The PTW reads PTEs
-        // directly from memory (it cannot see store buffer entries), so
-        // if we flush the TLBs while PTE-modifying stores are still in
-        // the store buffer, the next page walk would read stale PTEs.
-        //
-        // We check has_committed_stores() rather than !is_empty() because
-        // the store buffer may also contain speculative entries from
-        // instructions younger than this SFENCE.VMA — those can never
-        // commit (we're blocking the commit loop) and will be squashed
-        // by the full pipeline flush after this fence retires.
+        // SFENCE.VMA must wait for committed stores to reach RAM so PTW sees current PTEs.
         if head.ctrl.system_op == SystemOp::SfenceVma && store_buffer.has_committed_stores() {
             break;
         }
 
-        // Completed — retire
         let Some(entry) = rob.commit_head() else { break };
         retired_count += 1;
 
-        // Track the next-to-commit PC for accurate interrupt EPC when ROB is empty.
-        // For taken branches and jumps, the next PC is the branch target, not pc+4.
-        // Using pc+4 here would cause interrupts arriving during an empty-ROB window
-        // (e.g., after a misprediction flush) to save the wrong EPC, resuming
-        // execution at the fallthrough address instead of the branch target.
+        // For taken branches/jumps, committed_next_pc must be the target so interrupt EPC is correct.
         cpu.committed_next_pc = match entry.ctrl.control_flow {
             ControlFlow::Jump => {
                 entry.bp_target.unwrap_or_else(|| entry.pc.wrapping_add(entry.inst_size.as_u64()))
@@ -240,8 +199,7 @@ pub fn commit_stage(
             "CM: instruction retired"
         );
 
-        // Write to commit log if enabled (deferred until after register write
-        // so we can include the destination register value).
+        // Defer commit log write until after the register write so rd value is available.
         #[cfg(feature = "commit-log")]
         let commit_log_entry: Option<(u64, u32, bool, usize, u64)> = {
             if cpu.commit_log.is_some() {
@@ -253,19 +211,16 @@ pub fn commit_stage(
             }
         };
 
-        // Update PC trace
         cpu.pc_trace.push((entry.pc, entry.inst));
         if cpu.pc_trace.len() > PC_TRACE_MAX {
             let _ = cpu.pc_trace.remove(0);
         }
 
-        // Statistics
         if entry.inst != 0 && entry.inst != 0x13 {
             cpu.stats.instructions_retired += 1;
             update_instruction_stats(cpu, &entry);
         }
 
-        // Apply deferred branch predictor update (only update on committed branches)
         if entry.bp_update {
             cpu.branch_predictor.update_branch(
                 entry.bp_pc,
@@ -289,7 +244,6 @@ pub fn commit_stage(
             }
         }
 
-        // Write to register file
         debug_assert!(
             entry.result.is_some() || (!entry.ctrl.reg_write && !entry.ctrl.fp_reg_write),
             "CM: committing instruction with reg_write but no result: rob_tag={} pc={:#x}",
@@ -300,12 +254,10 @@ pub fn commit_stage(
         if entry.ctrl.fp_reg_write {
             cpu.regs.write_f(entry.rd, val);
             scoreboard.clear_if_match(entry.rd, true, entry.tag);
-            // Update committed rename map and recycle the old physical reg
             if entry.old_phys_dst.0 != entry.phys_dst.0 {
                 free_list.reclaim(entry.old_phys_dst);
             }
             committed_rename_map.set(entry.rd, true, entry.phys_dst);
-            // Set FS to DIRTY when any FP register is written
             cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             trace_commit!(cpu.trace;
@@ -321,7 +273,6 @@ pub fn commit_stage(
         } else if entry.ctrl.reg_write && !entry.rd.is_zero() {
             cpu.regs.write(entry.rd, val);
             scoreboard.clear_if_match(entry.rd, false, entry.tag);
-            // Update committed rename map and recycle the old physical reg
             if entry.old_phys_dst.0 != entry.phys_dst.0 {
                 free_list.reclaim(entry.old_phys_dst);
             }
@@ -338,36 +289,27 @@ pub fn commit_stage(
             );
         }
 
-        // ── Vector register writeback ─────────────────────────────────
-        // Copy data from vec physical regs → architectural VPR.
-        // Reclaim old vec physical regs and update committed rename map.
         if entry.vec_dst_count > 0 {
             let vd_base = entry.ctrl.vd.as_u8();
             for i in 0..entry.vec_dst_count as usize {
                 let vreg = VRegIdx::new(vd_base + i as u8);
-                // Copy vec_prf data to architectural VPR
                 if let Some(ref mut vprf) = vec_prf {
                     let bytes = vprf.read_bytes(entry.vec_phys_dst[i]);
                     cpu.regs.vpr_mut().write_bytes(vreg, bytes);
                 }
-                // Reclaim old physical reg
                 if let Some(ref mut vfl) = vec_free_list
                     && entry.vec_old_phys_dst[i] != entry.vec_phys_dst[i]
                 {
                     vfl.reclaim(entry.vec_old_phys_dst[i]);
                 }
-                // Update committed rename map
                 committed_rename_map.set_vec(vreg, entry.vec_phys_dst[i]);
-                // Clear scoreboard producer for this vec register
                 scoreboard.clear_vec_if_match(vreg, entry.tag);
             }
-            // Set mstatus.VS = Dirty and vstart = 0
             cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
             cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
             cpu.csrs.vstart = 0;
         }
 
-        // Write deferred commit log entry (now that rd has been written).
         #[cfg(feature = "commit-log")]
         if let Some((pc, inst, has_rd, rd, val)) = commit_log_entry {
             if let Some(ref mut log) = cpu.commit_log {
@@ -381,43 +323,27 @@ pub fn commit_stage(
             }
         }
 
-        // Apply deferred PTE A/D bit update.
-        // The page table walker defers A/D bit writes until commit to
-        // prevent speculative instructions from corrupting page tables.
         if let Some(pte_upd) = entry.pte_update {
             write_store_to_memory(cpu, pte_upd.pte_addr, pte_upd.pte_value, MemWidth::Double);
         }
 
-        // Apply deferred FP exception flags (accumulated during execution).
-        // This must happen before CSR writes so that a CSR read of fflags
-        // at execute time (which already drained older flags) stays consistent.
+        // Apply fp_flags before CSR writes to keep execute-time CSR reads of fflags consistent.
         if entry.fp_flags != 0 {
             cpu.csrs.fflags |= entry.fp_flags as u64;
             cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
         }
 
-        // Apply deferred vxsat (fixed-point saturation) flag from vector execution.
         if entry.vxsat {
             cpu.csrs.vxsat = 1;
         }
 
-        // Apply deferred CSR write
         if let Some(csr_update) = entry.csr_update {
-            // SATP writes change the address translation mode. All preceding
-            // stores (page table setup, etc.) must be visible in physical
-            // memory before the new page tables are consulted. Drain the
-            // entire store buffer so the PTW reads up-to-date PTEs.
+            // SATP write: drain SB so PTW reads up-to-date PTEs after translation mode change.
             if csr_update.addr == csr::SATP {
-                drain_all_committed(
-                    cpu,
-                    store_buffer,
-                    vec_store_buffer.as_deref_mut(),
-                );
+                drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
             }
-            // For the O3 backend, fflags/fcsr CSR writes are applied eagerly at
-            // complete time (in step 6a of tick()) to avoid races with younger
-            // speculative FP instructions. Skip re-applying them here.
+            // O3 applies fflags/fcsr eagerly at complete time; don't re-apply.
             if !csr_update.applied {
                 cpu.csr_write(csr_update.addr, csr_update.new_val);
             }
@@ -431,24 +357,14 @@ pub fn commit_stage(
                 deferred = !csr_update.applied,
                 "CM: CSR write applied at commit"
             );
-            // SATP changes address translation: any instructions fetched
-            // between the execute-stage redirect and this commit used the
-            // old page tables. Force a re-flush so the frontend re-fetches
-            // with the new translation context.
-            //
-            // We must also reset cpu.pc to the instruction after this CSR,
-            // because Fetch1 has been advancing cpu.pc since the execute-stage
-            // redirect. Without this, the frontend would restart from the
-            // stale (advanced) cpu.pc, skipping instructions.
+            // SATP redirect: post-execute fetches used old tables; reset cpu.pc to next inst.
             if csr_update.addr == csr::SATP {
                 cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
                 cpu.redirect_pending = true;
             }
-            // CSR instructions are serializing — drain before committing more
             break;
         }
 
-        // Handle MRET/SRET at commit (serializing instructions)
         if entry.ctrl.system_op == SystemOp::Mret {
             cpu.do_mret();
             cpu.committed_next_pc = cpu.pc;
@@ -480,18 +396,12 @@ pub fn commit_stage(
             break;
         }
 
-        // WFI — applied at commit so it is properly ordered with
-        // preceding instructions in the same fetch group.
         if entry.ctrl.system_op == SystemOp::Wfi {
             if cpu.csrs.mie != 0 || cpu.csrs.mip != 0 {
-                // At least one interrupt source is enabled or pending —
-                // enter the waiting state.  The interrupt check at the
-                // top of commit_instructions will wake us.
                 cpu.wfi_waiting = true;
                 cpu.wfi_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             } else {
-                // Nothing enabled, nothing pending — NOP (advance past WFI
-                // to avoid deadlock, e.g. OpenSBI early boot).
+                // Nothing enabled or pending — treat as NOP to avoid OpenSBI early-boot deadlock.
                 cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
                 cpu.redirect_pending = true;
             }
@@ -499,11 +409,7 @@ pub fn commit_stage(
             break;
         }
 
-        // Apply deferred LR/SC reservation action.
-        //
-        // LR/SC reservation checks are deferred from Memory2 (speculative) to
-        // commit (architectural) so that squashed instructions cannot corrupt
-        // the reservation state.  See ISSUES.md Finding 5.
+        // LR/SC reservation checks are deferred to commit so squashed insts can't corrupt them.
         if let Some(lr_sc_rec) = entry.lr_sc {
             match lr_sc_rec {
                 LrScRecord::Lr { paddr } => {
@@ -511,24 +417,13 @@ pub fn commit_stage(
                 }
                 LrScRecord::Sc { paddr } => {
                     if cpu.check_reservation(paddr) {
-                        // SC success — reservation valid, clear it and let
-                        // the store (already in store buffer) drain normally.
                         cpu.clear_reservation();
                     } else {
-                        // SC failure — reservation was invalid.  The Memory2
-                        // stage optimistically assumed success (rd=0, store
-                        // resolved).  We must undo this:
-                        // 1. Cancel the store buffer entry (no memory write).
-                        // 2. Write rd = 1 (failure) to the register file.
-                        // 3. Redirect the pipeline to re-fetch from the next
-                        //    instruction.  Younger instructions that consumed
-                        //    rd=0 are stale and must be discarded.
+                        // SC failure: undo Memory2's optimistic success (rd=0) and re-fetch.
                         store_buffer.cancel(entry.tag);
                         if entry.ctrl.reg_write && !entry.rd.is_zero() {
                             cpu.regs.write(entry.rd, 1);
-                            // Also fix the PRF so the post-flush rename map
-                            // sees the corrected value (rd=1, not the
-                            // optimistic rd=0 written at writeback).
+                            // Patch PRF too so post-flush rename sees rd=1, not optimistic 0.
                             if let Some(ref mut prf) = prf {
                                 prf.write(entry.phys_dst, 1);
                             }
@@ -541,15 +436,8 @@ pub fn commit_stage(
             }
         }
 
-        // Mark store buffer entry as committed (for stores)
         if entry.ctrl.mem_write {
-            // Per RISC-V spec Section 8.2: a store to the reservation set
-            // between a paired LR and SC must cause the SC to fail.  Clear
-            // the reservation when a non-LR/SC store (regular store or AMO)
-            // commits to an address in the reservation granule.
-            //
-            // SC stores are excluded: they already handle the reservation
-            // above via LrScRecord::Sc.
+            // RISC-V §8.2: a non-LR/SC store to the reservation set must fail any paired SC.
             if entry.lr_sc.is_none()
                 && let Some(paddr) = store_buffer.find_paddr(entry.tag)
                 && cpu.check_reservation(paddr)
@@ -558,18 +446,13 @@ pub fn commit_stage(
             }
             store_buffer.mark_committed(entry.tag);
         } else if crate::core::units::vpu::mem::is_vec_store(entry.ctrl.vec_op) {
-            // Vector store: data lives in the dedicated `VecStoreBuffer`.
-            // Marking committed there gates the per-line drain that follows.
-            // The legacy `store_buffer.mark_committed` is left as a no-op for
-            // any per-element SB slots that are still allocated; step 5
-            // removes those slots entirely and this call goes with them.
+            // Vector store data lives in the dedicated VecStoreBuffer.
             store_buffer.mark_committed(entry.tag);
             if let Some(vsb) = vec_store_buffer.as_deref_mut() {
                 vsb.mark_committed(entry.tag);
             }
         }
 
-        // Deallocate load queue entry (for loads)
         if entry.ctrl.mem_read
             && let Some(ref mut lq) = load_queue
         {
@@ -577,68 +460,35 @@ pub fn commit_stage(
         } else if crate::core::units::vpu::mem::is_vec_load(entry.ctrl.vec_op)
             && let Some(ref mut lq) = load_queue
         {
-            // Vector loads allocate one LQ entry per element micro-op at
-            // execute time. Without this release, the LQ leaks slots and
-            // eventually fails the per-op capacity check at issue, leaving
-            // vector loads parked in the IQ forever.
+            // Per-element micro-op slots leak otherwise; vec loads stay parked in IQ.
             lq.deallocate(entry.tag);
         }
 
-        // Free checkpoint slot when a branch/jump commits
         if let Some(ckpt_id) = entry.checkpoint_id
             && let Some(ref mut ckpt_table) = checkpoints
         {
             ckpt_table.free(ckpt_id);
         }
 
-        // FENCE.I always drains all committed stores — FENCE.I must see
-        // prior stores before refilling I-cache.
-        // SFENCE.VMA does NOT need drain_all_committed here because the
-        // stall check above already guarantees the store buffer is empty.
-        // FENCE: only drain when pred.w is set (older stores must be globally
-        // visible before younger succ operations proceed).
         if entry.ctrl.system_op == SystemOp::FenceI {
-            drain_all_committed(
-                cpu,
-                store_buffer,
-                vec_store_buffer.as_deref_mut(),
-            );
-            // FENCE.I: flush I-cache AFTER store drain so refills see new data.
-            // The execute stage already redirected the frontend; this flush
-            // ensures the I-cache doesn't hold stale lines when fetching resumes.
+            drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
+            // I-cache flush after drain so refills see new data; force a fresh redirect.
             let _ = cpu.l1_i_cache.invalidate_all();
-            // Re-redirect the frontend: the execute-time redirect may have
-            // already caused fetches with stale I-cache data. Force a new
-            // redirect so the frontend re-fetches with the flushed I-cache.
             cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             cpu.redirect_pending = true;
-            // FENCE.I is serializing — stop committing so the redirect
-            // takes effect before any younger instructions retire.
-            // Without this break, younger instructions (fetched before the
-            // store drain) could commit in the same cycle with stale data.
+            // FENCE.I serializes: break so younger insts fetched pre-drain don't retire here.
             break;
         } else if entry.ctrl.system_op == SystemOp::Fence {
             let pred_bits = ((entry.inst >> 24) & 0xF) as u8;
             let pred_w = pred_bits & 0b0001 != 0;
             let pred_r = pred_bits & 0b0010 != 0;
-            // FENCE pred,succ:
-            // - pred.w: drain store buffer (older stores globally visible)
-            // - pred.r: older loads already completed by commit order
-            // - Both pred.r and pred.w: full drain + flush WCB
+            // pred.w drains the SB; pred.r is satisfied by commit order.
             if pred_w || pred_r {
-                drain_all_committed(
-                    cpu,
-                    store_buffer,
-                    vec_store_buffer.as_deref_mut(),
-                );
+                drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
             }
         }
 
-        // SFENCE.VMA: the store buffer is guaranteed empty (stall above).
-        // Flush TLBs with proper ASID/vaddr granularity, clear the
-        // reservation, and trigger a full pipeline squash so that all
-        // younger instructions (which may have fetched with stale TLBs)
-        // are discarded and re-fetched with the now-clean translations.
+        // SFENCE.VMA: SB is empty (stall above). Flush TLBs, clear reservation, full squash.
         if let Some(info) = entry.sfence_vma {
             sfence_vma_commit(cpu, &info);
             cpu.clear_reservation();
@@ -647,19 +497,15 @@ pub fn commit_stage(
             break;
         }
 
-        // Ensure x0 stays zero
         cpu.regs.write(RegIdx::new(0), 0);
     }
 
-    // Record retirement histogram and ROB-empty tracking
     if retired_count == 0 && rob_empty_at_start {
         cpu.stats.cycles_rob_empty += 1;
     }
     cpu.stats.retire_histogram[retired_count.min(3)] += 1;
 
-    // Drain one committed store to memory per cycle. If the scalar SB has
-    // nothing committed, fall through to the VSB so total commit-time store
-    // bandwidth stays at one write per cycle.
+    // One drain per cycle: fall through to VSB if scalar SB has nothing committed.
     if !try_drain_one_store(cpu, store_buffer)
         && let Some(vsb) = vec_store_buffer
     {
@@ -674,7 +520,7 @@ pub fn commit_stage(
 fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
     let Some(store) = store_buffer.drain_one() else { return false };
     let StoreResolution::Committed { paddr, data } = store.resolution else {
-        // Cancelled (failed SC) — no write needed, slot already drained.
+        // Cancelled (failed SC) — slot was drained without a write.
         return true;
     };
 
@@ -725,11 +571,9 @@ fn drain_all_committed(
             write_store_to_memory(cpu, paddr, data, store.width);
         }
     }
-    // Drain all committed vec stores from the dedicated VSB.
     if let Some(vsb) = vec_store_buffer {
         vsb.drain_all_committed(cpu);
     }
-    // Flush remaining WCB entries through the cache hierarchy
     flush_wcb(cpu);
 }
 
@@ -823,7 +667,7 @@ fn check_interrupts(cpu: &Cpu) -> Option<Trap> {
 
 /// Updates instruction statistics based on the committed entry.
 const fn update_instruction_stats(cpu: &mut Cpu, entry: &crate::core::pipeline::rob::RobEntry) {
-    // Vector instructions — check first since vec loads/stores also set mem_read/mem_write.
+    // Check vec ops first: vec loads/stores also set mem_read/mem_write.
     if !matches!(entry.ctrl.vec_op, VectorOp::None) {
         update_vec_instruction_stats(cpu, entry.ctrl.vec_op);
         return;
@@ -888,7 +732,6 @@ const fn update_instruction_stats(cpu: &mut Cpu, entry: &crate::core::pipeline::
 const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
     match op {
         VectorOp::None => {}
-        // Loads
         VectorOp::VLoadUnit
         | VectorOp::VLoadFF
         | VectorOp::VLoadMask
@@ -896,14 +739,12 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VLoadStride
         | VectorOp::VLoadIndexOrd
         | VectorOp::VLoadIndexUnord => cpu.stats.inst_vec_load += 1,
-        // Stores
         VectorOp::VStoreUnit
         | VectorOp::VStoreMask
         | VectorOp::VStoreWholeReg
         | VectorOp::VStoreStride
         | VectorOp::VStoreIndexOrd
         | VectorOp::VStoreIndexUnord => cpu.stats.inst_vec_store += 1,
-        // Integer arithmetic, compare, shifts, saturating, widening int, narrowing, extension
         VectorOp::VAdd
         | VectorOp::VSub
         | VectorOp::VRsub
@@ -951,7 +792,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VNSra
         | VectorOp::VNClipU
         | VectorOp::VNClip
-        // Integer multiply/divide and widening mul
         | VectorOp::VMul
         | VectorOp::VMulh
         | VectorOp::VMulhu
@@ -979,7 +819,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VWMacc
         | VectorOp::VWMaccSU
         | VectorOp::VWMaccUS
-        // Integer/widening reductions
         | VectorOp::VRedSum
         | VectorOp::VRedAnd
         | VectorOp::VRedOr
@@ -990,7 +829,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VRedMax
         | VectorOp::VWRedSumU
         | VectorOp::VWRedSum => cpu.stats.inst_vec_int += 1,
-        // FP arithmetic, compare, conversion, unary
         VectorOp::VFAdd
         | VectorOp::VFSub
         | VectorOp::VFRSub
@@ -1018,7 +856,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VFCvtFX
         | VectorOp::VFCvtRtzXuF
         | VectorOp::VFCvtRtzXF
-        // FP FMA
         | VectorOp::VFMacc
         | VectorOp::VFNMacc
         | VectorOp::VFMSac
@@ -1027,7 +864,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VFNMAdd
         | VectorOp::VFMSub
         | VectorOp::VFNMSub
-        // FP widening
         | VectorOp::VFWAdd
         | VectorOp::VFWSub
         | VectorOp::VFWMul
@@ -1037,7 +873,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VFWNMacc
         | VectorOp::VFWMSac
         | VectorOp::VFWNMSac
-        // FP widening/narrowing conversion
         | VectorOp::VFWCvtXuF
         | VectorOp::VFWCvtXF
         | VectorOp::VFWCvtFXu
@@ -1053,20 +888,17 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VFNCvtRodFF
         | VectorOp::VFNCvtRtzXuF
         | VectorOp::VFNCvtRtzXF
-        // FP merge/move/slide
         | VectorOp::VFMerge
         | VectorOp::VFMvSF
         | VectorOp::VFMvFS
         | VectorOp::VFSlide1Up
         | VectorOp::VFSlide1Down
-        // FP reductions
         | VectorOp::VFRedOSum
         | VectorOp::VFRedUSum
         | VectorOp::VFRedMax
         | VectorOp::VFRedMin
         | VectorOp::VFWRedOSum
         | VectorOp::VFWRedUSum => cpu.stats.inst_vec_fp += 1,
-        // Permute, mask, config, whole-reg move, scalar moves
         VectorOp::Vsetvli
         | VectorOp::Vsetivli
         | VectorOp::Vsetvl
@@ -1098,7 +930,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VMv2r
         | VectorOp::VMv4r
         | VectorOp::VMv8r
-        // Zvbb / Zvbc bit-manip and carryless multiply count as integer
         | VectorOp::VAndN
         | VectorOp::VBrev
         | VectorOp::VBrev8
@@ -1111,7 +942,6 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VWsll
         | VectorOp::VClMul
         | VectorOp::VClMulH
-        // Crypto extensions
         | VectorOp::VAesEm
         | VectorOp::VAesEf
         | VectorOp::VAesDm
@@ -1131,15 +961,11 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
     }
 }
 
-/// Performs selective SFENCE.VMA TLB/cache flushing at commit time.
-///
-/// Uses the deferred operand values captured at execute time for proper
-/// ASID/vaddr granularity, matching the RISC-V privileged specification:
-///
-/// * rs1 == 0, rs2 == 0: flush all TLB entries + D-cache + I-cache
-/// * rs1 != 0, rs2 == 0: flush TLB entries matching virtual address in rs1
-/// * rs1 == 0, rs2 != 0: flush non-global TLB entries matching ASID in rs2
-/// * rs1 != 0, rs2 != 0: flush TLB entry matching both vaddr and ASID
+/// Performs selective SFENCE.VMA TLB/cache flushing at commit time per the privileged spec:
+/// rs1==0,rs2==0: flush all TLBs + D-cache + I-cache;
+/// rs1!=0,rs2==0: flush TLB entries matching vaddr in rs1;
+/// rs1==0,rs2!=0: flush non-global TLB entries matching ASID in rs2;
+/// rs1!=0,rs2!=0: flush TLB entry matching both vaddr and ASID.
 fn sfence_vma_commit(cpu: &mut Cpu, info: &SfenceVmaInfo) {
     match (!info.rs1_idx.is_zero(), !info.rs2_idx.is_zero()) {
         (false, false) => {

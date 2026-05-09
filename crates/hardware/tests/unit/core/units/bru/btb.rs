@@ -6,10 +6,6 @@
 
 use rvsim_core::core::units::bru::btb::Btb;
 
-// ══════════════════════════════════════════════════════════
-// 1. Basic lookup/update
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn lookup_empty_returns_none() {
     let btb = Btb::new(16, 1);
@@ -31,10 +27,6 @@ fn update_overwrites_previous_target() {
     assert_eq!(btb.lookup(0x1000), Some(0x3000), "Latest update should win");
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Tag mismatch
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn lookup_wrong_pc_returns_none() {
     let mut btb = Btb::new(16, 1);
@@ -44,8 +36,7 @@ fn lookup_wrong_pc_returns_none() {
 
 #[test]
 fn lookup_after_aliasing_eviction_direct_mapped() {
-    // Two PCs that map to the same index but have different tags.
-    // With 1-way (direct-mapped), the second update evicts the first.
+    // Direct-mapped: two PCs at same index but different tags → second evicts first.
     let mut btb = Btb::new(4, 1); // 4 sets, 1 way
     let pc_a = 0x1000; // index = (0x1000 >> 2) & 3 = 0
     let pc_b = 0x1010; // index = (0x1010 >> 2) & 3 = 0 (same index!)
@@ -54,10 +45,6 @@ fn lookup_after_aliasing_eviction_direct_mapped() {
     assert_eq!(btb.lookup(pc_a), None, "pc_a evicted by pc_b (same index)");
     assert_eq!(btb.lookup(pc_b), Some(0xBBBB));
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Multiple distinct entries
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn multiple_entries_non_conflicting() {
@@ -71,10 +58,6 @@ fn multiple_entries_non_conflicting() {
     assert_eq!(btb.lookup(0x1008), Some(0xC));
     assert_eq!(btb.lookup(0x100C), Some(0xD));
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Size and indexing
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn index_wraps_around() {
@@ -100,10 +83,6 @@ fn fill_entire_btb() {
         assert_eq!(btb.lookup(i * 4), Some(0xF000 + i));
     }
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Edge cases
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn lookup_pc_zero() {
@@ -134,10 +113,6 @@ fn target_max_is_valid() {
     assert_eq!(btb.lookup(0x1000), Some(u64::MAX));
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. Realistic branch patterns
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn loop_branch_updates_consistently() {
     let mut btb = Btb::new(64, 1);
@@ -166,14 +141,9 @@ fn switching_targets() {
     assert_eq!(btb.lookup(pc), Some(0xC000));
 }
 
-// ══════════════════════════════════════════════════════════
-// 7. Set-associative BTB tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn set_associative_no_conflict_within_ways() {
-    // 16 total entries, 4 ways → 4 sets.
-    // Two PCs that map to the same set should coexist (both fit in 4 ways).
+    // 4-way: two PCs in the same set should both fit.
     let mut btb = Btb::new(16, 4); // 4 sets, 4 ways
     let pc_a = 0x1000; // set = (0x1000 >> 2) & 3 = 0
     let pc_b = 0x1010; // set = (0x1010 >> 2) & 3 = 0 (same set!)
@@ -185,8 +155,7 @@ fn set_associative_no_conflict_within_ways() {
 
 #[test]
 fn set_associative_evicts_when_full() {
-    // 4 total entries, 2 ways → 2 sets.
-    // Insert 3 PCs mapping to the same set — the third should evict the first.
+    // 2-way: a third PC in the same set evicts the LRU entry.
     let mut btb = Btb::new(4, 2); // 2 sets, 2 ways
     // All three PCs need to map to the same set (set = (pc >> 2) & 1).
     let pc_a = 0x0000; // set = 0

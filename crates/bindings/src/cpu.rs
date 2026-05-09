@@ -17,8 +17,6 @@ use rvsim_core::sim::loader;
 use std::io::Write;
 use std::io::{BufReader, BufWriter, Read};
 
-// ── Formatting helper ────────────────────────────────────────────────────────
-
 fn fmt_commas(n: u64) -> String {
     let s = n.to_string();
     let bytes = s.as_bytes();
@@ -33,15 +31,11 @@ fn fmt_commas(n: u64) -> String {
     result
 }
 
-// ── Cpu ──────────────────────────────────────────────────────────────────────
-
 /// The simulation CPU. Created by `Simulator.build()`.
 #[pyclass(name = "Cpu")]
 pub struct PyCpu {
     pub inner: Simulator,
 }
-
-// ── Private Rust helpers (not exposed to Python) ─────────────────────────────
 
 impl PyCpu {
     pub(crate) const fn privilege_str(&self) -> &'static str {
@@ -85,8 +79,7 @@ impl PyCpu {
         }
     }
 
-    /// Core run loop. Runs for up to `limit` cycles (or forever if `None`),
-    /// checking Python signals every 10 000 cycles.
+    /// Runs for up to `limit` cycles, checking Python signals every 10000 cycles.
     fn run_inner(&mut self, py: Python<'_>, limit: Option<u64>) -> PyResult<Option<u64>> {
         let start = self.inner.cpu.stats.cycles;
         loop {
@@ -158,8 +151,6 @@ impl PyCpu {
     }
 }
 
-// ── Python-visible API ────────────────────────────────────────────────────────
-
 #[pymethods]
 impl PyCpu {
     /// Build a fully-configured CPU from a config dict and optional binary/kernel.
@@ -187,7 +178,6 @@ impl PyCpu {
         let disk = disk_path.unwrap_or_default();
         let mut system = rvsim_core::soc::System::new(&config, &disk);
 
-        // ELF loading (bare-metal mode)
         let mut elf_entry: Option<u64> = None;
         let mut tohost_addr: Option<u64> = None;
         if let Some(data) = elf_data {
@@ -206,33 +196,27 @@ impl PyCpu {
 
         let mut sim = Simulator::new(system, &config);
 
-        // Apply ELF entry point
         if let Some(entry) = elf_entry {
             sim.cpu.pc = entry;
         }
 
-        // HTIF setup (bare-metal with tohost symbol)
         if let Some(tohost) = tohost_addr {
             sim.cpu.direct_mode = false;
             sim.cpu.privilege = PrivilegeMode::Machine;
             sim.cpu.htif_range = Some((tohost, tohost + 16));
         }
 
-        // Kernel loading
         if let Some(kpath) = kernel_path {
             loader::setup_kernel_load(&mut sim.cpu, &config, "", dtb_path, Some(kpath))
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
             sim.cpu.direct_mode = false;
         }
 
-        // Sync architectural registers (a0/a1/a2 from loader, sp from direct_mode)
-        // into the O3 PRF. Must happen after all register initialization.
+        // Sync arch regs into the O3 PRF — must happen after all reg init.
         sim.sync_arch_regs();
 
         Ok(Self { inner: sim })
     }
-
-    // ── Properties ───────────────────────────────────────────────────────────
 
     /// Program counter (read/write).
     #[getter]
@@ -316,8 +300,6 @@ impl PyCpu {
     fn pc_trace(&self) -> Vec<(u64, u32)> {
         self.inner.cpu.pc_trace.clone()
     }
-
-    // ── Methods ──────────────────────────────────────────────────────────────
 
     /// Open a commit log file. Each retired instruction is written as
     /// ``core   0: 0x<pc> (0x<inst>)``. Requires the ``commit-log`` feature.
@@ -489,7 +471,6 @@ impl PyCpu {
                 chunk
             };
 
-            // Run a chunk, release borrow before checking predicates.
             let exit = slf_py.borrow_mut(py).run_for_cycles(py, c)?;
             cycles_run += c;
 
@@ -497,7 +478,6 @@ impl PyCpu {
                 return Ok(Some(code));
             }
 
-            // Check simple predicates with an immutable borrow.
             let stop = {
                 let cpu = slf_py.borrow(py);
                 pc.is_some_and(|p| cpu.inner.cpu.pc == p)
@@ -507,7 +487,6 @@ impl PyCpu {
                 return Ok(None);
             }
 
-            // Call Python predicate, passing the Cpu object itself.
             if let Some(ref pred) = predicate {
                 let result = pred.call1(py, (slf_py.clone_ref(py),))?;
                 if result.extract::<bool>(py)? {
@@ -564,7 +543,6 @@ impl PyCpu {
             let slice = unsafe { std::slice::from_raw_parts(cpu.ram_ptr.add(offset), length) };
             pyo3::types::PyBytes::new(py, slice)
         } else {
-            // Fallback: read byte-by-byte via the bus
             let mut buf = vec![0u8; length];
             for (i, byte) in buf.iter_mut().enumerate() {
                 *byte = self

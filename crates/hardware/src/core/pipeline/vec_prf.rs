@@ -32,7 +32,7 @@ impl VecPhysRegFile {
     pub fn new(total: usize, vlen: Vlen) -> Self {
         let mut ready = vec![false; total];
         if total > 0 {
-            ready[0] = true; // Slot 0 sentinel always ready
+            ready[0] = true;
         }
         Self { data: vec![0u8; total * vlen.bytes()], ready, vlen, total }
     }
@@ -189,9 +189,7 @@ impl<'a> VecPrfView<'a> {
 impl VectorRegFile for VecPrfView<'_> {
     #[inline]
     fn read_element(&self, vreg: VRegIdx, index: ElemIdx, sew: Sew) -> u64 {
-        // For LMUL > 1 the VPU passes element indices that span multiple
-        // physical registers (each physical register holds vlen/sew elements).
-        // Redirect element `i` to the correct register in the group.
+        // LMUL > 1: route element idx to the correct register in the group.
         let elems_per_phys = (self.prf.vlen().bytes() / sew.bytes()).max(1);
         let phys_offset = index.as_usize() / elems_per_phys;
         let local_idx = ElemIdx::new(index.as_usize() % elems_per_phys);
@@ -201,7 +199,6 @@ impl VectorRegFile for VecPrfView<'_> {
 
     #[inline]
     fn write_element(&mut self, vreg: VRegIdx, index: ElemIdx, sew: Sew, val: u64) {
-        // Same LMUL group scatter logic as read_element.
         let elems_per_phys = (self.prf.vlen().bytes() / sew.bytes()).max(1);
         let phys_offset = index.as_usize() / elems_per_phys;
         let local_idx = ElemIdx::new(index.as_usize() % elems_per_phys);

@@ -170,7 +170,6 @@ pub enum AluOp {
     /// Move integer register to floating-point register.
     FMvToF,
 
-    // ── Zba: Address generation ──────────────────────────────────────────
     /// Shift-left-1 and add (sh1add).
     Sh1Add,
 
@@ -195,7 +194,6 @@ pub enum AluOp {
     /// Shift-left-logical unsigned word immediate (slli.uw).
     SlliUw,
 
-    // ── Zbb: Basic bit manipulation ──────────────────────────────────────
     /// Bitwise AND with complement (andn).
     Andn,
 
@@ -244,7 +242,6 @@ pub enum AluOp {
     /// Byte-reverse (rev8).
     Rev8,
 
-    // ── Zbc: Carry-less multiplication ───────────────────────────────────
     /// Carry-less multiply (low half).
     Clmul,
 
@@ -254,7 +251,6 @@ pub enum AluOp {
     /// Carry-less multiply (reversed / remainder).
     Clmulr,
 
-    // ── Zbs: Single-bit operations ───────────────────────────────────────
     /// Clear single bit (bclr / bclri).
     Bclr,
 
@@ -267,7 +263,6 @@ pub enum AluOp {
     /// Set single bit (bset / bseti).
     Bset,
 
-    // ── Zbkb: Bitwise operations for cryptography ────────────────────────
     /// Bit-reverse within each byte (brev8).
     Brev8,
 
@@ -280,7 +275,6 @@ pub enum AluOp {
     /// Pack lower halves, 32-bit variant (packw).
     Packw,
 
-    // ── Zbkx: Crossbar permutations for cryptography ─────────────────────
     /// 4-bit crossbar permutation (xperm4).
     Xperm4,
 
@@ -536,7 +530,6 @@ pub enum VectorOp {
     #[default]
     None,
 
-    // ── Configuration ────────────────────────────────────────────────────
     /// `vsetvli` — set vl/vtype from rs1 and immediate.
     Vsetvli,
     /// `vsetivli` — set vl/vtype from uimm and immediate.
@@ -544,7 +537,6 @@ pub enum VectorOp {
     /// `vsetvl` — set vl/vtype from rs1 and rs2.
     Vsetvl,
 
-    // ── Integer arithmetic ───────────────────────────────────────────────
     /// `vadd` — vector add.
     VAdd,
     /// `vsub` — vector subtract.
@@ -572,11 +564,9 @@ pub enum VectorOp {
     /// `vmax` — vector signed maximum.
     VMax,
 
-    // ── Merge / move ─────────────────────────────────────────────────────
     /// `vmerge` / `vmv` — vector merge or move.
     VMerge,
 
-    // ── Integer comparison (write mask) ──────────────────────────────────
     /// `vmseq` — set mask if equal.
     VMSeq,
     /// `vmsne` — set mask if not equal.
@@ -594,7 +584,6 @@ pub enum VectorOp {
     /// `vmsgt` — set mask if greater than signed.
     VMSgt,
 
-    // ── Add/subtract with carry ──────────────────────────────────────────
     /// `vadc` — add with carry from v0 mask.
     VAdc,
     /// `vmadc` — mask-producing add with carry.
@@ -604,7 +593,6 @@ pub enum VectorOp {
     /// `vmsbc` — mask-producing subtract with borrow.
     VMsbc,
 
-    // ── Integer multiply ─────────────────────────────────────────────────
     /// `vmul` — multiply low bits.
     VMul,
     /// `vmulh` — multiply high bits (signed × signed).
@@ -622,7 +610,6 @@ pub enum VectorOp {
     /// `vnmsub` — negated multiply-subtract (vd = -(vs1*vd) + vs2).
     VNMSub,
 
-    // ── Integer divide ───────────────────────────────────────────────────
     /// `vdivu` — unsigned divide.
     VDivU,
     /// `vdiv` — signed divide.
@@ -632,7 +619,6 @@ pub enum VectorOp {
     /// `vrem` — signed remainder.
     VRem,
 
-    // ── Widening integer arithmetic ──────────────────────────────────────
     /// `vwaddu` — widening unsigned add (SEW → 2×SEW).
     VWAddU,
     /// `vwadd` — widening signed add (SEW → 2×SEW).
@@ -650,7 +636,6 @@ pub enum VectorOp {
     /// `vwsub.w` — widening signed subtract wide (2×SEW op SEW → 2×SEW).
     VWSubW,
 
-    // ── Widening integer multiply ────────────────────────────────────────
     /// `vwmulu` — widening unsigned multiply.
     VWMulU,
     /// `vwmul` — widening signed multiply.
@@ -666,7 +651,6 @@ pub enum VectorOp {
     /// `vwmaccus` — widening unsigned-signed multiply-accumulate.
     VWMaccUS,
 
-    // ── Narrowing ────────────────────────────────────────────────────────
     /// `vnsrl` — narrowing shift right logical (2×SEW → SEW).
     VNSrl,
     /// `vnsra` — narrowing shift right arithmetic (2×SEW → SEW).
@@ -676,7 +660,6 @@ pub enum VectorOp {
     /// `vnclip` — narrowing clip signed with saturation.
     VNClip,
 
-    // ── Fixed-point saturating ───────────────────────────────────────────
     /// `vsaddu` — saturating unsigned add.
     VSAddU,
     /// `vsadd` — saturating signed add.
@@ -686,7 +669,6 @@ pub enum VectorOp {
     /// `vssub` — saturating signed subtract.
     VSSub,
 
-    // ── Fixed-point averaging ────────────────────────────────────────────
     /// `vaaddu` — averaging unsigned add.
     VAAddU,
     /// `vaadd` — averaging signed add.
@@ -696,7 +678,6 @@ pub enum VectorOp {
     /// `vasub` — averaging signed subtract.
     VASub,
 
-    // ── Fixed-point scaling ──────────────────────────────────────────────
     /// `vsmul` — signed fractional multiply with rounding.
     VSmul,
     /// `vssrl` — scaling shift right logical with rounding.
@@ -704,7 +685,6 @@ pub enum VectorOp {
     /// `vssra` — scaling shift right arithmetic with rounding.
     VSSra,
 
-    // ── Extension ────────────────────────────────────────────────────────
     /// `vzext.vf2` — zero-extend SEW/2 to SEW.
     VZextVf2,
     /// `vzext.vf4` — zero-extend SEW/4 to SEW.
@@ -718,7 +698,6 @@ pub enum VectorOp {
     /// `vsext.vf8` — sign-extend SEW/8 to SEW.
     VSextVf8,
 
-    // ── Bit-manipulation (Zvbb) ──────────────────────────────────────────
     /// `vandn` — vector bitwise AND-NOT (vd[i] = vs2[i] & ~op1[i]).
     VAndN,
     /// `vbrev.v` — reverse all bits within each element.
@@ -740,13 +719,11 @@ pub enum VectorOp {
     /// `vwsll` — widening shift left logical (vd is 2*SEW).
     VWsll,
 
-    // ── Carry-less multiply (Zvbc) ───────────────────────────────────────
     /// `vclmul` — carry-less multiply low (GF(2) multiply, low half).
     VClMul,
     /// `vclmulh` — carry-less multiply high (GF(2) multiply, high half).
     VClMulH,
 
-    // ── AES (Zvkned) ─────────────────────────────────────────────────────
     /// `vaesem.vv`/`vaesem.vs` — AES single-round encryption (middle round).
     VAesEm,
     /// `vaesef.vv`/`vaesef.vs` — AES single-round encryption (final round).
@@ -762,7 +739,6 @@ pub enum VectorOp {
     /// `vaeskf2.vi` — AES-256 forward key schedule.
     VAesKf2,
 
-    // ── SHA-2 (Zvknha/b) ─────────────────────────────────────────────────
     /// `vsha2ms.vv` — SHA-2 message scheduling.
     VSha2Ms,
     /// `vsha2ch.vv` — SHA-2 compression (high half).
@@ -770,25 +746,21 @@ pub enum VectorOp {
     /// `vsha2cl.vv` — SHA-2 compression (low half).
     VSha2Cl,
 
-    // ── SM3 (Zvksh) ──────────────────────────────────────────────────────
     /// `vsm3me.vv` — SM3 message expansion.
     VSm3Me,
     /// `vsm3c.vi` — SM3 compression.
     VSm3C,
 
-    // ── SM4 (Zvksed) ─────────────────────────────────────────────────────
     /// `vsm4r.vv`/`vsm4r.vs` — SM4 round.
     VSm4R,
     /// `vsm4k.vi` — SM4 key expansion.
     VSm4K,
 
-    // ── GHASH / GMAC (Zvkg) ──────────────────────────────────────────────
     /// `vghsh.vv` — vector GHASH add-multiply.
     VGhsh,
     /// `vgmul.vv` — vector GHASH multiply.
     VGmul,
 
-    // ── Vector memory — unit-stride ──────────────────────────────────────
     /// Unit-stride vector load (`vle8/16/32/64`).
     VLoadUnit,
     /// Unit-stride vector store (`vse8/16/32/64`).
@@ -804,13 +776,11 @@ pub enum VectorOp {
     /// Whole-register store (`vs1r`, `vs2r`, etc.).
     VStoreWholeReg,
 
-    // ── Vector memory — strided ──────────────────────────────────────────
     /// Strided vector load (`vlse8/16/32/64`).
     VLoadStride,
     /// Strided vector store (`vsse8/16/32/64`).
     VStoreStride,
 
-    // ── Vector memory — indexed ──────────────────────────────────────────
     /// Indexed ordered vector load (`vloxei8/16/32/64`).
     VLoadIndexOrd,
     /// Indexed ordered vector store (`vsoxei8/16/32/64`).
@@ -820,7 +790,6 @@ pub enum VectorOp {
     /// Indexed unordered vector store (`vsuxei8/16/32/64`).
     VStoreIndexUnord,
 
-    // ── FP arithmetic ───────────────────────────────────────────────────
     /// `vfadd` — vector FP add.
     VFAdd,
     /// `vfsub` — vector FP subtract.
@@ -834,13 +803,11 @@ pub enum VectorOp {
     /// `vfrdiv` — vector FP reverse divide (scalar / vs2).
     VFRDiv,
 
-    // ── FP min/max ──────────────────────────────────────────────────────
     /// `vfmin` — vector FP minimum.
     VFMin,
     /// `vfmax` — vector FP maximum.
     VFMax,
 
-    // ── FP sign injection ───────────────────────────────────────────────
     /// `vfsgnj` — vector FP sign injection (copy sign).
     VFSgnj,
     /// `vfsgnjn` — vector FP negated sign injection.
@@ -848,7 +815,6 @@ pub enum VectorOp {
     /// `vfsgnjx` — vector FP XOR sign injection.
     VFSgnjx,
 
-    // ── FP comparison (write mask) ──────────────────────────────────────
     /// `vmfeq` — set mask if FP equal.
     VMFEq,
     /// `vmfne` — set mask if FP not equal.
@@ -862,7 +828,6 @@ pub enum VectorOp {
     /// `vmfge` — set mask if FP greater than or equal.
     VMFGe,
 
-    // ── FP fused multiply-add ───────────────────────────────────────────
     /// `vfmacc` — FP multiply-accumulate (vd = vs1*vs2 + vd).
     VFMacc,
     /// `vfnmacc` — FP negated multiply-accumulate (vd = -(vs1*vs2) - vd).
@@ -880,7 +845,6 @@ pub enum VectorOp {
     /// `vfnmsub` — FP negated multiply-subtract (vd = -(vs1*vd) + vs2).
     VFNMSub,
 
-    // ── FP unary ────────────────────────────────────────────────────────
     /// `vfsqrt` — vector FP square root.
     VFSqrt,
     /// `vfrsqrt7` — vector FP reciprocal square root (7-bit accuracy).
@@ -890,7 +854,6 @@ pub enum VectorOp {
     /// `vfclass` — vector FP classify.
     VFClass,
 
-    // ── FP conversion (int<->float) ─────────────────────────────────────
     /// `vfcvt.xu.f` — convert FP to unsigned integer.
     VFCvtXuF,
     /// `vfcvt.x.f` — convert FP to signed integer.
@@ -904,7 +867,6 @@ pub enum VectorOp {
     /// `vfcvt.rtz.x.f` — convert FP to signed integer (round toward zero).
     VFCvtRtzXF,
 
-    // ── FP widening arithmetic ──────────────────────────────────────────
     /// `vfwadd` — widening FP add (SEW -> 2*SEW).
     VFWAdd,
     /// `vfwsub` — widening FP subtract (SEW -> 2*SEW).
@@ -916,7 +878,6 @@ pub enum VectorOp {
     /// `vfwsub.w` — widening FP subtract wide (2*SEW op SEW -> 2*SEW).
     VFWSubW,
 
-    // ── FP widening FMA ─────────────────────────────────────────────────
     /// `vfwmacc` — widening FP multiply-accumulate.
     VFWMacc,
     /// `vfwnmacc` — widening FP negated multiply-accumulate.
@@ -926,7 +887,6 @@ pub enum VectorOp {
     /// `vfwnmsac` — widening FP negated multiply-subtract accumulate.
     VFWNMSac,
 
-    // ── FP widening conversion ──────────────────────────────────────────
     /// `vfwcvt.xu.f` — widening convert FP to unsigned integer.
     VFWCvtXuF,
     /// `vfwcvt.x.f` — widening convert FP to signed integer.
@@ -942,7 +902,6 @@ pub enum VectorOp {
     /// `vfwcvt.rtz.x.f` — widening convert FP to signed integer (round toward zero).
     VFWCvtRtzXF,
 
-    // ── FP narrowing conversion ─────────────────────────────────────────
     /// `vfncvt.xu.f` — narrowing convert FP to unsigned integer.
     VFNCvtXuF,
     /// `vfncvt.x.f` — narrowing convert FP to signed integer.
@@ -960,7 +919,6 @@ pub enum VectorOp {
     /// `vfncvt.rtz.x.f` — narrowing convert FP to signed integer (round toward zero).
     VFNCvtRtzXF,
 
-    // ── FP merge/move ───────────────────────────────────────────────────
     /// `vfmerge` — vector FP merge with mask.
     VFMerge,
     /// `vfmv.s.f` — move FP scalar to vector element 0.
@@ -968,13 +926,11 @@ pub enum VectorOp {
     /// `vfmv.f.s` — move vector element 0 to FP scalar.
     VFMvFS,
 
-    // ── FP slides ───────────────────────────────────────────────────────
     /// `vfslide1up` — slide up by one with FP scalar.
     VFSlide1Up,
     /// `vfslide1down` — slide down by one with FP scalar.
     VFSlide1Down,
 
-    // ── Integer reductions ──────────────────────────────────────────────
     /// `vredsum` — reduction sum.
     VRedSum,
     /// `vredand` — reduction AND.
@@ -992,13 +948,11 @@ pub enum VectorOp {
     /// `vredmax` — reduction signed maximum.
     VRedMax,
 
-    // ── Widening integer reductions ─────────────────────────────────────
     /// `vwredsumu` — widening unsigned reduction sum.
     VWRedSumU,
     /// `vwredsum` — widening signed reduction sum.
     VWRedSum,
 
-    // ── FP reductions ───────────────────────────────────────────────────
     /// `vfredosum` — FP ordered reduction sum.
     VFRedOSum,
     /// `vfredusum` — FP unordered reduction sum.
@@ -1008,13 +962,11 @@ pub enum VectorOp {
     /// `vfredmin` — FP reduction minimum.
     VFRedMin,
 
-    // ── FP widening reductions ──────────────────────────────────────────
     /// `vfwredosum` — widening FP ordered reduction sum.
     VFWRedOSum,
     /// `vfwredusum` — widening FP unordered reduction sum.
     VFWRedUSum,
 
-    // ── Mask-register logical ───────────────────────────────────────────
     /// `vmand.mm` — mask AND.
     VMAndMM,
     /// `vmnand.mm` — mask NAND.
@@ -1032,13 +984,11 @@ pub enum VectorOp {
     /// `vmxnor.mm` — mask XNOR.
     VMXnorMM,
 
-    // ── Mask scalar ─────────────────────────────────────────────────────
     /// `vcpop.m` — count population of mask register.
     VCPopM,
     /// `vfirst.m` — find first set bit in mask register.
     VFirstM,
 
-    // ── Mask-producing ──────────────────────────────────────────────────
     /// `vmsbf.m` — set-before-first mask bit.
     VMSbfM,
     /// `vmsif.m` — set-including-first mask bit.
@@ -1046,13 +996,11 @@ pub enum VectorOp {
     /// `vmsof.m` — set-only-first mask bit.
     VMSofM,
 
-    // ── Mask misc ───────────────────────────────────────────────────────
     /// `viota.m` — iota (prefix sum of mask bits).
     VIotaM,
     /// `vid.v` — vector element index.
     VIdV,
 
-    // ── Permutations ────────────────────────────────────────────────────
     /// `vmv.x.s` — move vector element 0 to scalar GPR.
     VMvXS,
     /// `vmv.s.x` — move scalar GPR to vector element 0.
@@ -1143,168 +1091,97 @@ impl VectorOp {
         let vs2_crypto = if broadcast_vs2 { 1 } else { lmul };
 
         match self {
-            // ── Configuration (no vector register operands) ──────────────
             None | Vsetvli | Vsetivli | Vsetvl => VecOperandGroups { vd: 0, vs1: 0, vs2: 0 },
 
-            // ── Standard arithmetic (vd=LMUL, vs2=LMUL, vs1=LMUL|0) ────
-            VAdd | VSub | VRsub | VAnd | VOr | VXor |
-            VSll | VSrl | VSra |
-            VMinU | VMin | VMaxU | VMax |
-            VMul | VMulh | VMulhu | VMulhsu |
-            VMacc | VNMSac | VMadd | VNMSub |
-            VDivU | VDiv | VRemU | VRem |
-            VSAddU | VSAdd | VSSubU | VSSub |
-            VAAddU | VAAdd | VASubU | VASub |
-            VSmul | VSSrl | VSSra |
-            VMerge |
-            // Slides, gather, compress read full groups
-            VSlideUp | VSlideDown | VSlide1Up | VSlide1Down |
-            VRgather | VRgatherEi16 | VCompress |
-            // FP standard arithmetic
-            VFAdd | VFSub | VFRSub | VFMul | VFDiv | VFRDiv |
-            VFMin | VFMax | VFSgnj | VFSgnjn | VFSgnjx |
-            VFMacc | VFNMacc | VFMSac | VFNMSac |
-            VFMAdd | VFNMAdd | VFMSub | VFNMSub |
-            VFMerge |
-            // FP slides
-            VFSlide1Up | VFSlide1Down |
-            // Carry/borrow input ops (read v0 mask + full group operands)
-            VAdc | VSbc |
-            // Zvbb arithmetic (vandn/vrol/vror) and Zvbc carryless multiply
-            VAndN | VRol | VRor | VClMul | VClMulH
-            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base },
+            VAdd | VSub | VRsub | VAnd | VOr | VXor | VSll | VSrl | VSra | VMinU | VMin | VMaxU
+            | VMax | VMul | VMulh | VMulhu | VMulhsu | VMacc | VNMSac | VMadd | VNMSub | VDivU
+            | VDiv | VRemU | VRem | VSAddU | VSAdd | VSSubU | VSSub | VAAddU | VAAdd | VASubU
+            | VASub | VSmul | VSSrl | VSSra | VMerge | VSlideUp | VSlideDown | VSlide1Up
+            | VSlide1Down | VRgather | VRgatherEi16 | VCompress | VFAdd | VFSub | VFRSub
+            | VFMul | VFDiv | VFRDiv | VFMin | VFMax | VFSgnj | VFSgnjn | VFSgnjx | VFMacc
+            | VFNMacc | VFMSac | VFNMSac | VFMAdd | VFNMAdd | VFMSub | VFNMSub | VFMerge
+            | VFSlide1Up | VFSlide1Down | VAdc | VSbc | VAndN | VRol | VRor | VClMul | VClMulH => {
+                VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base }
+            }
 
-            // ── Vector crypto with vs1 as a real register operand (Zvknh,
-            //    Zvksh vsm3me, Zvkg vghsh): each takes a per-group vs1 vector
-            //    input, so alignment is checked normally.
-            VSha2Ms | VSha2Ch | VSha2Cl | VSm3Me | VGhsh
-            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: lmul },
+            // Zvknh / Zvksh vsm3me / Zvkg vghsh: vs1 is a per-group vector input.
+            VSha2Ms | VSha2Ch | VSha2Cl | VSm3Me | VGhsh => {
+                VecOperandGroups { vd: lmul, vs2: lmul, vs1: lmul }
+            }
 
-            // ── Vector crypto where vs1 field encodes a sub-opcode or imm
-            // AES rounds, AES key schedule, SM4 rounds/keys, SM3-C, Zvkg vgmul
-            // all share OPMVV funct3 with the standard .vv encoding but the
-            // vs1 field is *not* a register reference — so group size is 0.
-            // .vs forms additionally take a single vs2 element group (EMUL=1)
-            // that is broadcast across destination groups.
-            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ | VSm4R
-            => VecOperandGroups { vd: lmul, vs2: vs2_crypto, vs1: 0 },
+            // AES/SM4 rounds: vs1 field is a sub-opcode, not a register; .vs broadcasts vs2 EMUL=1.
+            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ | VSm4R => {
+                VecOperandGroups { vd: lmul, vs2: vs2_crypto, vs1: 0 }
+            }
 
-            // Same shape as FP/bit-manip unary below: vs1 is a sub-opcode/imm,
-            // not a register reference, so its group size is 0.
-            VAesKf1 | VAesKf2 | VSm4K | VSm3C | VGmul |
-            // ── FP conversions, unary, and indexed mem (vd=LMUL, vs2=LMUL, vs1=0)
-            VFCvtXuF | VFCvtXF | VFCvtFXu | VFCvtFX |
-            VFCvtRtzXuF | VFCvtRtzXF |
-            VFSqrt | VFRsqrt7 | VFRec7 | VFClass |
-            VLoadIndexOrd | VLoadIndexUnord |
-            VStoreIndexOrd | VStoreIndexUnord |
-            // Zvbb unary bit-manip (vbrev/vbrev8/vrev8/vclz/vctz/vcpop.v)
-            VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV
-            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
+            // vs1 field is a sub-opcode/imm here, not a register reference.
+            VAesKf1 | VAesKf2 | VSm4K | VSm3C | VGmul | VFCvtXuF | VFCvtXF | VFCvtFXu | VFCvtFX
+            | VFCvtRtzXuF | VFCvtRtzXF | VFSqrt | VFRsqrt7 | VFRec7 | VFClass | VLoadIndexOrd
+            | VLoadIndexUnord | VStoreIndexOrd | VStoreIndexUnord | VBrev | VBrev8 | VRev8
+            | VClz | VCtz | VCpopV => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
 
-            // Reductions (standard + widening): vd and vs1 are single registers
-            // (scalar accumulator in element 0), vs2 is the full LMUL group.
-            // RVV 1.0 §14.1: "any vector register can be the scalar source or
-            // destination of a reduction regardless of LMUL setting."
-            VRedSum | VRedAnd | VRedOr | VRedXor |
-            VRedMinU | VRedMin | VRedMaxU | VRedMax |
-            VFRedOSum | VFRedUSum | VFRedMax | VFRedMin |
-            VWRedSumU | VWRedSum | VFWRedOSum | VFWRedUSum
-            => VecOperandGroups { vd: 1, vs2: lmul, vs1: 1 },
+            // RVV 1.0 §14.1: reduction vd/vs1 are single registers; vs2 is the full LMUL group.
+            VRedSum | VRedAnd | VRedOr | VRedXor | VRedMinU | VRedMin | VRedMaxU | VRedMax
+            | VFRedOSum | VFRedUSum | VFRedMax | VFRedMin | VWRedSumU | VWRedSum | VFWRedOSum
+            | VFWRedUSum => VecOperandGroups { vd: 1, vs2: lmul, vs1: 1 },
 
-            // ── Widening integer (vd=2×LMUL, sources=LMUL) ──────────────
-            VWAddU | VWAdd | VWSubU | VWSub |
-            VWMulU | VWMul | VWMulSU |
-            VWMaccU | VWMacc | VWMaccSU | VWMaccUS |
-            // Zvbb widening shift left
-            VWsll |
-            // FP widening
-            VFWAdd | VFWSub | VFWMul |
-            VFWMacc | VFWNMacc | VFWMSac | VFWNMSac
-            => VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: vs1_base },
+            VWAddU | VWAdd | VWSubU | VWSub | VWMulU | VWMul | VWMulSU | VWMaccU | VWMacc
+            | VWMaccSU | VWMaccUS | VWsll | VFWAdd | VFWSub | VFWMul | VFWMacc | VFWNMacc
+            | VFWMSac | VFWNMSac => VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: vs1_base },
 
-            // ── Widening with wide source (.wv/.wf: vd=2×LMUL, vs2=2×LMUL, vs1=LMUL)
-            VWAddUW | VWAddW | VWSubUW | VWSubW |
-            VFWAddW | VFWSubW
-            => VecOperandGroups { vd: emul_widened, vs2: emul_widened, vs1: vs1_base },
+            VWAddUW | VWAddW | VWSubUW | VWSubW | VFWAddW | VFWSubW => {
+                VecOperandGroups { vd: emul_widened, vs2: emul_widened, vs1: vs1_base }
+            }
 
-            // ── Narrowing (vd=LMUL, vs2=2×LMUL) ────────────────────────
-            VNSrl | VNSra | VNClipU | VNClip
-            => VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: vs1_base },
+            VNSrl | VNSra | VNClipU | VNClip => {
+                VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: vs1_base }
+            }
 
-            // ── Zero/sign extension (vd=LMUL, vs2=LMUL/factor) ─────────
-            // These read narrower source elements; vs2 group is smaller.
-            // However, in practice EMUL for vs2 = LMUL/factor, which may be
-            // fractional (< 1 register). Use 1 as minimum.
+            // Use 1 as minimum; vs2 EMUL = LMUL/factor may be fractional (<1 register).
             VZextVf2 | VSextVf2 => VecOperandGroups { vd: lmul, vs2: (lmul / 2).max(1), vs1: 0 },
             VZextVf4 | VSextVf4 => VecOperandGroups { vd: lmul, vs2: (lmul / 4).max(1), vs1: 0 },
             VZextVf8 | VSextVf8 => VecOperandGroups { vd: lmul, vs2: (lmul / 8).max(1), vs1: 0 },
 
-            // ── Widening FP conversions (vd=2×LMUL, vs2=LMUL) ──────────
-            VFWCvtXuF | VFWCvtXF | VFWCvtFXu | VFWCvtFX |
-            VFWCvtFF | VFWCvtRtzXuF | VFWCvtRtzXF
-            => VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: 0 },
+            VFWCvtXuF | VFWCvtXF | VFWCvtFXu | VFWCvtFX | VFWCvtFF | VFWCvtRtzXuF | VFWCvtRtzXF => {
+                VecOperandGroups { vd: emul_widened, vs2: lmul, vs1: 0 }
+            }
 
-            // ── Narrowing FP conversions (vd=LMUL, vs2=2×LMUL) ─────────
-            VFNCvtXuF | VFNCvtXF | VFNCvtFXu | VFNCvtFX |
-            VFNCvtFF | VFNCvtRodFF | VFNCvtRtzXuF | VFNCvtRtzXF
-            => VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: 0 },
+            VFNCvtXuF | VFNCvtXF | VFNCvtFXu | VFNCvtFX | VFNCvtFF | VFNCvtRodFF | VFNCvtRtzXuF
+            | VFNCvtRtzXF => VecOperandGroups { vd: lmul, vs2: emul_widened, vs1: 0 },
 
-            // ── Scalar-result ops (vd is a GPR/FPR, not a vreg) ─────────
-            // vmv.x.s / vfmv.f.s read only element 0 from vs2, not a group.
-            // RVV 1.0 §16.1: "unaffected by … the current LMUL setting."
-            VMvXS | VFMvFS | VCPopM | VFirstM
-            => VecOperandGroups { vd: 0, vs2: 1, vs1: 0 },
+            // RVV 1.0 §16.1: vmv.x.s / vfmv.f.s read only element 0 of vs2.
+            VMvXS | VFMvFS | VCPopM | VFirstM => VecOperandGroups { vd: 0, vs2: 1, vs1: 0 },
 
-            // ── Scalar-to-vector / mask load-store (vd=1, no vreg sources) ─
-            // vmv.s.x / vfmv.s.f: write only element 0 (§16.1).
-            // vlm.v / vsm.v: single mask register.
-            VMvSX | VFMvSF | VLoadMask | VStoreMask
-            => VecOperandGroups { vd: 1, vs2: 0, vs1: 0 },
+            // vmv.s.x / vfmv.s.f write only element 0 (§16.1); vlm/vsm: single mask register.
+            VMvSX | VFMvSF | VLoadMask | VStoreMask => VecOperandGroups { vd: 1, vs2: 0, vs1: 0 },
 
-            // ── Mask-producing comparisons + carry/borrow flag output ────
-            // (vd = single mask register)
-            VMSeq | VMSne | VMSltu | VMSlt | VMSleu | VMSle | VMSgtu | VMSgt |
-            VMFEq | VMFNe | VMFLt | VMFLe | VMFGt | VMFGe |
-            VMadc | VMsbc
-            => VecOperandGroups { vd: 1, vs2: lmul, vs1: vs1_base },
+            VMSeq | VMSne | VMSltu | VMSlt | VMSleu | VMSle | VMSgtu | VMSgt | VMFEq | VMFNe
+            | VMFLt | VMFLe | VMFGt | VMFGe | VMadc | VMsbc => {
+                VecOperandGroups { vd: 1, vs2: lmul, vs1: vs1_base }
+            }
 
-            // ── Mask-source unary (vs2 = single mask reg, vd = 1) ────────
-            VMSbfM | VMSofM | VMSifM | VMv1r
-            => VecOperandGroups { vd: 1, vs2: 1, vs1: 0 },
+            VMSbfM | VMSofM | VMSifM | VMv1r => VecOperandGroups { vd: 1, vs2: 1, vs1: 0 },
 
             VIotaM => VecOperandGroups { vd: lmul, vs2: 1, vs1: 0 },
 
-            // vid.v writes element index into vd; the vs2 field of the encoded
-            // instruction is part of the opcode (must be zero per spec) and is
-            // not a register operand, so the alignment check should not apply.
-            //
-            // Memory ops (vd/vs3 = LMUL group, vs2 = index vector for indexed
-            // forms; for unit/strided/fault-only-first vs2 is part of the
-            // opcode) share the same shape.
-            VIdV |
-            VLoadUnit | VLoadFF | VStoreUnit |
-            VLoadStride | VStoreStride
-            => VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 },
+            // vid.v's vs2 field is part of the opcode (must be zero), not a register.
+            VIdV | VLoadUnit | VLoadFF | VStoreUnit | VLoadStride | VStoreStride => {
+                VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 }
+            }
 
-            // ── Mask logical (all operands are single mask registers) ────
-            VMAndMM | VMNandMM | VMAndnMM | VMOrMM | VMNorMM | VMOrnMM |
-            VMXorMM | VMXnorMM
-            => VecOperandGroups { vd: 1, vs2: 1, vs1: 1 },
+            VMAndMM | VMNandMM | VMAndnMM | VMOrMM | VMNorMM | VMOrnMM | VMXorMM | VMXnorMM => {
+                VecOperandGroups { vd: 1, vs2: 1, vs1: 1 }
+            }
 
-            // ── Whole-register moves (group size from opcode, not LMUL) ─
             VMv2r => VecOperandGroups { vd: 2, vs2: 2, vs1: 0 },
             VMv4r => VecOperandGroups { vd: 4, vs2: 4, vs1: 0 },
             VMv8r => VecOperandGroups { vd: 8, vs2: 8, vs1: 0 },
 
-            // ── Whole-register loads/stores (group from nf, not LMUL) ───
-            // nf encoding: 0=1reg, 1=2reg, 3=4reg, 7=8reg.  Group = nf+1.
-            // Store: vd field encodes the source register (vs3).
+            // nf encoding: 0=1reg, 1=2reg, 3=4reg, 7=8reg; group = nf+1.
             VLoadWholeReg | VStoreWholeReg => {
                 let regs = nf + 1;
                 VecOperandGroups { vd: regs, vs2: 0, vs1: 0 }
             }
-
         }
     }
 }

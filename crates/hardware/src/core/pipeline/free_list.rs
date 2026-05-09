@@ -29,7 +29,6 @@ impl<R: PhysRegister> FreeList<R> {
     /// `num_arch` = architectural registers (`0..num_arch` are in use at init).
     pub fn new(prf_size: usize, num_arch: usize) -> Self {
         let mut queue = VecDeque::with_capacity(prf_size);
-        // Registers num_arch..prf_size are free initially
         for i in num_arch..prf_size {
             queue.push_back(R::from_index(i as u16));
         }

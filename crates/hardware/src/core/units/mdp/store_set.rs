@@ -82,22 +82,18 @@ impl MemDepPredictor for StoreSetPredictor {
         let store_set = self.ssit[store_idx.0 as usize];
 
         match (load_set, store_set) {
-            // Neither has a set — allocate a new one for both.
             (None, None) => {
                 let id = StoreSetId(self.next_set_id);
                 self.next_set_id = (self.next_set_id + 1) % self.max_sets;
                 self.ssit[load_idx.0 as usize] = Some(id);
                 self.ssit[store_idx.0 as usize] = Some(id);
             }
-            // Store has a set, load doesn't — join the store's set.
             (None, Some(sid)) => {
                 self.ssit[load_idx.0 as usize] = Some(sid);
             }
-            // Load has a set, store doesn't — join the load's set.
             (Some(lid), None) => {
                 self.ssit[store_idx.0 as usize] = Some(lid);
             }
-            // Both have sets — merge into the store's set.
             (Some(lid), Some(sid)) => {
                 if lid != sid {
                     self.ssit[load_idx.0 as usize] = Some(sid);
@@ -113,7 +109,6 @@ impl MemDepPredictor for StoreSetPredictor {
             match *slot {
                 None => *slot = Some(rob_tag),
                 Some(current) => {
-                    // Only overwrite with a newer tag (program-order rebuild).
                     if rob_tag.is_newer_than(current) {
                         *slot = Some(rob_tag);
                     }
@@ -123,12 +118,10 @@ impl MemDepPredictor for StoreSetPredictor {
     }
 
     fn flush(&mut self) {
-        // Clear transient LFST state; SSIT (learned) persists.
         self.lfst.fill(None);
     }
 
     fn flush_after(&mut self, keep_tag: RobTag) {
-        // Clear LFST entries for stores newer than keep_tag.
         for entry in &mut self.lfst {
             if let Some(tag) = *entry
                 && tag.is_newer_than(keep_tag)

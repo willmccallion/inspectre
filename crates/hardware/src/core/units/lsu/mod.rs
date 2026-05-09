@@ -6,13 +6,10 @@
 //! - [`ordering`]: Memory ordering / fence support (stub).
 //! - [`unaligned`]: Unaligned access handling (stub).
 
-/// Atomic memory operation ALU (RISC-V A extension).
 pub mod atomic;
 
-/// Memory ordering and fence operations (stub, Phase 3).
 pub mod ordering;
 
-/// Unaligned memory access handling (stub, Phase 3).
 pub mod unaligned;
 
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};

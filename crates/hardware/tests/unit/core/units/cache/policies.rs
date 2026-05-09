@@ -10,19 +10,10 @@ use rvsim_core::core::units::cache::policies::{
     FifoPolicy, LruPolicy, MruPolicy, PlruPolicy, RandomPolicy, ReplacementPolicy,
 };
 
-// ══════════════════════════════════════════════════════════
-// 1. LRU Policy
-// ══════════════════════════════════════════════════════════
-
-/// LRU initial state: ways are in order [0,1,2,3], so the last way (3)
-/// is conceptually the "most recent" and way 3 is the last in stack.
-/// Actually, in LruPolicy::new, stack is (0..ways).collect() = [0,1,2,3]
-/// with index 0 = MRU. So get_victim returns *last() = 3.
+/// Initial stack is [0,1,2,3] with index 0 = MRU, so the LRU victim is way 3.
 #[test]
 fn lru_initial_victim_is_last_way() {
     let mut policy = LruPolicy::new(1, 4);
-    // No accesses yet; initial stack is [0, 1, 2, 3].
-    // MRU = 0, LRU = 3.
     assert_eq!(policy.get_victim(0), 3);
 }
 
@@ -118,10 +109,6 @@ fn lru_two_way() {
     assert_eq!(policy.get_victim(0), 1);
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. FIFO Policy
-// ══════════════════════════════════════════════════════════
-
 /// FIFO pointer starts at 0 and advances through all ways round-robin.
 #[test]
 fn fifo_round_robin_eviction_order() {
@@ -183,10 +170,6 @@ fn fifo_wraps_two_way() {
     assert_eq!(policy.get_victim(0), 0); // wrap
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. PLRU Policy
-// ══════════════════════════════════════════════════════════
-
 /// PLRU: initial state has all bits 0, so victim is way 0 (first unset bit).
 #[test]
 fn plru_initial_victim_is_zero() {
@@ -224,8 +207,7 @@ fn plru_wraps_when_all_bits_set() {
     // Bits: 0111. Victim = 3.
     assert_eq!(policy.get_victim(0), 3);
 
-    // Access way 3 → all bits become set (1111).
-    // Implementation resets to only bit 3 set (1000).
+    // Access way 3 → bits would be 1111; implementation resets to 1000.
     policy.update(0, 3);
     // Bits after reset: 1000. First unset = 0.
     assert_eq!(policy.get_victim(0), 0);
@@ -262,10 +244,6 @@ fn plru_two_way() {
     // All bits set (11) → reset to just bit 1 → bits=10. Victim=0.
     assert_eq!(policy.get_victim(0), 0);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. MRU Policy
-// ══════════════════════════════════════════════════════════
 
 /// MRU: initial victim is way 0 (first in the MRU-ordered stack).
 #[test]
@@ -318,10 +296,6 @@ fn mru_opposite_of_lru() {
     assert_eq!(policy.get_victim(0), 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Random Policy
-// ══════════════════════════════════════════════════════════
-
 /// Random: all victims must be in range [0, ways).
 #[test]
 fn random_victim_always_in_range() {
@@ -354,8 +328,6 @@ fn random_update_is_noop() {
     let v1 = policy.get_victim(0);
     policy.update(0, v1);
     let v2 = policy.get_victim(0);
-    // We can't guarantee they differ, but the LFSR should have advanced.
-    // Just verify both are in range.
     assert!(v1 < 4);
     assert!(v2 < 4);
 }

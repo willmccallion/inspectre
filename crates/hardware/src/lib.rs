@@ -1,14 +1,4 @@
-//! RISC-V system simulator library.
-//!
 //! Cycle-accurate RV64GC + RVV 1.0 simulator core.
-//!
-//! Components:
-//! 1. **Core:** 10-stage pipeline (Fetch1/2, Decode, Rename, Issue, Execute, Mem1/2, WB, Commit),
-//!    GPR/FPR, and CSR state.
-//! 2. **Memory:** MMU, TLB, caches, prefetchers, and configurable memory controllers.
-//! 3. **ISA:** Decoding and execution for RV64I/M/A/F/D/C and privileged operations.
-//! 4. **`SoC`:** Interconnect, RAM, and MMIO devices (UART, CLINT, PLIC, `VirtIO`, etc.).
-//! 5. **Simulation:** `Simulator` (owns CPU + pipeline), loader, configuration, and statistics.
 
 /// Common types and constants (addresses, registers, traps, access types).
 pub mod common;

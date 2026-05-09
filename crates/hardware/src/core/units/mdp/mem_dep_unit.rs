@@ -1,6 +1,6 @@
 //! Memory Dependence Unit — gem5-style dependency tracker with wakeup.
 //!
-//! Owns a predictor (Blind or StoreSet) and maintains a per-instruction
+//! Owns a predictor (`Blind` or `StoreSet`) and maintains a per-instruction
 //! dependency map. The pipeline queries this unit at dispatch to get a
 //! cached [`MemDepState`] for each instruction, and notifies it when
 //! stores resolve so that waiting instructions can be woken.
@@ -178,7 +178,6 @@ impl MemDepUnit {
         self.deps.retain(|&tag, _| RobTag(tag).is_older_or_eq(keep_tag));
         if let PredictorKind::StoreSet(predictor) = &mut self.predictor {
             predictor.flush_after(keep_tag);
-            // Rebuild LFST from surviving stores in program order.
             for entry in rob.iter_in_order() {
                 if entry.ctrl.mem_write {
                     predictor.rebuild_lfst_entry(entry.pc, entry.tag);

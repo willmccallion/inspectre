@@ -10,7 +10,9 @@ use crate::core::Cpu;
 use crate::core::pipeline::latches::{ExMem1Entry, RenameIssueEntry};
 use crate::core::pipeline::signals::{ControlSignals, VectorOp};
 use crate::core::units::vpu::regfile::VectorRegFile;
-use crate::core::units::vpu::types::{ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, VtypeFields, parse_vtype};
+use crate::core::units::vpu::types::{
+    ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, VtypeFields, parse_vtype,
+};
 
 /// Returns `(data_emul_regs, idx_emul_regs)` for a vec memory op.
 ///
@@ -28,20 +30,21 @@ pub fn vec_mem_emul_regs(
     let (lnum, lden) = lmul.as_fraction();
     let lmul_regs = if lnum >= lden { (lnum / lden) as u8 } else { 1 };
     match op {
-        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
-        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+        VectorOp::VLoadIndexOrd
+        | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd
+        | VectorOp::VStoreIndexUnord => {
             // Indexed: data EMUL = LMUL, index EMUL = (idx_EEW × LMUL) / SEW.
             let idx_num = eew.bits() * lnum;
             let idx_den = sew.bits() * lden;
-            let idx = if idx_num >= idx_den {
-                ((idx_num / idx_den) as u8).max(1)
-            } else {
-                1
-            };
+            let idx = if idx_num >= idx_den { ((idx_num / idx_den) as u8).max(1) } else { 1 };
             (lmul_regs, idx)
         }
-        VectorOp::VLoadUnit | VectorOp::VLoadFF | VectorOp::VStoreUnit
-        | VectorOp::VLoadStride | VectorOp::VStoreStride => {
+        VectorOp::VLoadUnit
+        | VectorOp::VLoadFF
+        | VectorOp::VStoreUnit
+        | VectorOp::VLoadStride
+        | VectorOp::VStoreStride => {
             // Unit/strided: data EMUL = (EEW × LMUL) / SEW.
             let num = eew.bits() * lnum;
             let den = sew.bits() * lden;
@@ -96,8 +99,11 @@ pub fn check_vec_mem_emul(
     let lmul = vtype.vlmul;
     let vd = ctrl.vd.as_u8() as usize;
     let illegal = match op {
-        VectorOp::VLoadUnit | VectorOp::VStoreUnit | VectorOp::VLoadFF
-        | VectorOp::VLoadStride | VectorOp::VStoreStride => {
+        VectorOp::VLoadUnit
+        | VectorOp::VStoreUnit
+        | VectorOp::VLoadFF
+        | VectorOp::VLoadStride
+        | VectorOp::VStoreStride => {
             let nf = (ctrl.vec_nf as usize).saturating_add(1);
             let (lnum, lden) = lmul.as_fraction();
             let emul_num = eew.bits() * lnum;
@@ -106,8 +112,10 @@ pub fn check_vec_mem_emul(
             let total = emul.saturating_mul(nf);
             emul > 8 || total > 8 || vd + total > 32 || (emul > 0 && !vd.is_multiple_of(emul))
         }
-        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
-        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+        VectorOp::VLoadIndexOrd
+        | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd
+        | VectorOp::VStoreIndexUnord => {
             // Index EMUL = (idx_EEW * LMUL) / SEW; data EMUL = LMUL.
             let nf = (ctrl.vec_nf as usize).saturating_add(1);
             let (lnum, lden) = lmul.as_fraction();
@@ -246,8 +254,6 @@ pub const fn is_vec_mem(op: VectorOp) -> bool {
     is_vec_load(op) || is_vec_store(op)
 }
 
-// ── Address generation for O3 pipeline ───────────────────────────────────────
-
 /// Generate per-element address micro-ops for a vector memory instruction.
 ///
 /// This computes the virtual address for each active element without performing
@@ -279,8 +285,10 @@ pub fn generate_element_addrs(
             // The actual store data comes from the VPR (already executed functionally).
             gen_strided_addrs(cpu, base_addr, stride, eew, &ex_result.ctrl, is_store)
         }
-        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
-        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+        VectorOp::VLoadIndexOrd
+        | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd
+        | VectorOp::VStoreIndexUnord => {
             gen_indexed_addrs(cpu, base_addr, eew, &ex_result.ctrl, is_store)
         }
         VectorOp::VLoadMask | VectorOp::VStoreMask => {
@@ -322,13 +330,11 @@ fn gen_unit_stride_addrs(
             continue;
         }
         for seg in 0..nf.fields_usize() {
-            let addr = base.wrapping_add(((i * nf.fields_usize() + seg) as u64).wrapping_mul(eew_bytes));
+            let addr =
+                base.wrapping_add(((i * nf.fields_usize() + seg) as u64).wrapping_mul(eew_bytes));
             let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
-            let store_data = if is_store {
-                cpu.regs.vpr().read_element(dest, ElemIdx::new(i), eew)
-            } else {
-                0
-            };
+            let store_data =
+                if is_store { cpu.regs.vpr().read_element(dest, ElemIdx::new(i), eew) } else { 0 };
             ops.push(VecMemAddrOp {
                 vaddr: VirtAddr::new(addr),
                 store_data,
@@ -369,11 +375,8 @@ fn gen_strided_addrs(
         for seg in 0..nf.fields_usize() {
             let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(eew_bytes));
             let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
-            let store_data = if is_store {
-                cpu.regs.vpr().read_element(dest, ElemIdx::new(i), eew)
-            } else {
-                0
-            };
+            let store_data =
+                if is_store { cpu.regs.vpr().read_element(dest, ElemIdx::new(i), eew) } else { 0 };
             ops.push(VecMemAddrOp {
                 vaddr: VirtAddr::new(addr),
                 store_data,
@@ -450,11 +453,8 @@ fn gen_mask_addrs(
 
     for i in 0..num_bytes {
         let addr = base.wrapping_add(i as u64);
-        let store_data = if is_store {
-            cpu.regs.vpr().read_element(vd, ElemIdx::new(i), Sew::E8)
-        } else {
-            0
-        };
+        let store_data =
+            if is_store { cpu.regs.vpr().read_element(vd, ElemIdx::new(i), Sew::E8) } else { 0 };
         ops.push(VecMemAddrOp {
             vaddr: VirtAddr::new(addr),
             store_data,
@@ -500,8 +500,6 @@ fn gen_whole_reg_addrs(
     ops
 }
 
-// ── Generic address generation for O3 backend (VecPrfView) ──────────────────
-
 /// Compute the physical destination register for a given element.
 ///
 /// For non-segment ops: `vd_phys[elem / elements_per_reg]`
@@ -516,11 +514,7 @@ const fn compute_vd_phys(
 ) -> VecPhysReg {
     let reg_in_seg = if elements_per_reg > 0 { elem / elements_per_reg } else { 0 };
     let idx = seg * emul_regs + reg_in_seg;
-    if idx < vd_count as usize {
-        vd_phys[idx]
-    } else {
-        VecPhysReg::ZERO
-    }
+    if idx < vd_count as usize { vd_phys[idx] } else { VecPhysReg::ZERO }
 }
 
 /// Generate per-element address micro-ops using any `VectorRegFile` implementation.
@@ -565,18 +559,24 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
             let emul_regs = emul.regs() as usize;
             let mut ops = Vec::with_capacity(vl * nf.fields_usize());
             for i in vstart..vl {
-                if !is_element_active_vrf(vrf, i, vm) { continue; }
+                if !is_element_active_vrf(vrf, i, vm) {
+                    continue;
+                }
                 for seg in 0..nf.fields_usize() {
                     let addr = base_addr.wrapping_add(
                         ((i * nf.fields_usize() + seg) as u64).wrapping_mul(eew_bytes),
                     );
                     let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
-                    let store_data = if is_store {
-                        vrf.read_element(dest, ElemIdx::new(i), eew)
-                    } else { 0 };
-                    let phys = compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
+                    let store_data =
+                        if is_store { vrf.read_element(dest, ElemIdx::new(i), eew) } else { 0 };
+                    let phys =
+                        compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
                     ops.push(VecMemAddrOp {
-                        vaddr: VirtAddr::new(addr), store_data, elem_idx: ElemIdx::new(i), eew, vd_phys: phys,
+                        vaddr: VirtAddr::new(addr),
+                        store_data,
+                        elem_idx: ElemIdx::new(i),
+                        eew,
+                        vd_phys: phys,
                     });
                 }
             }
@@ -589,24 +589,32 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
             let emul_regs = emul.regs() as usize;
             let mut ops = Vec::with_capacity(vl * nf.fields_usize());
             for i in vstart..vl {
-                if !is_element_active_vrf(vrf, i, vm) { continue; }
+                if !is_element_active_vrf(vrf, i, vm) {
+                    continue;
+                }
                 let elem_base = base_addr.wrapping_add((i as i64).wrapping_mul(stride) as u64);
                 for seg in 0..nf.fields_usize() {
                     let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(eew_bytes));
                     let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
-                    let store_data = if is_store {
-                        vrf.read_element(dest, ElemIdx::new(i), eew)
-                    } else { 0 };
-                    let phys = compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
+                    let store_data =
+                        if is_store { vrf.read_element(dest, ElemIdx::new(i), eew) } else { 0 };
+                    let phys =
+                        compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
                     ops.push(VecMemAddrOp {
-                        vaddr: VirtAddr::new(addr), store_data, elem_idx: ElemIdx::new(i), eew, vd_phys: phys,
+                        vaddr: VirtAddr::new(addr),
+                        store_data,
+                        elem_idx: ElemIdx::new(i),
+                        eew,
+                        vd_phys: phys,
                     });
                 }
             }
             ops
         }
-        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
-        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+        VectorOp::VLoadIndexOrd
+        | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd
+        | VectorOp::VStoreIndexUnord => {
             let vs2 = ctrl.vs2;
             let data_sew = vtype.vsew;
             let idx_eew = eew;
@@ -616,7 +624,9 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
             let emul_regs = data_emul.regs() as usize;
             let mut ops = Vec::with_capacity(vl * nf.fields_usize());
             for i in vstart..vl {
-                if !is_element_active_vrf(vrf, i, vm) { continue; }
+                if !is_element_active_vrf(vrf, i, vm) {
+                    continue;
+                }
                 let offset = vrf.read_element(vs2, ElemIdx::new(i), idx_eew);
                 let elem_base = base_addr.wrapping_add(offset);
                 for seg in 0..nf.fields_usize() {
@@ -624,10 +634,17 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
                     let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * data_emul.regs());
                     let store_data = if is_store {
                         vrf.read_element(dest, ElemIdx::new(i), data_sew)
-                    } else { 0 };
-                    let phys = compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
+                    } else {
+                        0
+                    };
+                    let phys =
+                        compute_vd_phys(vd_phys, vd_count, i, seg, emul_regs, elements_per_reg);
                     ops.push(VecMemAddrOp {
-                        vaddr: VirtAddr::new(addr), store_data, elem_idx: ElemIdx::new(i), eew: data_sew, vd_phys: phys,
+                        vaddr: VirtAddr::new(addr),
+                        store_data,
+                        elem_idx: ElemIdx::new(i),
+                        eew: data_sew,
+                        vd_phys: phys,
                     });
                 }
             }
@@ -639,12 +656,15 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
             let mut ops = Vec::with_capacity(num_bytes);
             for i in 0..num_bytes {
                 let addr = base_addr.wrapping_add(i as u64);
-                let store_data = if is_store {
-                    vrf.read_element(vd, ElemIdx::new(i), Sew::E8)
-                } else { 0 };
+                let store_data =
+                    if is_store { vrf.read_element(vd, ElemIdx::new(i), Sew::E8) } else { 0 };
                 let phys = compute_vd_phys(vd_phys, vd_count, i, 0, 1, elements_per_reg);
                 ops.push(VecMemAddrOp {
-                    vaddr: VirtAddr::new(addr), store_data, elem_idx: ElemIdx::new(i), eew: Sew::E8, vd_phys: phys,
+                    vaddr: VirtAddr::new(addr),
+                    store_data,
+                    elem_idx: ElemIdx::new(i),
+                    eew: Sew::E8,
+                    vd_phys: phys,
                 });
             }
             ops
@@ -661,10 +681,20 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
                 let src = VRegIdx::new(vd.as_u8() + reg_offset as u8);
                 let store_data = if is_store {
                     vrf.read_element(src, ElemIdx::new(byte_offset), Sew::E8)
-                } else { 0 };
-                let phys = if reg_offset < vd_count as usize { vd_phys[reg_offset] } else { VecPhysReg::ZERO };
+                } else {
+                    0
+                };
+                let phys = if reg_offset < vd_count as usize {
+                    vd_phys[reg_offset]
+                } else {
+                    VecPhysReg::ZERO
+                };
                 ops.push(VecMemAddrOp {
-                    vaddr: VirtAddr::new(addr), store_data, elem_idx: ElemIdx::new(byte_offset), eew: Sew::E8, vd_phys: phys,
+                    vaddr: VirtAddr::new(addr),
+                    store_data,
+                    elem_idx: ElemIdx::new(byte_offset),
+                    eew: Sew::E8,
+                    vd_phys: phys,
                 });
             }
             ops
@@ -675,11 +705,11 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
 
 /// Check if element `i` is active under the mask using a generic `VectorRegFile`.
 fn is_element_active_vrf<V: VectorRegFile>(vrf: &V, i: usize, vm: bool) -> bool {
-    if vm { return true; }
+    if vm {
+        return true;
+    }
     vrf.read_mask_bit(VRegIdx::new(0), ElemIdx::new(i))
 }
-
-// ── Internal helpers ─────────────────────────────────────────────────────────
 
 /// Get `(vl, vstart)` for the current vector configuration.
 ///
@@ -735,8 +765,6 @@ fn mem_write_element(cpu: &mut Cpu, vaddr: u64, eew: Sew, val: u64) -> Result<()
     Ok(())
 }
 
-// ── Unit-stride load ─────────────────────────────────────────────────────────
-
 /// Execute a unit-stride vector load: `addr[i] = base + i * eew_bytes`.
 fn exec_unit_stride_load(
     cpu: &mut Cpu,
@@ -769,8 +797,6 @@ fn exec_unit_stride_load(
 
     Ok(0)
 }
-
-// ── Fault-only-first load ────────────────────────────────────────────────────
 
 /// Execute a fault-only-first vector load.
 ///
@@ -805,13 +831,10 @@ fn exec_fault_first_load(
                 }
                 Err(trap) => {
                     if i == 0 && seg == 0 {
-                        // Very first element fault propagates normally.
                         cpu.csrs.vstart = 0;
                         return Err(trap);
                     }
-                    // A fault on any element/segment past the first silently
-                    // trims vl to the index of the faulting element. The
-                    // entire segment for that element is dropped.
+                    // Trim vl to the faulting element index; drop its segment.
                     cpu.csrs.vl = i as u64;
                     break 'elements;
                 }
@@ -821,8 +844,6 @@ fn exec_fault_first_load(
 
     Ok(0)
 }
-
-// ── Strided load ─────────────────────────────────────────────────────────────
 
 /// Execute a strided vector load: `addr[i] = base + i * stride`.
 fn exec_strided_load(
@@ -859,8 +880,6 @@ fn exec_strided_load(
 
     Ok(0)
 }
-
-// ── Indexed load ─────────────────────────────────────────────────────────────
 
 /// Execute an indexed vector load: `addr[i] = base + vs2[i]`.
 ///
@@ -907,8 +926,6 @@ fn exec_indexed_load(
     Ok(0)
 }
 
-// ── Mask load ────────────────────────────────────────────────────────────────
-
 /// Execute a mask load (`vlm.v`): loads `ceil(vl/8)` bytes into `vd`.
 ///
 /// Mask loads always use EEW=8 and ignore vtype SEW. The mask is stored
@@ -933,8 +950,6 @@ fn exec_mask_load(
 
     Ok(0)
 }
-
-// ── Whole-register load ──────────────────────────────────────────────────────
 
 /// Execute a whole-register load (`vl1re8`, `vl2re8`, etc.).
 ///
@@ -965,8 +980,6 @@ fn exec_whole_reg_load(
 
     Ok(0)
 }
-
-// ── Unit-stride store ────────────────────────────────────────────────────────
 
 /// Execute a unit-stride vector store: `addr[i] = base + i * eew_bytes`.
 fn exec_unit_stride_store(
@@ -1001,8 +1014,6 @@ fn exec_unit_stride_store(
 
     Ok(0)
 }
-
-// ── Strided store ────────────────────────────────────────────────────────────
 
 /// Execute a strided vector store: `addr[i] = base + i * stride`.
 fn exec_strided_store(
@@ -1039,8 +1050,6 @@ fn exec_strided_store(
 
     Ok(0)
 }
-
-// ── Indexed store ────────────────────────────────────────────────────────────
 
 /// Execute an indexed vector store: `addr[i] = base + vs2[i]`.
 fn exec_indexed_store(
@@ -1083,8 +1092,6 @@ fn exec_indexed_store(
     Ok(0)
 }
 
-// ── Mask store ───────────────────────────────────────────────────────────────
-
 /// Execute a mask store (`vsm.v`): stores `ceil(vl/8)` bytes from `vs3`.
 fn exec_mask_store(
     cpu: &mut Cpu,
@@ -1106,8 +1113,6 @@ fn exec_mask_store(
 
     Ok(0)
 }
-
-// ── Whole-register store ─────────────────────────────────────────────────────
 
 /// Execute a whole-register store (`vs1r`, `vs2r`, etc.).
 ///

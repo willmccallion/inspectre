@@ -102,7 +102,6 @@ impl Scoreboard {
             } else if entry.ctrl.reg_write && !entry.rd.is_zero() {
                 self.gpr[idx] = Some(entry.tag);
             }
-            // Vector register writes: mark each register in the LMUL group
             if entry.ctrl.vec_reg_write {
                 for i in 0..entry.vec_dst_count {
                     let vd_idx = idx as u8 + i;

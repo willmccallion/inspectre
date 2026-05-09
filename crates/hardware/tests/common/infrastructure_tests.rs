@@ -7,8 +7,6 @@ use rvsim_core::common::{PhysAddr, RegIdx};
 use rvsim_core::core::pipeline::signals::ControlSignals;
 use rvsim_core::isa::rv64i::opcodes::*;
 
-// ─── InstructionBuilder: R-type encoding ───────────────────────────────────
-
 #[test]
 fn builder_add_encodes_r_type() {
     let inst = InstructionBuilder::new().add(1, 2, 3).build();
@@ -63,8 +61,6 @@ fn builder_slt_sltu() {
     assert_eq!((sltu >> 12) & 0x7, 0b011);
 }
 
-// ─── InstructionBuilder: I-type encoding ───────────────────────────────────
-
 #[test]
 fn builder_addi_encodes_i_type() {
     let inst = InstructionBuilder::new().addi(1, 0, 42).build();
@@ -102,8 +98,6 @@ fn builder_immediate_variants() {
     assert_eq!((sltiu >> 12) & 0x7, 0b011);
 }
 
-// ─── InstructionBuilder: Load/Store encoding ───────────────────────────────
-
 #[test]
 fn builder_lw_encodes_i_type_load() {
     let inst = InstructionBuilder::new().lw(1, 2, 8).build();
@@ -140,8 +134,6 @@ fn builder_sd_encodes_doubleword_store() {
     assert_eq!((inst >> 12) & 0x7, 0b011); // funct3 = SD
 }
 
-// ─── InstructionBuilder: Branch encoding (B-type) ─────────────────────────
-
 #[test]
 fn builder_beq_encodes_b_type() {
     let inst = InstructionBuilder::new().beq(1, 2, 8).build();
@@ -169,8 +161,6 @@ fn builder_branch_variants_funct3() {
     assert_eq!((bgeu >> 12) & 0x7, 0b111);
 }
 
-// ─── InstructionBuilder: U-type encoding ───────────────────────────────────
-
 #[test]
 fn builder_lui_encodes_u_type() {
     let inst = InstructionBuilder::new().lui(1, 0x12345).build();
@@ -187,8 +177,6 @@ fn builder_auipc_encodes_u_type() {
     assert_eq!((inst >> 7) & 0x1F, 1);
 }
 
-// ─── InstructionBuilder: J-type encoding ───────────────────────────────────
-
 #[test]
 fn builder_jal_encodes_j_type() {
     let inst = InstructionBuilder::new().jal(1, 0).build();
@@ -203,8 +191,6 @@ fn builder_jalr_encodes_i_type() {
     assert_eq!((inst >> 7) & 0x1F, 1);
     assert_eq!((inst >> 15) & 0x1F, 2);
 }
-
-// ─── InstructionBuilder: RV64I 32-bit variants ────────────────────────────
 
 #[test]
 fn builder_addiw_encodes_op_imm_32() {
@@ -224,8 +210,6 @@ fn builder_addw_subw_encodes_op_reg_32() {
     assert_eq!((subw >> 25) & 0x7F, 0b0100000);
 }
 
-// ─── InstructionBuilder: NOP ───────────────────────────────────────────────
-
 #[test]
 fn builder_nop_is_addi_x0_x0_0() {
     let nop = InstructionBuilder::new().nop().build();
@@ -233,11 +217,8 @@ fn builder_nop_is_addi_x0_x0_0() {
     assert_eq!(nop, addi_x0);
 }
 
-// ─── InstructionBuilder: raw field API ─────────────────────────────────────
-
 #[test]
 fn builder_raw_field_api() {
-    // Build an ADD x1, x2, x3 using the raw field API
     let inst = InstructionBuilder::new()
         .opcode(OP_REG)
         .rd(1)
@@ -249,8 +230,6 @@ fn builder_raw_field_api() {
     let via_helper = InstructionBuilder::new().add(1, 2, 3).build();
     assert_eq!(inst, via_helper, "Raw field API should produce same encoding as helper");
 }
-
-// ─── Pipeline State Builders ───────────────────────────────────────────────
 
 #[test]
 fn ifid_builder_defaults_and_setters() {
@@ -311,8 +290,6 @@ fn memwb_builder() {
     assert_eq!(entry.load_data, 0x5678);
 }
 
-// ─── TestContext (Harness) ─────────────────────────────────────────────────
-
 #[test]
 fn harness_boot_default_pc() {
     let ctx = TestContext::new();
@@ -353,8 +330,6 @@ fn harness_x0_always_zero() {
     assert_eq!(ctx.get_reg(0), 0, "x0 must always read as zero");
 }
 
-// ─── MockMemory ────────────────────────────────────────────────────────────
-
 #[test]
 fn mock_memory_read_write_all_widths() {
     use rvsim_core::soc::devices::Device;
@@ -389,7 +364,7 @@ fn mock_memory_fault_injection_panics() {
 
     let mut mem = MockMemory::new(1024, 0x1000);
     mem.inject_fault(0x1010);
-    mem.read_u32(0x10); // offset 0x10 -> address 0x1010
+    mem.read_u32(0x10);
 }
 
 #[test]
@@ -398,7 +373,6 @@ fn mock_memory_fault_only_affects_target_address() {
 
     let mut mem = MockMemory::new(1024, 0x1000);
     mem.inject_fault(0x1010);
-    // Non-faulting address should work fine
     mem.write_u32(0x0, 42);
     assert_eq!(mem.read_u32(0x0), 42);
 }
@@ -421,8 +395,6 @@ fn mock_memory_name() {
     assert_eq!(mem.name(), "MockMemory");
 }
 
-// ─── MockInterruptController ───────────────────────────────────────────────
-
 #[test]
 fn interrupt_controller_raise_and_claim() {
     let mut ic = MockInterruptController::new();
@@ -437,7 +409,6 @@ fn interrupt_controller_raise_and_claim() {
 fn interrupt_controller_disabled_irq_not_claimable() {
     let mut ic = MockInterruptController::new();
     ic.raise(5);
-    // IRQ 5 is raised but not enabled
     assert!(!ic.is_pending());
     assert_eq!(ic.claim(), None);
 }
@@ -449,7 +420,6 @@ fn interrupt_controller_multiple_irqs_claims_lowest() {
     ic.enable(5);
     ic.raise(5);
     ic.raise(2);
-    // Should claim lowest (highest priority) first
     assert_eq!(ic.claim(), Some(2));
     assert_eq!(ic.claim(), Some(5));
     assert_eq!(ic.claim(), None);

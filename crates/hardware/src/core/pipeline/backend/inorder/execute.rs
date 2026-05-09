@@ -41,8 +41,7 @@ pub fn execute_inorder(
 ) -> (Vec<ExMem1Entry>, bool) {
     let mut results = Vec::with_capacity(entries.len());
     let mut flush_remaining = false;
-    // Accumulates fp_flags from FP instructions executed in this batch,
-    // so a later CSR read of fflags in the same cycle sees them.
+    // Tracks batch FP flags so a later CSR read of fflags in the same cycle sees them.
     let mut batch_fp_flags: u8 = 0;
 
     for id in entries {
@@ -50,7 +49,6 @@ pub fn execute_inorder(
             break;
         }
 
-        // Propagate traps from earlier stages
         if let Some(trap) = id.trap.clone() {
             trace_trap!(cpu.trace;
                 event   = "propagate",
@@ -70,7 +68,7 @@ pub fn execute_inorder(
                 alu: 0,
                 store_data: 0,
                 ctrl: id.ctrl,
-                trap: None, // trap is in ROB now
+                trap: None,
                 exception_stage: None,
                 rd_phys: PhysReg::default(),
                 fp_flags: 0,
@@ -100,10 +98,12 @@ pub fn execute_inorder(
         let fwd_c = id.rv3;
         let store_data = fwd_b;
 
-        // ── Execute trigger check ────────────────────────────────────────────────
         if cpu.check_execute_trigger(id.pc) {
-            rob.fault(id.rob_tag, crate::common::Trap::Breakpoint(id.pc),
-                      crate::common::error::ExceptionStage::Execute);
+            rob.fault(
+                id.rob_tag,
+                crate::common::Trap::Breakpoint(id.pc),
+                crate::common::error::ExceptionStage::Execute,
+            );
             results.push(ExMem1Entry {
                 rob_tag: id.rob_tag,
                 pc: id.pc,
@@ -136,10 +136,7 @@ pub fn execute_inorder(
         };
         let op_c = fwd_c;
 
-        // FENCE.I: flush the pipeline so younger instructions are squashed.
-        // The I-cache flush is deferred to COMMIT time (after store drain)
-        // to ensure that all prior stores are visible in RAM before the
-        // I-cache refills with the new data.
+        // I-cache flush deferred to commit so prior stores are visible before refill.
         if id.ctrl.system_op == SystemOp::FenceI {
             cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
             cpu.redirect_pending = true;
@@ -164,9 +161,8 @@ pub fn execute_inorder(
             continue;
         }
 
-        // System instructions (FENCE is a NOP at execute — handled at commit only)
+        // FENCE is a NOP at execute — handled at commit only.
         if !matches!(id.ctrl.system_op, SystemOp::None | SystemOp::Fence) {
-            // MRET: requires M-mode privilege (spec §3.3.2)
             if id.ctrl.system_op == SystemOp::Mret {
                 if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine {
                     rob.fault(
@@ -213,8 +209,6 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // SRET: requires at least S-mode privilege (spec §3.3.2)
-            // In S-mode, SRET is illegal if mstatus.TSR=1
             if id.ctrl.system_op == SystemOp::Sret {
                 if cpu.privilege == crate::core::arch::mode::PrivilegeMode::User {
                     rob.fault(
@@ -288,7 +282,6 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // WFI: deferred to commit (like MRET/SRET), but check privilege here.
             // WFI is illegal in U-mode, or in S-mode when mstatus.TW=1.
             if id.ctrl.system_op == SystemOp::Wfi {
                 let tw = (cpu.csrs.mstatus >> 21) & 1;
@@ -322,9 +315,7 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // SFENCE.VMA
             if id.ctrl.system_op == SystemOp::SfenceVma {
-                // In S-mode, SFENCE.VMA is illegal if mstatus.TVM=1
                 let tvm = (cpu.csrs.mstatus >> 20) & 1;
                 if cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tvm != 0 {
                     rob.fault(
@@ -352,15 +343,7 @@ pub fn execute_inorder(
                     continue;
                 }
 
-                // SFENCE.VMA: Do NOT flush TLBs or clear reservation here.
-                // Preceding PTE-modifying stores may still be in the store
-                // buffer; flushing TLBs now would let in-flight fetches
-                // repopulate them with stale translations. The commit stage
-                // stalls until the store buffer drains, then flushes TLBs
-                // with proper ASID/vaddr granularity.
-                //
-                // Flush the frontend so subsequent fetches are deferred
-                // until after the commit-time TLB flush.
+                // Defer TLB flush to commit (after store buffer drains); just flush the frontend.
                 cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                 cpu.redirect_pending = true;
                 flush_remaining = true;
@@ -389,9 +372,6 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // ECALL: always generate a trap and let commit handle it.
-            // In direct mode, the trap handler reads the (now committed)
-            // architectural registers for the syscall number and exit code.
             if id.inst == sys_ops::ECALL {
                 use crate::core::arch::mode::PrivilegeMode;
                 let trap = match cpu.privilege {
@@ -422,9 +402,7 @@ pub fn execute_inorder(
                 continue;
             }
 
-            // CSR operations: compute old/new but defer write to commit
             if id.ctrl.csr_op != CsrOp::None {
-                // In S-mode, SATP access is illegal if mstatus.TVM=1
                 if id.ctrl.csr_addr == crate::core::arch::csr::SATP
                     && cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor
                     && ((cpu.csrs.mstatus >> 20) & 1) != 0
@@ -454,7 +432,6 @@ pub fn execute_inorder(
                     continue;
                 }
 
-                // Counter-enable check for CYCLE/TIME/INSTRET
                 {
                     use crate::core::arch::csr as csr_addrs;
                     use crate::core::arch::mode::PrivilegeMode;
@@ -505,7 +482,6 @@ pub fn execute_inorder(
                     }
                 }
 
-                // Existence check: non-existent CSRs must trap (spec §2.2).
                 if !cpu.is_valid_csr(id.ctrl.csr_addr) {
                     rob.fault(
                         id.rob_tag,
@@ -532,7 +508,6 @@ pub fn execute_inorder(
                     continue;
                 }
 
-                // Privilege check: CSR bits [9:8] encode minimum privilege level.
                 let csr_priv = id.ctrl.csr_addr.privilege_level() as u32;
                 if (cpu.privilege.to_u8() as u32) < csr_priv {
                     rob.fault(
@@ -560,9 +535,6 @@ pub fn execute_inorder(
                     continue;
                 }
 
-                // Read-only check: CSR bits [11:10] == 0b11 means read-only.
-                // CSRRW/CSRRWI always write. CSRRS/CSRRC/CSRRSI/CSRRCI write
-                // only when rs1 (or uimm) != 0.
                 let read_only = id.ctrl.csr_addr.is_read_only();
                 if read_only {
                     let would_write = match id.ctrl.csr_op {
@@ -598,9 +570,7 @@ pub fn execute_inorder(
                     }
                 }
 
-                // Drain accumulated fp_flags from older ROB entries AND in-flight
-                // pipeline latches into fflags before reading fflags/fcsr/frm,
-                // so the CSR read sees flags from all older FP instructions.
+                // Drain deferred fp_flags so CSR reads of fflags/fcsr/frm see them.
                 {
                     use crate::core::arch::csr as csr_addrs;
                     if id.ctrl.csr_addr == csr_addrs::FFLAGS
@@ -623,9 +593,7 @@ pub fn execute_inorder(
                     CsrOp::None => old,
                 };
 
-                // Only generate a CSR write if the operation actually writes.
-                // CSRRS/CSRRC with rs1=x0 and CSRRSI/CSRRCI with uimm=0 are
-                // pure reads and must not trigger write side effects (spec §2.8).
+                // CSRRS/CSRRC with rs1=x0 and CSRRSI/CSRRCI with uimm=0 must not write (spec §2.8).
                 let would_write = match id.ctrl.csr_op {
                     CsrOp::Rw | CsrOp::Rwi => true,
                     CsrOp::Rs | CsrOp::Rc => !id.rs1.is_zero(),
@@ -644,7 +612,6 @@ pub fn execute_inorder(
                     );
                 }
 
-                // Flush frontend after CSR
                 cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                 cpu.redirect_pending = true;
                 flush_remaining = true;
@@ -655,7 +622,7 @@ pub fn execute_inorder(
                     inst: id.inst,
                     inst_size: id.inst_size,
                     rd: id.rd,
-                    alu: old, // result = old CSR value for rd
+                    alu: old,
                     store_data,
                     ctrl: id.ctrl,
                     trap: None,
@@ -669,10 +636,7 @@ pub fn execute_inorder(
             }
         }
 
-        // When mstatus.FS == OFF, all FP instructions trap as illegal.
-        // This check is in execute (not decode) because a preceding CSR write
-        // to mstatus may still be in-flight (deferred to commit) when the FP
-        // instruction is decoded, causing a false positive.
+        // mstatus.FS check is here, not decode, because mstatus writes are deferred to commit.
         {
             let fs = (cpu.csrs.mstatus & crate::core::arch::csr::MSTATUS_FS) >> 13;
             let is_fp = id.ctrl.fp_reg_write || id.ctrl.rs1_fp || id.ctrl.rs2_fp || id.ctrl.rs3_fp;
@@ -699,16 +663,10 @@ pub fn execute_inorder(
             }
         }
 
-        // Vector execution: dispatch to VPU, skip normal ALU path.
-        // Vector ops are serializing (system_op = System) so they drain the pipeline
-        // before executing here. The VPR is read/written directly at execute time;
-        // commit will set mstatus.VS=dirty and vstart=0.
+        // Vector ops serialize; execute against the VPR directly and flush after.
         if id.ctrl.vec_op != VectorOp::None {
             match crate::core::units::vpu::execute::execute_vec_op(cpu, &id) {
                 Ok(alu_out) => {
-                    // vsetvl family writes scalar rd — alu_out is the new vl.
-                    // Other vector ops produce no scalar result (alu_out = 0).
-                    // Flush pipeline after serializing instruction.
                     cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                     cpu.redirect_pending = true;
                     flush_remaining = true;
@@ -758,26 +716,12 @@ pub fn execute_inorder(
             continue;
         }
 
-        // ALU / FPU execution
-        let fp_rm = id
-            .ctrl
-            .fp_rm
-            .or_else(|| RoundingMode::from_bits(cpu.csrs.frm as u8));
-        let (alu_out, fp_flags) = compute_alu(
-            id.ctrl.alu,
-            op_a,
-            op_b,
-            op_c,
-            id.ctrl.is_f16,
-            id.ctrl.is_rv32,
-            fp_rm,
-        );
+        let fp_rm = id.ctrl.fp_rm.or_else(|| RoundingMode::from_bits(cpu.csrs.frm as u8));
+        let (alu_out, fp_flags) =
+            compute_alu(id.ctrl.alu, op_a, op_b, op_c, id.ctrl.is_f16, id.ctrl.is_rv32, fp_rm);
 
-        // FP exception flags are deferred to commit via the ROB entry
-        // (applied by commit_stage in shared/commit.rs).
         batch_fp_flags |= fp_flags;
 
-        // Branch resolution
         if id.ctrl.control_flow == ControlFlow::Branch {
             let taken = match (id.inst >> FUNCT3_SHIFT) & FUNCT3_MASK {
                 funct3::BEQ => op_a == op_b,
@@ -796,7 +740,6 @@ pub fn execute_inorder(
 
             let mispredicted = predicted_target != actual_next_pc;
 
-            // Defer branch predictor update to commit time
             rob.set_bp_update(
                 id.rob_tag,
                 id.pc,
@@ -806,8 +749,7 @@ pub fn execute_inorder(
             );
 
             if mispredicted {
-                // Restore GHR to the snapshot (pre-speculation state), then
-                // push the actual outcome so subsequent fetches see correct history.
+                // Restore GHR to pre-speculation state, then push the actual outcome.
                 cpu.branch_predictor.repair_history(&id.ghr_snapshot);
                 cpu.branch_predictor.speculate(id.pc, taken);
                 cpu.branch_predictor.restore_ras(id.ras_snapshot);
@@ -820,7 +762,6 @@ pub fn execute_inorder(
             }
         }
 
-        // Jump resolution
         if id.ctrl.control_flow == ControlFlow::Jump {
             use crate::common::constants::OPCODE_MASK;
             let is_jalr = (id.inst & OPCODE_MASK) == opcodes::OP_JALR;
@@ -841,12 +782,9 @@ pub fn execute_inorder(
 
             let mispredicted = actual_target != predicted_target;
 
-            // Store the jump target in the ROB for committed_next_pc tracking,
-            // but don't set bp_update — jumps are unconditional and should not
-            // train the direction predictor.
+            // Record target for committed_next_pc but skip bp_update: jumps don't train direction.
             rob.set_bp_target(id.rob_tag, actual_target);
 
-            // Update BTB directly — jumps are unconditional, don't train direction predictor.
             // Skip for calls — on_call already updates the BTB.
             if !rd_link {
                 cpu.branch_predictor.update_btb(id.pc, actual_target);
@@ -863,18 +801,14 @@ pub fn execute_inorder(
                 cpu.stats.speculative_branch_predictions += 1;
             }
 
-            // RAS management per RISC-V spec Table 2.1:
-            // Both x1 (ra) and x5 (t0) are link registers.
+            // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.
             let ret_addr = id.pc.wrapping_add(id.inst_size.as_u64());
             if rd_link && rs1_link && id.rd != id.rs1 {
-                // Coroutine swap: pop then push
                 cpu.branch_predictor.on_return();
                 cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
             } else if rd_link {
-                // Call (JAL/JALR with rd in {x1, x5})
                 cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
             } else if rs1_link {
-                // Return (JALR with rs1 in {x1, x5}, rd not a link register)
                 cpu.branch_predictor.on_return();
             }
         }
@@ -911,9 +845,7 @@ fn compute_alu(
     is_rv32: bool,
     fp_rm: Option<RoundingMode>,
 ) -> (u64, u8) {
-    // FP conversions and moves that need special handling.
-    // Int-to-float and float-to-float conversions can raise FP exception
-    // flags (INEXACT, OVERFLOW, etc.), so we use the host FPU to detect them.
+    // FP conversions go through the host FPU so we capture INEXACT / OVERFLOW etc.
     match alu_op {
         AluOp::FCvtSW
         | AluOp::FCvtSL
@@ -923,9 +855,6 @@ fn compute_alu(
         | AluOp::FCvtDS
         | AluOp::FCvtSH
         | AluOp::FCvtDH
-            // When is_f16 is set, int↔f16 and f16↔f16 ops go through
-            // execute_full_rm → execute_f16 for software rounding. Only
-            // non-f16-target conversions are handled inline here.
             if !is_f16 =>
         {
             use crate::core::units::fpu::half::{f16_to_f32, unbox_f16};
@@ -978,12 +907,10 @@ fn compute_alu(
                     canonicalize_f64_bits(val_d)
                 }
                 AluOp::FCvtSH => {
-                    // Half → single: lossless, just rebox.
                     let val_s = f16_to_f32(unbox_f16(op_a));
                     box_f32_canon(val_s)
                 }
                 AluOp::FCvtDH => {
-                    // Half → double: lossless.
                     use crate::core::units::fpu::nan_handling::canonicalize_f64_bits;
                     let val_s = f16_to_f32(unbox_f16(op_a));
                     canonicalize_f64_bits(std::hint::black_box(val_s) as f64)
@@ -995,7 +922,6 @@ fn compute_alu(
             return (val, fp_flags.bits());
         }
         AluOp::FMvToF => {
-            // Bit-level move — no FP exceptions possible.
             let val = if is_f16 {
                 use crate::core::units::fpu::half::box_f16;
                 box_f16(op_a as u16)

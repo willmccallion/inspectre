@@ -150,16 +150,11 @@ fn test_trap_double_fault_detection() {
     let handler_pc = 0x8000_0000;
     cpu.csrs.mtvec = handler_pc;
 
-    // A trap whose EPC happens to equal the handler address is NOT a double
-    // fault — it's a legitimate trap (e.g. WFI interrupted by a timer while
-    // executing at the handler entry point). The CPU should dispatch it
-    // normally rather than halting.
+    // A trap whose EPC equals the handler address is legitimate (not a double fault).
     cpu.trap(&Trap::IllegalInstruction(0), handler_pc);
     assert_eq!(cpu.exit_code, None);
     assert_eq!(cpu.pc, handler_pc); // dispatched to M-mode handler
 }
-
-// === Interrupt Handling Tests ===
 
 #[test]
 fn test_trap_interrupts_set_interrupt_bit() {
@@ -291,8 +286,6 @@ fn test_trap_user_external_interrupt() {
     // User mode external interrupt handling
 }
 
-// === Delegation Tests ===
-
 #[test]
 fn test_trap_delegation_to_supervisor_with_medeleg() {
     let mut cpu = create_test_cpu();
@@ -370,8 +363,6 @@ fn test_trap_user_mode_no_delegation_without_medeleg() {
     assert_eq!(cpu.pc, 0x8000_0000);
 }
 
-// === Vectored Mode Tests ===
-
 #[test]
 fn test_trap_vectored_mode_direct_for_exceptions() {
     let mut cpu = create_test_cpu();
@@ -427,8 +418,6 @@ fn test_trap_supervisor_vectored_mode() {
     // Supervisor timer interrupt (code 5) should offset by 4*5 = 20
     assert_eq!(cpu.pc, base + 20);
 }
-
-// === Trap Value (tval) Tests ===
 
 #[test]
 fn test_trap_tval_for_address_exceptions() {
@@ -496,8 +485,6 @@ fn test_trap_stval_on_delegation() {
     assert_eq!(cpu.csrs.stval, fault_addr);
 }
 
-// === Status Bit Tests ===
-
 #[test]
 fn test_trap_saves_previous_privilege_in_mpp() {
     let mut cpu = create_test_cpu();
@@ -557,8 +544,6 @@ fn test_trap_disables_sie_on_delegation() {
     // SEPC should be set
     assert_eq!(cpu.csrs.sepc, 0x8000_2000);
 }
-
-// === Edge Cases and Complex Scenarios ===
 
 #[test]
 fn test_trap_requested_trap_custom_code() {

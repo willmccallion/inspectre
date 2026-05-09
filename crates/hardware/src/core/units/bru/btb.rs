@@ -81,7 +81,6 @@ impl Btb {
         let set = self.set_index(pc);
         let base = set * self.ways;
 
-        // Check for existing entry with same tag.
         for w in 0..self.ways {
             let e = &mut self.table[base + w];
             if e.valid && e.tag == pc {
@@ -90,7 +89,6 @@ impl Btb {
             }
         }
 
-        // Try to find an invalid (empty) slot.
         for w in 0..self.ways {
             let e = &mut self.table[base + w];
             if !e.valid {
@@ -99,7 +97,6 @@ impl Btb {
             }
         }
 
-        // All ways valid — round-robin replacement.
         let victim = self.replace_ptr[set] as usize % self.ways;
         self.replace_ptr[set] = ((victim + 1) % self.ways) as u8;
         self.table[base + victim] = BtbEntry { tag: pc, target, valid: true };

@@ -27,19 +27,11 @@ fn dram_default() -> DramController {
     dram_no_refresh(5, 10, 8)
 }
 
-// Address helpers for 8 banks, 2048-byte rows.
-// bank = (addr >> 11) % 8
-// Addresses in the same bank are separated by 8 * 2048 = 0x4000.
-
 /// Returns an address in the given bank and row-group.
 /// bank 0 row 0 = 0x0000, bank 0 row 1 = 0x4000, bank 1 row 0 = 0x0800, etc.
 fn addr(bank: usize, row_group: u64) -> u64 {
     (row_group * 8 + bank as u64) * 2048
 }
-
-// ══════════════════════════════════════════════════════════
-// 1. SimpleController
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn simple_controller_fixed_latency() {
@@ -62,20 +54,12 @@ fn simple_controller_address_independent() {
     assert_eq!(ctrl.access_latency(u64::MAX, 0), 5);
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. DramController: Cold start (no row open)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn dram_cold_start_latency() {
     let mut ctrl = dram_default();
     // First access ever: t_ras + t_cas = 10 + 5 = 15
     assert_eq!(ctrl.access_latency(addr(0, 0), 0), 15);
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. DramController: Row buffer hit (same bank, same row)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn dram_row_buffer_hit() {
@@ -96,10 +80,6 @@ fn dram_row_buffer_hit_multiple() {
     assert_eq!(ctrl.access_latency(addr(0, 0) + 0x300, 60), 5);
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. DramController: Row buffer miss (same bank, different row)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn dram_row_buffer_miss_same_bank() {
     let mut ctrl = dram_default();
@@ -119,10 +99,6 @@ fn dram_row_switch_back_same_bank() {
     // Switch back to row 0 in bank 0 → miss again.
     assert_eq!(ctrl.access_latency(addr(0, 0), 300), 23);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Multi-bank parallelism: different banks are independent
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn dram_different_banks_both_row_hits() {
@@ -149,10 +125,6 @@ fn dram_different_banks_different_rows_no_conflict() {
     assert_eq!(ctrl.access_latency(addr(2, 2) + 8, 500), 5, "bank 2 hit");
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. Row boundary
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn dram_row_boundary_exact() {
     let mut ctrl = dram_default();
@@ -161,10 +133,6 @@ fn dram_row_boundary_exact() {
     // Access within the same row should hit.
     assert_eq!(ctrl.access_latency(addr(0, 0) + 1024, 100), 5);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. Timing parameter variations
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn dram_low_latency() {
@@ -182,10 +150,6 @@ fn dram_high_latency() {
     assert_eq!(ctrl.access_latency(addr(0, 1), 200), 90); // miss: 30+40+20
 }
 
-// ══════════════════════════════════════════════════════════
-// 8. Configurable row size
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn dram_custom_row_size_4k() {
     // 4 KiB rows, 4 banks, no refresh.
@@ -199,17 +163,10 @@ fn dram_custom_row_size_4k() {
         t_refi: 0,
         t_rfc: 0,
     });
-    // row_shift = 12, bank = (addr >> 12) % 4
-    // bank 0, row 0: [0x0000, 0x0FFF]
-    // bank 0, row 1: [0x4000, 0x4FFF] (stride = 4 * 4096 = 0x4000)
     ctrl.access_latency(0x0000, 0); // cold open bank 0 row 0
     assert_eq!(ctrl.access_latency(0x0800, 50), 5, "4KiB row: 0x0800 is same row as 0x0000");
     assert_eq!(ctrl.access_latency(0x0FFF, 100), 5, "4KiB row: 0x0FFF still in same row");
 }
-
-// ══════════════════════════════════════════════════════════
-// 9. Refresh modeling
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn dram_refresh_causes_latency_spike() {
@@ -230,11 +187,8 @@ fn dram_refresh_causes_latency_spike() {
     // Access before refresh fires — should be row hit.
     assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 50), 5);
 
-    // At cycle 100, refresh fires. All banks busy until cycle 120.
-    // Access at cycle 100 should pay refresh wait + cold start (rows are closed).
+    // Refresh fires at cycle 100, busy until 120; access pays refresh wait + cold start.
     let lat = ctrl.access_latency(addr(0, 0), 100);
-    // After refresh: effective_cycle=120, then cold start = ras+cas = 15
-    // Total = (120 - 100) + 10 + 5 = 35
     assert!(lat > 5, "refresh should add extra latency, got {}", lat);
 }
 
@@ -288,10 +242,6 @@ fn dram_no_refresh_when_disabled() {
     assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 100_000), 5);
 }
 
-// ══════════════════════════════════════════════════════════
-// 10. tRRD enforcement
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn dram_trrd_back_to_back_activations() {
     // t_rrd=4: minimum 4 cycles between activations to different banks.
@@ -300,9 +250,7 @@ fn dram_trrd_back_to_back_activations() {
     let lat1 = ctrl.access_latency(addr(0, 0), 0);
     assert_eq!(lat1, 15); // cold start: ras+cas
 
-    // Immediate second activation at cycle 0 to bank 1.
-    // tRRD forces waiting: earliest activate = 0 + 4 = 4.
-    // latency = (4 - 0) + ras + cas = 4 + 10 + 5 = 19
+    // tRRD delays the bank-1 activation by 4 cycles → latency = 4 + ras(10) + cas(5) = 19.
     let lat2 = ctrl.access_latency(addr(1, 0), 0);
     assert_eq!(lat2, 19, "tRRD should delay the second bank activation");
 }

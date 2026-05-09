@@ -79,8 +79,7 @@ fn test_canonical_nan_propagation() {
 
 #[test]
 fn test_f64_nan_boxing_not_applicable() {
-    // NaN boxing only applies to 32-bit values in 64-bit registers.
-    // 64-bit operations should use the full 64 bits.
+    // NaN boxing applies only to 32-bit values; f64 ops use the full 64 bits.
     let d_val1 = f64::to_bits(1.0);
     let d_val2 = f64::to_bits(2.0);
 

@@ -18,7 +18,6 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
 
     for wb in entries {
         if let Some(ref trap) = wb.trap {
-            // Mark as faulted
             rob.fault(
                 wb.rob_tag,
                 trap.clone(),
@@ -35,7 +34,6 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
             continue;
         }
 
-        // Compute the result value
         let val = if wb.ctrl.mem_read {
             wb.load_data
         } else if wb.ctrl.control_flow == ControlFlow::Jump {

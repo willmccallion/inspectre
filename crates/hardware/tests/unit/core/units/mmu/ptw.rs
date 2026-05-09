@@ -15,10 +15,6 @@ use rvsim_core::core::arch::mode::PrivilegeMode;
 use rvsim_core::core::units::mmu::Mmu;
 use rvsim_core::soc::interconnect::Bus;
 
-// ══════════════════════════════════════════════════════════
-// Helpers
-// ══════════════════════════════════════════════════════════
-
 const ROOT_PPN: u64 = 0x80000; // Base at 0x8000_0000
 const MEM_BASE: u64 = 0x8000_0000;
 const MEM_SIZE: usize = 0x1000_0000; // 256MB
@@ -46,8 +42,7 @@ fn setup_mmu() -> (Mmu, Csrs, TestContext) {
     let satp_val = (csr::SATP_MODE_SV39 << 60) | ROOT_PPN;
     csrs.write(csr::SATP, satp_val);
 
-    // Enable SUM and MXR in sstatus for broader testing flexibility
-    // SSTATUS_SUM (bit 18) = 1, SSTATUS_MXR (bit 19) = 1
+    // SSTATUS.SUM | SSTATUS.MXR for broader test flexibility.
     csrs.write(csr::SSTATUS, (1 << 18) | (1 << 19));
 
     let tc = TestContext::new().with_memory(MEM_SIZE, MEM_BASE);
@@ -62,10 +57,6 @@ fn write_pte(bus: &mut Bus, base_ppn: u64, vpn_index: u64, pte: u64) {
     let addr = (base_ppn << 12) + (vpn_index * 8);
     bus.write_u64(PhysAddr::new(addr), pte);
 }
-
-// ══════════════════════════════════════════════════════════
-// 1. Bare Mode
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn bare_mode_bypass() {
@@ -103,21 +94,12 @@ fn machine_mode_bypass() {
     assert_eq!(res.paddr.val(), 0x1234_5678);
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. 4KB Page Walk (3 Levels)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn sv39_4kb_page_walk() {
     let (mut mmu, csrs, mut tc) = setup_mmu();
     let bus = &mut tc.cpu_mut().bus.bus;
 
-    // VA = 0x4000_1234
-    // VPN[2] = 1, VPN[1] = 0, VPN[0] = 0
-    // Offset = 0x234
-    let vaddr = VirtAddr::new(0x4000_1234); // Binary: 0100 0000 0000 0000 0001 0010 0011 0100
-    // VPN2=1, VPN1=0, VPN0=1, Off=0x234
-
+    let vaddr = VirtAddr::new(0x4000_1234);
     let l2_idx = (0x4000_1234 >> 30) & 0x1FF; // 1
     let l1_idx = (0x4000_1234 >> 21) & 0x1FF; // 0
     let l0_idx = (0x4000_1234 >> 12) & 0x1FF; // 1
@@ -139,17 +121,11 @@ fn sv39_4kb_page_walk() {
     assert_eq!(res.paddr.val(), (target_ppn << 12) | 0x234);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Superpages (Megapage and Gigapage)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn sv39_megapage_walk() {
     let (mut mmu, csrs, mut tc) = setup_mmu();
     let bus = &mut tc.cpu_mut().bus.bus;
 
-    // VA = 0x4020_0000
-    // VPN[2]=1, VPN[1]=1
     let vaddr = VirtAddr::new(0x4020_0000);
     let l2_idx = (0x4020_0000 >> 30) & 0x1FF; // 1
     let l1_idx = (0x4020_0000 >> 21) & 0x1FF; // 1
@@ -186,10 +162,6 @@ fn sv39_gigapage_walk() {
     assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
     assert_eq!(res.paddr.val(), target_ppn << 12);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Invalid and Malformed PTEs
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn invalid_pte_causes_fault() {
@@ -235,8 +207,7 @@ fn misaligned_superpage_causes_fault() {
     let l1_idx = 0;
 
     let l1_ppn = ROOT_PPN + 1;
-    // PPN must be aligned for megapage (PPN[0..8] must be 0)
-    // We set a misaligned PPN
+    // Megapages require PPN[0..8]=0; this PPN is misaligned.
     let misaligned_target_ppn = (ROOT_PPN + 100) | 0x1;
 
     write_pte(bus, ROOT_PPN, l2_idx, make_pte(l1_ppn, 0));
@@ -245,10 +216,6 @@ fn misaligned_superpage_causes_fault() {
     let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
     assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Access Permissions & A/D Bits
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn write_to_clean_page_sets_dirty() {
@@ -322,10 +289,6 @@ fn execute_permission_check() {
     assert!(matches!(res.trap, Some(Trap::InstructionPageFault(_))), "Trap: {:?}", res.trap);
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. User / Supervisor Checks
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn user_cannot_access_supervisor_page() {
     let (mut mmu, csrs, mut tc) = setup_mmu();
@@ -380,21 +343,11 @@ fn supervisor_cannot_fetch_user_page() {
     assert!(matches!(res.trap, Some(Trap::InstructionPageFault(_))), "Trap: {:?}", res.trap);
 }
 
-// ══════════════════════════════════════════════════════════
-// 7. Canonical Address Check
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn non_canonical_address_faults() {
     let (mut mmu, csrs, mut tc) = setup_mmu();
 
-    // SV39 addresses must have bits 63:38 all equal (sign extension of bit 38)
-    // 0x0000_0040_0000_0000 -> bit 38 is 1, so 63:39 must be 1.
-    // Here 63:39 are 0, so it's non-canonical.
-    // 39 bits = 512GB space. Top bit is bit 38.
-
-    // Construct a non-canonical address.
-    // Bit 38 is 1, so bits 63..39 should be 1.
+    // SV39 requires bits 63..39 to sign-extend bit 38; here bit 38=1 but 63..39=0.
     let non_canon = VirtAddr::new(1 << 38);
 
     let res = mmu.translate(

@@ -10,8 +10,6 @@ use rvsim_core::common::RegIdx;
 use rvsim_core::core::pipeline::snapshot::PipelineSnapshot;
 use rvsim_core::isa::disasm::disassemble;
 
-// ── ABI register names ────────────────────────────────────────────────────────
-
 const ABI: [&str; 32] = [
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
     "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
@@ -22,8 +20,6 @@ fn reg_name(idx: RegIdx) -> &'static str {
     ABI.get(idx.as_usize()).copied().unwrap_or("x?")
 }
 
-// ── Slot dict helpers ─────────────────────────────────────────────────────────
-
 fn slot_dict(py: Python<'_>, pc: u64, raw: u32) -> PyResult<Bound<'_, PyDict>> {
     let d = PyDict::new(py);
     d.set_item("pc", pc)?;
@@ -32,19 +28,8 @@ fn slot_dict(py: Python<'_>, pc: u64, raw: u32) -> PyResult<Bound<'_, PyDict>> {
     Ok(d)
 }
 
-// ── ASCII renderer ────────────────────────────────────────────────────────────
-//
-// Layout (one row per issue slot, one column per stage):
-//
-//   Cycle N  width=4
-//        F1   F2   DE   IS   EX   M1   M2   WB
-//   [0]  lui  addi slli ─    ─    ─    ─    ─
-//   [1]  ─    ─    ─    ─    ─    ─    ─    ─
-//        fwd: a0←0x80000  stall:M1=3
-
-// Column width: enough for the longest common mnemonic + register operands.
 const COL_W: usize = 14;
-const SLOT_W: usize = 4; // "[0] "
+const SLOT_W: usize = 4;
 
 fn trunc(s: &str, w: usize) -> String {
     if s.chars().count() <= w {
@@ -69,18 +54,15 @@ fn empty_cell(stall: u64) -> String {
 fn render_inner(snap: &PipelineSnapshot) -> String {
     let w = snap.width;
 
-    // Stage definitions: (header label, per-slot cell content, stall cycles).
-    // Each is a Vec<Option<String>> of length w — None means empty/stalled.
     #[allow(clippy::items_after_statements)]
     struct StageCol {
         hdr: &'static str,
-        cells: Vec<Option<String>>, // length == w
+        cells: Vec<Option<String>>,
         stall: u64,
     }
 
     let mut cols: Vec<StageCol> = Vec::new();
 
-    // Helper: build a StageCol from a latch vec using a closure.
     macro_rules! stage {
         ($hdr:expr, $entries:expr, $cell_fn:expr, $stall:expr) => {{
             let mut cells: Vec<Option<String>> = vec![None; w];
@@ -153,8 +135,7 @@ fn render_inner(snap: &PipelineSnapshot) -> String {
         0u64
     );
 
-    // WB and CM: WB writes results; CM retires from ROB head.
-    // Neither has an outbound latch we can inspect, so both show empty.
+    // WB and CM have no outbound latch to inspect — both show empty.
     {
         let cells = vec![None; w];
         cols.push(StageCol { hdr: "WB", cells, stall: 0 });
@@ -164,12 +145,10 @@ fn render_inner(snap: &PipelineSnapshot) -> String {
         cols.push(StageCol { hdr: "CM", cells, stall: 0 });
     }
 
-    // ── header ────────────────────────────────────────────────────────────────
     let hdr_cells: Vec<String> = cols.iter().map(|c| format!("{:^COL_W$}", c.hdr)).collect();
     let hdr_line = format!("{:SLOT_W$} {}", "", hdr_cells.join(" "));
     let rule = "─".repeat(hdr_line.len());
 
-    // ── slot rows ─────────────────────────────────────────────────────────────
     let mut rows: Vec<String> = Vec::new();
     for slot in 0..w {
         let row_cells: Vec<String> = cols
@@ -184,7 +163,6 @@ fn render_inner(snap: &PipelineSnapshot) -> String {
         rows.push(format!("[{slot}]  {}", row_cells.join(" ")));
     }
 
-    // ── forwarding / stall annotation line ────────────────────────────────────
     let mut notes: Vec<String> = Vec::new();
     for e in &snap.execute_mem1 {
         if !e.rd.is_zero() {
@@ -208,7 +186,6 @@ fn render_inner(snap: &PipelineSnapshot) -> String {
         stall_notes.push(format!("M1={}", snap.mem1_stall));
     }
 
-    // ── assemble ──────────────────────────────────────────────────────────────
     let mut out: Vec<String> = Vec::new();
     out.push(rule.clone());
     out.push(hdr_line);
@@ -232,8 +209,6 @@ fn render_inner(snap: &PipelineSnapshot) -> String {
     out.push(rule);
     out.join("\n")
 }
-
-// ── PipelineSnapshot ──────────────────────────────────────────────────────────
 
 /// Point-in-time snapshot of all pipeline inter-stage latches.
 ///

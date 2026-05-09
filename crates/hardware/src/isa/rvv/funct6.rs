@@ -3,8 +3,6 @@
 //! Note: The same funct6 value may map to different operations depending on
 //! the funct3 category (OPIVV vs OPMVV vs OPFVV, etc.).
 
-// ── Integer arithmetic (OPIVV/OPIVX/OPIVI) ──────────────────────────────────
-
 /// Vector add (`vadd`).
 pub const VADD: u32 = 0b000000;
 /// Vector subtract (`vsub`).
@@ -34,8 +32,6 @@ pub const VSLIDEUP: u32 = 0b001110;
 /// Vector slide down (`vslidedown`).
 pub const VSLIDEDOWN: u32 = 0b001111;
 
-// ── Add/sub with carry ──────────────────────────────────────────────────────
-
 /// Vector add with carry (`vadc`).
 pub const VADC: u32 = 0b010000;
 /// Vector mask add with carry (`vmadc`).
@@ -45,12 +41,8 @@ pub const VSBC: u32 = 0b010010;
 /// Vector mask subtract with borrow (`vmsbc`).
 pub const VMSBC: u32 = 0b010011;
 
-// ── Merge/move ──────────────────────────────────────────────────────────────
-
 /// Vector merge / move (`vmerge` / `vmv`).
 pub const VMERGE_VMV: u32 = 0b010111;
-
-// ── Comparison (write mask result) ──────────────────────────────────────────
 
 /// Vector mask set if equal (`vmseq`).
 pub const VMSEQ: u32 = 0b011000;
@@ -68,8 +60,6 @@ pub const VMSLE: u32 = 0b011101;
 pub const VMSGTU: u32 = 0b011110;
 /// Vector mask set if greater than signed (`vmsgt`).
 pub const VMSGT: u32 = 0b011111;
-
-// ── Fixed-point (OPIVV/OPIVX/OPIVI) ────────────────────────────────────────
 
 /// Vector saturating add unsigned (`vsaddu`).
 pub const VSADDU: u32 = 0b100000;
@@ -92,8 +82,6 @@ pub const VSSRL: u32 = 0b101010;
 /// Vector scaling shift right arithmetic (`vssra`).
 pub const VSSRA: u32 = 0b101011;
 
-// ── Narrowing ───────────────────────────────────────────────────────────────
-
 /// Vector narrowing shift right logical (`vnsrl`).
 pub const VNSRL: u32 = 0b101100;
 /// Vector narrowing shift right arithmetic (`vnsra`).
@@ -103,14 +91,10 @@ pub const VNCLIPU: u32 = 0b101110;
 /// Vector narrowing clip signed (`vnclip`).
 pub const VNCLIP: u32 = 0b101111;
 
-// ── Widening reduction (OPMVV) ─────────────────────────────────────────────
-
 /// Vector widening unsigned reduction sum (`vwredsumu`).
 pub const VWREDSUMU: u32 = 0b110000;
 /// Vector widening signed reduction sum (`vwredsum`).
 pub const VWREDSUM: u32 = 0b110001;
-
-// ── Widening integer add/sub (OPMVV/OPMVX) ─────────────────────────────────
 
 /// Vector widening unsigned add (`vwaddu`).
 pub const VWADDU: u32 = 0b110000;
@@ -129,8 +113,6 @@ pub const VWSUBU_W: u32 = 0b110110;
 /// Vector widening signed subtract wide (`vwsub.w`).
 pub const VWSUB_W: u32 = 0b110111;
 
-// ── Widening multiply (OPMVV/OPMVX) ────────────────────────────────────────
-
 /// Vector widening unsigned multiply (`vwmulu`).
 pub const VWMULU: u32 = 0b111000;
 /// Vector widening signed-unsigned multiply (`vwmulsu`).
@@ -145,8 +127,6 @@ pub const VWMACC: u32 = 0b111101;
 pub const VWMACCUS: u32 = 0b111110;
 /// Vector widening signed-unsigned multiply-accumulate (`vwmaccsu`).
 pub const VWMACCSU: u32 = 0b111111;
-
-// ── Integer multiply/divide (OPMVV/OPMVX) ──────────────────────────────────
 
 /// Vector unsigned divide (`vdivu`).
 pub const VDIVU: u32 = 0b100000;
@@ -173,8 +153,6 @@ pub const VMACC: u32 = 0b101101;
 /// Vector negated multiply-subtract accumulate (`vnmsac`).
 pub const VNMSAC: u32 = 0b101111;
 
-// ── Integer reduction (OPMVV) ───────────────────────────────────────────────
-
 /// Vector reduction sum (`vredsum`).
 pub const VREDSUM: u32 = 0b000000;
 /// Vector reduction AND (`vredand`).
@@ -192,8 +170,6 @@ pub const VREDMAXU: u32 = 0b000110;
 /// Vector reduction signed maximum (`vredmax`).
 pub const VREDMAX: u32 = 0b000111;
 
-// ── Averaging add/sub (OPMVV/OPMVX) ────────────────────────────────────────
-
 /// Vector averaging unsigned add (`vaaddu`).
 pub const VAADDU: u32 = 0b001000;
 /// Vector averaging signed add (`vaadd`).
@@ -202,8 +178,6 @@ pub const VAADD: u32 = 0b001001;
 pub const VASUBU: u32 = 0b001010;
 /// Vector averaging signed subtract (`vasub`).
 pub const VASUB: u32 = 0b001011;
-
-// ── FP arithmetic (OPFVV/OPFVF) ────────────────────────────────────────────
 
 /// Vector FP add (`vfadd`).
 pub const VFADD: u32 = 0b000000;
@@ -232,12 +206,8 @@ pub const VFSLIDE1UP: u32 = 0b001110;
 /// Vector FP slide one down (`vfslide1down`).
 pub const VFSLIDE1DOWN: u32 = 0b001111;
 
-// ── FP conversion/class/sqrt (OPFVV, vs1 field encodes variant) ─────────────
-
 /// Vector FP widening-unary0 encoding (`vfmv.f.s`; OPFVV funct6=010000).
 pub const VWFUNARY0: u32 = 0b010000;
-
-// ── vs1 sub-field values for unary operations ───────────────────────────────
 
 /// vs1 sub-field for `vfmv.f.s` within VWFUNARY0.
 pub const VWFUNARY0_VFMV_F_S: u8 = 0b00000;
@@ -250,8 +220,6 @@ pub const VRFUNARY0_VFMV_S_F: u8 = 0b00000;
 pub const VFUNARY0: u32 = 0b010010;
 /// Vector FP unary1 encoding (`vfsqrt`, `vfclass`, `vfrec7`, `vfrsqrt7`).
 pub const VFUNARY1: u32 = 0b010011;
-
-// ── FP comparison (OPFVV/OPFVF) ────────────────────────────────────────────
 
 /// Vector FP mask set if equal (`vmfeq`).
 pub const VMFEQ: u32 = 0b011000;
@@ -268,8 +236,6 @@ pub const VMFGT: u32 = 0b011101;
 /// Vector FP mask set if greater than or equal (`vmfge`).
 pub const VMFGE: u32 = 0b011111;
 
-// ── FP multiply/divide (OPFVV/OPFVF) ───────────────────────────────────────
-
 /// Vector FP divide (`vfdiv`).
 pub const VFDIV: u32 = 0b100000;
 /// Vector FP reverse divide (`vfrdiv`).
@@ -280,8 +246,6 @@ pub const VFMUL: u32 = 0b100100;
 /// 0b100xxx funct6 range alongside multiply/divide; OPIVV/OPMVV use the same
 /// value for vsmul/vmulh and disambiguate via funct3.
 pub const VFRSUB: u32 = 0b100111;
-
-// ── FP fused multiply-add (OPFVV/OPFVF) ────────────────────────────────────
 
 /// Vector FP multiply-add (`vfmadd`).
 pub const VFMADD: u32 = 0b101000;
@@ -299,8 +263,6 @@ pub const VFNMACC: u32 = 0b101101;
 pub const VFMSAC: u32 = 0b101110;
 /// Vector FP negated multiply-subtract accumulate (`vfnmsac`).
 pub const VFNMSAC: u32 = 0b101111;
-
-// ── FP widening (OPFVV/OPFVF) ──────────────────────────────────────────────
 
 /// Vector FP widening add (`vfwadd`).
 pub const VFWADD: u32 = 0b110000;
@@ -325,16 +287,12 @@ pub const VFWMSAC: u32 = 0b111110;
 /// Vector FP widening negated multiply-subtract accumulate (`vfwnmsac`).
 pub const VFWNMSAC: u32 = 0b111111;
 
-// ── OPMVV unary groups ────────────────────────────────────────────────────
-
 /// Unary scalar-result ops in OPMVV: `vmv.x.s`, `vcpop.m`, `vfirst.m`.
 pub const VWXUNARY0: u32 = 0b010000;
 /// Integer extension unary ops in OPMVV: `vzext`, `vsext`.
 pub const VXUNARY0: u32 = 0b010010;
 /// Mask-source unary ops in OPMVV: `vmsbf.m`, `vmsof.m`, `vmsif.m`, `viota.m`, `vid.v`.
 pub const VMUNARY0: u32 = 0b010100;
-
-// ── vs1 sub-field values for OPMVV unary operations ─────────────────────
 
 /// vs1 for `vmv.x.s` within VWXUNARY0.
 pub const VWXUNARY0_VMV_X_S: u8 = 0b00000;
@@ -365,11 +323,6 @@ pub const VMUNARY0_VIOTA_M: u8 = 0b10000;
 /// vs1 for `vid.v` within VMUNARY0.
 pub const VMUNARY0_VID_V: u8 = 0b10001;
 
-// ── Zvbb sub-fields under VXUNARY0 (OPMVV funct6=0b010010) ─────────────
-//
-// Zvbb extends the VXUNARY0 group with bit-manipulation ops. They share
-// the funct6 with VZEXT/VSEXT and are disambiguated by the vs1 field.
-
 /// vs1 for `vbrev8.v` within VXUNARY0 (Zvbb).
 pub const VXUNARY0_VBREV8: u8 = 0b01000;
 /// vs1 for `vrev8.v` within VXUNARY0 (Zvbb).
@@ -382,8 +335,6 @@ pub const VXUNARY0_VCLZ: u8 = 0b01100;
 pub const VXUNARY0_VCTZ: u8 = 0b01101;
 /// vs1 for `vcpop.v` within VXUNARY0 (Zvbb).
 pub const VXUNARY0_VCPOP: u8 = 0b01110;
-
-// ── Zvbb / Zvbc funct6 constants (OPIVV/OPIVX/OPIVI) ──────────────────────
 
 /// `vandn.vv`/`vandn.vx` (Zvbb). Shares funct6 0b000001 with vredand (OPMVV)
 /// and vfredusum (OPFVV); disambiguated by funct3.
@@ -402,8 +353,6 @@ pub const VROL: u32 = 0b010101;
 /// `VWADD_W` (different funct3).
 pub const VWSLL: u32 = 0b110101;
 
-// ── Mask operations (OPMVV) ─────────────────────────────────────────────────
-
 /// Mask AND (`vmand.mm`).
 pub const VMAND: u32 = 0b011001;
 /// Mask NAND (`vmnand.mm`).
@@ -420,10 +369,6 @@ pub const VMNOR: u32 = 0b011110;
 pub const VMORN: u32 = 0b011100;
 /// Mask XNOR (`vmxnor.mm`).
 pub const VMXNOR: u32 = 0b011111;
-
-// ── Vector crypto extensions (opcode 0x77) ──────────────────────────────────
-// Funct6 values for Zvkn*/Zvks*/Zvkg/Zvknh* under OP-V-CRYPTO. The vs1 field
-// of OPMVV-encoded crypto ops is a sub-opcode; see the *_VS1 constants below.
 
 /// `vsm3me.vv` (Zvksh).
 pub const VSM3_ME: u32 = 0b100000; // 0x20

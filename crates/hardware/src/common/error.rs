@@ -1,9 +1,4 @@
 //! Trap and Translation Result definitions.
-//!
-//! This module defines the error handling and trap mechanisms for the simulator. It provides:
-//! 1. **Trap Representation:** Encompassing all synchronous exceptions and asynchronous interrupts.
-//! 2. **Translation Results:** Reporting the outcome of virtual-to-physical address translation.
-//! 3. **Error Handling:** Integrating with standard Rust error traits for system-level reporting.
 
 use std::fmt;
 
@@ -28,154 +23,59 @@ pub enum ExceptionStage {
 }
 
 /// RISC-V trap types representing exceptions and interrupts.
-///
-/// Traps cause the processor to transfer control to a predefined trap handler.
-/// This enum covers all standard traps defined in the RISC-V Privileged Specification.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Trap {
-    /// Instruction address misaligned exception.
-    ///
-    /// Raised when the program counter is not aligned to the instruction size.
-    /// The associated value is the misaligned address.
+    /// Instruction address misaligned exception (carries misaligned address).
     InstructionAddressMisaligned(u64),
-
-    /// Instruction access fault exception.
-    ///
-    /// Raised when an instruction fetch violates memory protection or accesses
-    /// invalid memory. The associated value is the faulting address.
+    /// Instruction access fault exception (carries faulting address).
     InstructionAccessFault(u64),
-
-    /// Illegal instruction exception.
-    ///
-    /// Raised when an instruction encoding is invalid or not implemented.
-    /// The associated value is the instruction encoding.
+    /// Illegal instruction exception (carries instruction encoding).
     IllegalInstruction(u32),
-
-    /// Breakpoint exception.
-    ///
-    /// Raised when a breakpoint instruction is executed or a hardware breakpoint
-    /// is hit. The associated value is the program counter.
+    /// Breakpoint exception (carries program counter).
     Breakpoint(u64),
-
-    /// Load address misaligned exception.
-    ///
-    /// Raised when a load instruction accesses a misaligned address.
-    /// The associated value is the misaligned address.
+    /// Load address misaligned exception (carries misaligned address).
     LoadAddressMisaligned(u64),
-
-    /// Load access fault exception.
-    ///
-    /// Raised when a load instruction violates memory protection or accesses
-    /// invalid memory. The associated value is the faulting address.
+    /// Load access fault exception (carries faulting address).
     LoadAccessFault(u64),
-
-    /// Store address misaligned exception.
-    ///
-    /// Raised when a store instruction accesses a misaligned address.
-    /// The associated value is the misaligned address.
+    /// Store address misaligned exception (carries misaligned address).
     StoreAddressMisaligned(u64),
-
-    /// Store access fault exception.
-    ///
-    /// Raised when a store instruction violates memory protection or accesses
-    /// invalid memory. The associated value is the faulting address.
+    /// Store access fault exception (carries faulting address).
     StoreAccessFault(u64),
-
     /// Environment call from user mode.
-    ///
-    /// Raised when an `ECALL` instruction is executed in user mode.
     EnvironmentCallFromUMode,
-
     /// Environment call from supervisor mode.
-    ///
-    /// Raised when an `ECALL` instruction is executed in supervisor mode.
     EnvironmentCallFromSMode,
-
     /// Environment call from machine mode.
-    ///
-    /// Raised when an `ECALL` instruction is executed in machine mode.
     EnvironmentCallFromMMode,
-
-    /// Instruction page fault exception.
-    ///
-    /// Raised when an instruction fetch causes a page fault.
-    /// The associated value is the faulting virtual address.
+    /// Instruction page fault exception (carries faulting virtual address).
     InstructionPageFault(u64),
-
-    /// Load page fault exception.
-    ///
-    /// Raised when a load instruction causes a page fault.
-    /// The associated value is the faulting virtual address.
+    /// Load page fault exception (carries faulting virtual address).
     LoadPageFault(u64),
-
-    /// Store page fault exception.
-    ///
-    /// Raised when a store instruction causes a page fault.
-    /// The associated value is the faulting virtual address.
+    /// Store page fault exception (carries faulting virtual address).
     StorePageFault(u64),
-
     /// User software interrupt.
-    ///
-    /// Software interrupt intended for user mode.
     UserSoftwareInterrupt,
-
     /// Supervisor software interrupt.
-    ///
-    /// Software interrupt intended for supervisor mode.
     SupervisorSoftwareInterrupt,
-
     /// Machine software interrupt.
-    ///
-    /// Software interrupt intended for machine mode.
     MachineSoftwareInterrupt,
-
     /// Machine timer interrupt.
-    ///
-    /// Timer interrupt intended for machine mode.
     MachineTimerInterrupt,
-
     /// Supervisor timer interrupt.
-    ///
-    /// Timer interrupt intended for supervisor mode.
     SupervisorTimerInterrupt,
-
     /// Machine external interrupt.
-    ///
-    /// External interrupt intended for machine mode.
     MachineExternalInterrupt,
-
     /// Supervisor external interrupt.
-    ///
-    /// External interrupt intended for supervisor mode.
     SupervisorExternalInterrupt,
-
     /// User external interrupt.
-    ///
-    /// External interrupt intended for user mode.
     UserExternalInterrupt,
-
-    /// Requested trap for debugging or simulation purposes.
-    ///
-    /// The associated value is a trap code for identification.
+    /// Requested trap for debugging or simulation purposes (carries trap code).
     RequestedTrap(u64),
-
-    /// Double fault exception.
-    ///
-    /// Raised when a fault occurs while handling another fault.
-    /// The associated value is the faulting address.
+    /// Double fault — fault while handling another fault (carries faulting address).
     DoubleFault(u64),
 }
 
 impl fmt::Display for Trap {
-    /// Formats the trap for display.
-    ///
-    /// # Arguments
-    ///
-    /// * `f` - The formatter to write to.
-    ///
-    /// # Returns
-    ///
-    /// A formatting result indicating success or failure.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InstructionAddressMisaligned(addr) => {
@@ -219,33 +119,20 @@ impl Trap {
     /// priorities 0-11, while interrupts have priority 12+.
     pub const fn exception_priority(&self) -> u8 {
         match self {
-            // Highest priority: instruction address breakpoint
             Self::Breakpoint(_) => 0,
-
-            // Instruction fetch exceptions
             Self::InstructionPageFault(_) => 1,
             Self::InstructionAccessFault(_) => 2,
-
-            // Illegal instruction / decode errors
             Self::IllegalInstruction(_) => 3,
             Self::InstructionAddressMisaligned(_) => 4,
-
-            // Environment calls
             Self::EnvironmentCallFromUMode
             | Self::EnvironmentCallFromSMode
             | Self::EnvironmentCallFromMMode => 5,
-
-            // Store/AMO address misaligned
             Self::StoreAddressMisaligned(_) => 6,
             Self::LoadAddressMisaligned(_) => 7,
-
-            // Store/AMO page fault & access fault
             Self::StorePageFault(_) => 8,
             Self::LoadPageFault(_) => 9,
             Self::StoreAccessFault(_) => 10,
             Self::LoadAccessFault(_) => 11,
-
-            // Interrupts (lower priority than synchronous exceptions)
             Self::MachineExternalInterrupt => 12,
             Self::MachineSoftwareInterrupt => 13,
             Self::MachineTimerInterrupt => 14,
@@ -254,8 +141,6 @@ impl Trap {
             Self::SupervisorTimerInterrupt => 17,
             Self::UserExternalInterrupt => 18,
             Self::UserSoftwareInterrupt => 19,
-
-            // Simulator-specific traps (lowest priority)
             Self::RequestedTrap(_) => 20,
             Self::DoubleFault(_) => 21,
         }
@@ -336,15 +221,6 @@ pub struct TranslationResult {
 
 impl TranslationResult {
     /// Creates a successful translation result.
-    ///
-    /// # Arguments
-    ///
-    /// * `paddr` - The successfully translated physical address.
-    /// * `cycles` - Number of cycles consumed by the translation.
-    ///
-    /// # Returns
-    ///
-    /// A `TranslationResult` indicating successful translation.
     #[inline]
     pub const fn success(paddr: PhysAddr, cycles: u64) -> Self {
         Self { paddr, cycles, trap: None, pte_update: None }
@@ -361,15 +237,6 @@ impl TranslationResult {
     }
 
     /// Creates a translation result indicating a fault occurred.
-    ///
-    /// # Arguments
-    ///
-    /// * `trap` - The trap that occurred during translation.
-    /// * `cycles` - Number of cycles consumed before the fault.
-    ///
-    /// # Returns
-    ///
-    /// A `TranslationResult` indicating translation failure.
     #[inline]
     pub const fn fault(trap: Trap, cycles: u64) -> Self {
         Self { paddr: PhysAddr(0), cycles, trap: Some(trap), pte_update: None }

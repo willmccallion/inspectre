@@ -5,10 +5,8 @@
 //! hardware prefetchers. It models cache hits, misses, and write-back
 //! penalties to simulate memory hierarchy latency.
 
-/// Cache replacement policy implementations (FIFO, LRU, MRU, PLRU, Random).
 pub mod policies;
 
-/// Miss Status Holding Registers (MSHRs) for non-blocking cache access.
 pub mod mshr;
 
 use self::policies::{
@@ -290,7 +288,6 @@ impl CacheSim {
         let (hit, penalty, evictions, prefetch_candidates) =
             self.access_tracked_split(addr, is_write, next_level_latency);
 
-        // Install all prefetch candidates directly
         let mut all_evictions = evictions;
         for target in prefetch_candidates {
             if !self.contains(target) {
@@ -478,7 +475,6 @@ impl CacheSim {
         let tag = addr / (self.line_bytes * self.num_sets) as u64;
         let base_idx = set_index * self.ways;
 
-        // Try to find an invalid (free) way first
         for i in 0..self.ways {
             let idx = base_idx + i;
             if !self.lines[idx].valid {
@@ -488,7 +484,6 @@ impl CacheSim {
             }
         }
 
-        // No free way — fall back to replacement
         self.install_line_tracked(addr, is_write, next_level_latency)
     }
 

@@ -1,10 +1,4 @@
 //! System-on-Chip construction and top-level `System` type.
-//!
-//! This module builds the complete SoC from configuration. It performs:
-//! 1. **Bus setup:** Creates the interconnect with configured width and latency.
-//! 2. **Device registration:** Instantiates RAM, UART, VirtIO disk, CLINT, PLIC, SysCon, and RTC.
-//! 3. **Memory controller:** Selects simple or DRAM controller based on config.
-//! 4. **Binary loading:** Optionally loads a disk image from path and kernel via `load_binary_at`.
 
 use crate::config::{Config, MemoryController as MemControllerType};
 use crate::soc::devices::{Clint, GoldfishRtc, Htif, Plic, SysCon, Uart, VirtioBlock};
@@ -42,18 +36,6 @@ impl std::fmt::Debug for System {
 
 impl System {
     /// Builds a new system from configuration and optional disk image path.
-    ///
-    /// Creates the bus, RAM, UART, `VirtIO` disk (loading `disk_path` if non-empty), CLINT, PLIC,
-    /// `SysCon`, and Goldfish RTC. The memory controller is chosen from `config.memory.controller`.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Simulator configuration (system, memory, etc.).
-    /// * `disk_path` - Path to disk image file; if non-empty and readable, data is loaded into `VirtIO`.
-    ///
-    /// # Returns
-    ///
-    /// A fully constructed `System` ready for simulation.
     pub fn new(config: &Config, disk_path: &str) -> Self {
         let mut bus = Bus::new(config.system.bus_width, config.system.bus_latency);
         let exit_request = Arc::new(AtomicU64::new(u64::MAX));
@@ -120,47 +102,27 @@ impl System {
     }
 
     /// Loads a binary into memory at the given physical address.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Raw bytes to write.
-    /// * `addr` - Physical base address for the write.
     pub fn load_binary_at(&mut self, data: &[u8], addr: crate::common::PhysAddr) {
         self.bus.load_binary_at(data, addr);
     }
 
-    /// Advances all devices by one tick; returns (`timer_irq`, `msip`, `meip`, `seip`).
-    ///
-    /// # Returns
-    ///
-    /// A tuple of (machine timer IRQ, machine software IRQ, machine external IRQ, supervisor external IRQ).
+    /// Advances all devices by one tick. Returns (`timer_irq`, `msip`, `meip`, `seip`).
     pub fn tick(&mut self) -> (bool, bool, bool, bool) {
         self.bus.tick()
     }
 
     /// Returns the requested exit code if a device has requested shutdown.
-    ///
-    /// # Returns
-    ///
-    /// `Some(exit_code)` if exit was requested, otherwise `None`.
     pub fn check_exit(&self) -> Option<u64> {
         let val = self.exit_request.load(std::sync::atomic::Ordering::Relaxed);
         if val == u64::MAX { None } else { Some(val) }
     }
 
-    /// Checks whether the kernel has signaled panic via UART (e.g., for test harnesses).
-    ///
-    /// # Returns
-    ///
-    /// `true` if a kernel panic was detected, otherwise `false`.
+    /// Checks whether the kernel has signaled panic via UART.
     pub fn check_kernel_panic(&mut self) -> bool {
         self.bus.check_kernel_panic()
     }
 
     /// Registers an HTIF device at the given tohost address.
-    ///
-    /// Called after ELF loading discovers a `tohost` symbol. The device shares
-    /// the same `exit_request` atomic so the simulation loop picks up the exit.
     pub fn add_htif(&mut self, tohost_addr: u64) {
         let htif = Htif::new(tohost_addr, self.exit_request.clone());
         self.bus.add_device(Box::new(htif));

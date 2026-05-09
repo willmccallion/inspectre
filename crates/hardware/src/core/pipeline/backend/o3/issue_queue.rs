@@ -240,20 +240,23 @@ impl IssueQueue {
             && entry.ctrl.vec_op != VectorOp::None
             && !matches!(
                 entry.ctrl.vec_op,
-                VectorOp::Vsetvli
-                    | VectorOp::Vsetivli
-                    | VectorOp::Vsetvl
+                VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl
             );
-        let mask_phys = if needs_mask {
-            entry.mask_phys
-        } else {
-            VecPhysReg::ZERO
-        };
+        let mask_phys = if needs_mask { entry.mask_phys } else { VecPhysReg::ZERO };
         let mask_ready = !needs_mask || vec_prf.is_none_or(|vprf| vprf.is_ready(mask_phys));
 
         let iq_entry = IssueQueueEntry {
-            entry, src1, src2, src3, vec_src1, vec_src2, vec_src3, mem_dep,
-            mask_phys, mask_ready, needs_mask,
+            entry,
+            src1,
+            src2,
+            src3,
+            vec_src1,
+            vec_src2,
+            vec_src3,
+            mem_dep,
+            mask_phys,
+            mask_ready,
+            needs_mask,
         };
 
         for slot in &mut self.slots {

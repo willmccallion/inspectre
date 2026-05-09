@@ -9,10 +9,8 @@
 
 use crate::core::pipeline::signals::AluOp;
 
-/// Bit mask for shift amount in RV64 (6 bits: 0-63).
 const SHAMT_MASK_RV64: u64 = 0x3f;
 
-/// Bit mask for shift amount in RV32 (5 bits: 0-31).
 const SHAMT_MASK_RV32: u32 = 0x1f;
 
 /// Executes a shift operation.

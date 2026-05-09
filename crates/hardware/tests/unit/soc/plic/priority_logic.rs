@@ -6,10 +6,6 @@
 use rvsim_core::soc::devices::Device;
 use rvsim_core::soc::devices::plic::Plic;
 
-// ══════════════════════════════════════════════════════════
-// 1. Basic identification
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn plic_name() {
     let plic = Plic::new(0xC00_0000);
@@ -23,10 +19,6 @@ fn plic_address_range() {
     assert_eq!(base, 0xC00_0000);
     assert_eq!(size, 0x400_0000);
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. Priority registers
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn plic_set_and_read_priority() {
@@ -44,17 +36,12 @@ fn plic_priority_source_zero_reserved() {
     assert_eq!(plic.read_u32(0), 5);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Interrupt enable
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn plic_enable_and_check_interrupt() {
     let mut plic = Plic::new(0);
     // Set priority for source 1
     plic.write_u32(4, 3);
-    // Enable source 1 for context 0
-    // Enable register for ctx 0 at 0x2000
+    // Enable source 1 for ctx 0 (enable register at 0x2000).
     plic.write_u32(0x2000, 1 << 1);
     // Set threshold for ctx 0 to 0
     plic.write_u32(0x200000, 0);
@@ -65,10 +52,6 @@ fn plic_enable_and_check_interrupt() {
     let (meip, _seip) = plic.check_interrupts();
     assert!(meip, "Machine external interrupt should be pending");
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Threshold filtering
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn plic_threshold_filters_low_priority() {
@@ -93,10 +76,6 @@ fn plic_threshold_zero_allows_all() {
     let (meip, _) = plic.check_interrupts();
     assert!(meip, "Threshold 0 should allow priority 1");
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Claim/Complete
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn plic_claim_returns_highest_priority_id() {
@@ -152,10 +131,6 @@ fn plic_complete_clears_claim() {
     assert!(!meip, "No interrupts after complete and clear");
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. No pending → no interrupt
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn plic_no_pending_no_interrupt() {
     let mut plic = Plic::new(0);
@@ -168,10 +143,6 @@ fn plic_no_pending_no_interrupt() {
     assert!(!meip);
     assert!(!seip);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. Disabled source doesn't trigger
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn plic_disabled_source_no_interrupt() {

@@ -3,8 +3,6 @@
 
 use rvsim_core::isa::disasm::disassemble;
 
-// ── Helper: build a 32-bit instruction word from fields ─────────────────────
-
 const OP_V: u32 = 0b1010111;
 const OP_LOAD_FP: u32 = 0b0000111;
 const OP_STORE_FP: u32 = 0b0100111;
@@ -112,14 +110,9 @@ const OPFVF: u32 = 0b101;
 const OPMVX: u32 = 0b110;
 const OPCFG: u32 = 0b111;
 
-// ══════════════════════════════════════════════════════════
-// Configuration instructions
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_config() {
-    // vsetvli a0, a1, e32, m4, ta, ma — bit31=0
-    // zimm = e32(010 << 3) + m4(010) + ta(1<<6) + ma(1<<7) = 0b11_010_010 = 0xD2
+    // vsetvli a0, a1, e32, m4, ta, ma. zimm = 0b11_010_010 = 0xD2.
     let zimm: u32 = 0xD2;
     let inst = (zimm << 20) | (11 << 15) | (OPCFG << 12) | (10 << 7) | OP_V;
     let text = disassemble(inst);
@@ -131,8 +124,7 @@ fn test_rvv_config() {
     assert!(text.contains("ta"), "expected ta in '{text}'");
     assert!(text.contains("ma"), "expected ma in '{text}'");
 
-    // vsetivli a0, 16, e8, m1, tu, mu
-    // zimm = e8(000<<3) + m1(000) + tu(0<<6) + mu(0<<7) = 0x00
+    // vsetivli a0, 16, e8, m1, tu, mu. zimm = 0x00.
     let zimm: u32 = 0x00;
     let inst = (3 << 30) | (zimm << 20) | (16 << 15) | (OPCFG << 12) | (10 << 7) | OP_V;
     let text = disassemble(inst);
@@ -147,10 +139,6 @@ fn test_rvv_config() {
     assert!(text.contains("a1"), "expected a1 in '{text}'");
     assert!(text.contains("a2"), "expected a2 in '{text}'");
 }
-
-// ══════════════════════════════════════════════════════════
-// Integer arithmetic
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rvv_int_arith() {
@@ -187,10 +175,6 @@ fn test_rvv_int_arith() {
     assert!(disassemble(vec_arith(0b000111, 1, 2, 3, OPIVV, 1)).starts_with("vmax.vv"));
 }
 
-// ══════════════════════════════════════════════════════════
-// Integer multiply/divide
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_int_mul_div() {
     assert!(disassemble(vec_arith(0b100101, 1, 2, 3, OPMVV, 1)).starts_with("vmul.vv"));
@@ -214,10 +198,6 @@ fn test_rvv_int_mul_div() {
     assert!(disassemble(vec_arith(0b100001, 1, 2, 10, OPMVX, 1)).starts_with("vdiv.vx"));
 }
 
-// ══════════════════════════════════════════════════════════
-// Comparison
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_comparison() {
     assert!(disassemble(vec_arith(0b011000, 1, 2, 3, OPIVV, 1)).starts_with("vmseq.vv"));
@@ -230,10 +210,6 @@ fn test_rvv_comparison() {
     assert!(disassemble(vec_arith(0b011111, 1, 2, 3, OPIVX, 1)).starts_with("vmsgt.vx"));
 }
 
-// ══════════════════════════════════════════════════════════
-// Widening / narrowing
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_widening() {
     assert!(disassemble(vec_arith(0b110000, 1, 2, 3, OPMVV, 1)).starts_with("vwaddu.vv"));
@@ -245,10 +221,6 @@ fn test_rvv_widening() {
     assert!(disassemble(vec_arith(0b101100, 1, 2, 3, OPIVV, 1)).starts_with("vnsrl.vv"));
     assert!(disassemble(vec_arith(0b101101, 1, 2, 3, OPIVV, 1)).starts_with("vnsra.vv"));
 }
-
-// ══════════════════════════════════════════════════════════
-// FP arithmetic
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rvv_fp_arith() {
@@ -297,10 +269,6 @@ fn test_rvv_fp_arith() {
     assert!(disassemble(inst).starts_with("vfncvt.f.f.w"), "{}", disassemble(inst));
 }
 
-// ══════════════════════════════════════════════════════════
-// FP comparison
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_fp_compare() {
     assert!(disassemble(vec_arith(0b011000, 1, 2, 3, OPFVV, 1)).starts_with("vmfeq.vv"));
@@ -312,10 +280,6 @@ fn test_rvv_fp_compare() {
     assert!(disassemble(vec_arith(0b011101, 1, 2, 3, OPFVF, 1)).starts_with("vmfgt.vf"));
     assert!(disassemble(vec_arith(0b011111, 1, 2, 3, OPFVF, 1)).starts_with("vmfge.vf"));
 }
-
-// ══════════════════════════════════════════════════════════
-// Loads and stores
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rvv_loads_stores() {
@@ -376,10 +340,6 @@ fn test_rvv_loads_stores() {
     assert!(text.starts_with("vlseg2e32.v"), "got '{text}'");
 }
 
-// ══════════════════════════════════════════════════════════
-// Mask operations
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn test_rvv_mask() {
     // vmand.mm v1, v2, v3  (funct6=0b011001 under OPMVV)
@@ -425,10 +385,6 @@ fn test_rvv_mask() {
     let inst = vec_arith(0b010010, 1, 2, 0b00101, OPMVV, 1);
     assert!(disassemble(inst).starts_with("vsext.vf4"), "{}", disassemble(inst));
 }
-
-// ══════════════════════════════════════════════════════════
-// Permute operations
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rvv_permute() {
@@ -495,10 +451,6 @@ fn test_rvv_permute() {
     let text = disassemble(inst);
     assert!(text.starts_with("vfmv.s.f"), "got '{text}'");
 }
-
-// ══════════════════════════════════════════════════════════
-// Widening reductions
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn test_rvv_reductions() {

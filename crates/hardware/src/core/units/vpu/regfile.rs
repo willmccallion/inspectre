@@ -1,8 +1,8 @@
-//! VectorRegFile trait: abstracting vector register access for O3 pipeline integration.
+//! `VectorRegFile` trait: abstracts vector register access for O3 pipeline integration.
 //!
 //! The VPU execution modules (alu, fpu, reduction, mask, permute) are generic over
 //! this trait, allowing them to operate on either the architectural VPR (in-order
-//! backend) or a VecPrfView (O3 backend with physical register renaming).
+//! backend) or a `VecPrfView` (O3 backend with physical register renaming).
 
 use crate::core::units::vpu::types::{ElemIdx, Sew, VRegIdx, Vlen};
 
@@ -31,7 +31,6 @@ pub trait VectorRegFile {
     fn vlen(&self) -> Vlen;
 }
 
-// Implement for the architectural VPR.
 impl VectorRegFile for crate::core::arch::vpr::Vpr {
     #[inline]
     fn read_element(&self, vreg: VRegIdx, index: ElemIdx, sew: Sew) -> u64 {

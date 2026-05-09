@@ -200,27 +200,12 @@ impl VirtioBlock {
     }
 
     /// Loads a disk image into the device.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - The raw bytes of the disk image.
     pub fn load(&mut self, data: Vec<u8>) {
         self.disk_image = data;
     }
 
-    /// Performs a Direct Memory Access (DMA) read from system RAM.
-    ///
-    /// Reads `len` bytes from the physical address `addr`.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Physical address to read from.
-    /// * `len` - Number of bytes to read.
-    ///
-    /// # Returns
-    ///
-    /// A vector containing the read bytes. Returns zeroed bytes if the address
-    /// is out of bounds.
+    /// Reads `len` bytes from system RAM at physical address `addr` via DMA.
+    /// Returns zeroed bytes if the address is out of bounds.
     fn dma_read(&self, addr: u64, len: usize) -> Vec<u8> {
         if addr < self.ram_base {
             return vec![0; len];
@@ -249,14 +234,7 @@ impl VirtioBlock {
         u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
     }
 
-    /// Performs a Direct Memory Access (DMA) write to system RAM.
-    ///
-    /// Writes `data` to the physical address `addr`.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Physical address to write to.
-    /// * `data` - Bytes to write.
+    /// Writes `data` to system RAM at physical address `addr` via DMA.
     fn dma_write(&self, addr: u64, data: &[u8]) {
         if addr < self.ram_base {
             println!("[VirtIO] DMA Write Out of Bounds (Low): 0x{addr:x}");
@@ -276,10 +254,7 @@ impl VirtioBlock {
         self.ram.write_slice(offset, data);
     }
 
-    /// Processes the `VirtQueue`.
-    ///
-    /// Reads descriptors from the Available Ring, executes the requests (Read/Write),
-    /// and updates the Used Ring. This is triggered by a write to the Queue Notify register.
+    /// Processes the `VirtQueue` (triggered on Queue Notify write).
     fn process_queue(&mut self) {
         if self.queue_num == 0 {
             return;
@@ -348,7 +323,7 @@ impl VirtioBlock {
                 let mut current_offset = 0;
 
                 if is_flush {
-                    // FLUSH: no data transfer, just acknowledge
+                    // no-op: flush has no data transfer
                 } else if is_write {
                     let mut current_disk_offset = sector_offset;
 
@@ -398,19 +373,14 @@ impl VirtioBlock {
 }
 
 impl Device for VirtioBlock {
-    /// Returns the device name.
     fn name(&self) -> &'static str {
         "VirtIO-Blk"
     }
 
-    /// Returns the address range (Base, Size).
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x1000)
     }
 
-    /// Reads a word (32-bit) from the device.
-    ///
-    /// Handles reads from `VirtIO` MMIO registers (Magic, Version, `DeviceID`, Status, etc.).
     fn read_u32(&mut self, offset: u64) -> u32 {
         match offset {
             REG_MAGIC => VIRTIO_MMIO_MAGIC_VALUE,
@@ -443,9 +413,6 @@ impl Device for VirtioBlock {
         }
     }
 
-    /// Writes a word (32-bit) to the device.
-    ///
-    /// Handles writes to `VirtIO` MMIO registers (Status, Queue configuration, Notify).
     fn write_u32(&mut self, offset: u64, val: u32) {
         match offset {
             REG_DEVICE_FEATURES_SEL => self.device_features_sel = val,
@@ -468,39 +435,29 @@ impl Device for VirtioBlock {
         }
     }
 
-    /// Reads a byte (delegates to `read_u32`).
     fn read_u8(&mut self, offset: u64) -> u8 {
         (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u8
     }
-    /// Reads a half-word (delegates to `read_u32`).
     fn read_u16(&mut self, offset: u64) -> u16 {
         (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u16
     }
-    /// Reads a double-word (delegates to `read_u32`).
     fn read_u64(&mut self, offset: u64) -> u64 {
         self.read_u32(offset) as u64
     }
-    /// Writes a byte (delegates to `write_u32`).
     fn write_u8(&mut self, offset: u64, val: u8) {
         self.write_u32(offset & !3, val as u32);
     }
-    /// Writes a half-word (delegates to `write_u32`).
     fn write_u16(&mut self, offset: u64, val: u16) {
         self.write_u32(offset & !3, val as u32);
     }
-    /// Writes a double-word (delegates to `write_u32`).
     fn write_u64(&mut self, offset: u64, val: u64) {
         self.write_u32(offset, val as u32);
     }
 
-    /// Advances the device state.
-    ///
-    /// Returns true if an interrupt is pending.
     fn tick(&mut self) -> bool {
         (self.interrupt_status & 1) != 0
     }
 
-    /// Returns the Interrupt Request (IRQ) ID associated with this device.
     fn get_irq_id(&self) -> Option<IrqId> {
         Some(IrqId::new(1))
     }

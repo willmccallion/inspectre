@@ -41,9 +41,7 @@ impl MockMemory {
 
     fn check_fault(&self, offset: u64) {
         let addr = self.base + offset;
-        // In a real scenario, this would trigger a bus error signal.
-        // Since the Device trait doesn't support errors, we panic to simulate
-        // a catastrophic failure that the test harness should catch or expect.
+        // Device trait has no error channel, so injected faults panic.
         assert!(
             !self.fault_addrs.lock().unwrap().contains(&addr),
             "Bus Error injected at address {:#x}",
@@ -127,8 +125,6 @@ impl Device for MockMemory {
     }
 
     fn as_memory_mut(&mut self) -> Option<&mut Memory> {
-        // We cannot downcast to real Memory because we are not it.
-        // Return None.
         None
     }
 }

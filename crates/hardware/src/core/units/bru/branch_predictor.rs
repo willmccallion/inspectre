@@ -96,13 +96,11 @@ impl Ghr {
     /// All positions shift up by 1 (position K moves to K+1). The new
     /// outcome is inserted at position 0. Bits beyond `len` are masked off.
     pub fn push(&mut self, taken: bool) {
-        // Shift all words left by 1, carrying MSB to next word's LSB.
         for i in (1..GHR_MAX_WORDS).rev() {
             self.bits[i] = (self.bits[i] << 1) | (self.bits[i - 1] >> 63);
         }
         self.bits[0] = (self.bits[0] << 1) | (taken as u64);
 
-        // Mask the top word to len bits.
         let len = self.len as usize;
         if len > 0 && len < GHR_MAX_WORDS * 64 {
             let top_word_idx = len / 64;

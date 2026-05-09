@@ -47,6 +47,3 @@ pub mod unit;
 
 /// Integration tests for complete instruction execution and system behavior.
 pub mod integration;
-
-// pub mod fuzz;
-// pub mod compliance;

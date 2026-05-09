@@ -3,16 +3,12 @@
 //! This module contains the interface and implementations for various
 //! hardware prefetchers used to hide memory latency.
 
-/// Next-line prefetcher (prefetches sequential cache lines).
 pub mod next_line;
 
-/// Stream prefetcher (detects ascending/descending access streams).
 pub mod stream;
 
-/// Stride prefetcher (detects constant-stride access patterns).
 pub mod stride;
 
-/// Tagged prefetcher (prefetches on demand misses and prefetch hits).
 pub mod tagged;
 
 pub use self::next_line::NextLinePrefetcher;

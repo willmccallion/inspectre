@@ -7,10 +7,6 @@
 use crate::common::builder::instruction::InstructionBuilder;
 use crate::common::harness::TestContext;
 
-// ══════════════════════════════════════════════════════════
-// Helper constants
-// ══════════════════════════════════════════════════════════
-
 const BASE_ADDR: u64 = 0x8000_0000;
 const MEM_SIZE: usize = 0x1000;
 
@@ -19,21 +15,8 @@ fn ctx() -> TestContext {
     TestContext::new().with_memory(MEM_SIZE, BASE_ADDR)
 }
 
-// ══════════════════════════════════════════════════════════
-// 1. Taken branch flushes speculated instructions
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn taken_branch_redirects_pc() {
-    // Program:
-    //   0: x1 = 10
-    //   4: x2 = 20
-    //   8: BEQ x1, x1, +8  (always taken → jumps to 16)
-    //  12: x3 = 99          (should NOT execute — flushed)
-    //  16: x4 = 42          (branch target)
-    //  20: NOP
-    //  24: NOP
-    //  28: NOP
     let nop = InstructionBuilder::new().nop().build();
     let mut tc = ctx().load_program(
         BASE_ADDR,
@@ -57,18 +40,8 @@ fn taken_branch_redirects_pc() {
     assert_eq!(tc.get_reg(4), 42, "x4 should be 42 (branch target)");
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Not-taken branch continues sequentially
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn not_taken_branch_continues() {
-    // Program:
-    //   0: x1 = 10
-    //   4: x2 = 20
-    //   8: BEQ x1, x2, +8  (not taken: 10 != 20)
-    //  12: x3 = 33          (should execute)
-    //  16: NOP ...
     let nop = InstructionBuilder::new().nop().build();
     let mut tc = ctx().load_program(
         BASE_ADDR,
@@ -89,20 +62,9 @@ fn not_taken_branch_continues() {
     assert_eq!(tc.get_reg(3), 33, "Not-taken: x3 should execute normally");
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. JAL unconditional jump
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn jal_redirects_and_links() {
-    // Program:
-    //   0: JAL x1, +12     (jump to 12, x1 = 4)
-    //   4: x6 = 99         (should NOT execute — flushed)
-    //   8: x7 = 99         (should NOT execute — flushed)
-    //  12: x4 = 55         (target)
-    //  16: NOP...
-    //
-    // Note: avoid x2 (sp) — it is pre-initialised in direct mode.
+    // Avoid x2 (sp): it is pre-initialised in direct mode.
     let nop = InstructionBuilder::new().nop().build();
     let mut tc = ctx().load_program(
         BASE_ADDR,
@@ -125,23 +87,9 @@ fn jal_redirects_and_links() {
     assert_eq!(tc.get_reg(4), 55, "x4 should be 55 (jump target)");
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. JALR indirect jump
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn jalr_indirect_jump() {
-    // Program:
-    //   0: AUIPC x5, 0      (x5 = PC = BASE_ADDR, avoids LUI sign-extension)
-    //   4: ADDI  x5, x5, 16 (x5 = BASE_ADDR + 16 = target)
-    //   8: JALR  x1, x5, 0  (jump to x5, link x1)
-    //  12: x6 = 99           (should NOT execute)
-    //  16: x3 = 77           (target)
-    //  20: NOP...
-    //
-    // Note: LUI x5, 0x80000 sign-extends bit 31 on RV64 → 0xFFFF_FFFF_8000_0000.
-    // AUIPC adds PC (already 64-bit) + 0, giving the correct 0x8000_0000.
-    // Note: avoid x2 (sp) — it is pre-initialised in direct mode.
+    // AUIPC instead of LUI: LUI x5, 0x80000 would sign-extend to 0xFFFF_FFFF_8000_0000 on RV64.
     let nop = InstructionBuilder::new().nop().build();
     let mut tc = ctx().load_program(
         BASE_ADDR,
@@ -164,19 +112,8 @@ fn jalr_indirect_jump() {
     assert_eq!(tc.get_reg(6), 0, "x6 should NOT execute (flushed)");
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Branch backward (loop-like pattern)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn backward_branch_loop() {
-    // Simple loop: x1 counts from 0 to 3.
-    //   0: x1 = 0
-    //   4: x2 = 3
-    //   8: ADDI x1, x1, 1     (loop body — increment)
-    //  12: BNE x1, x2, -4     (branch backward to 8 if x1 != x2)
-    //  16: x3 = 100            (post-loop)
-    //  20: NOP...
     let nop = InstructionBuilder::new().nop().build();
     let mut tc = ctx().load_program(
         BASE_ADDR,
@@ -197,10 +134,6 @@ fn backward_branch_loop() {
     assert_eq!(tc.get_reg(1), 3, "x1 should be 3 after loop");
     assert_eq!(tc.get_reg(3), 100, "x3 should be 100 after loop exit");
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. All branch variants execute correctly
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn blt_taken() {

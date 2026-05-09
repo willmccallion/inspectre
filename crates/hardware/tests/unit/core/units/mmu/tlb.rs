@@ -11,10 +11,6 @@
 use rvsim_core::common::{Asid, Ppn, Vpn};
 use rvsim_core::core::units::mmu::tlb::{Tlb, TlbHit};
 
-// ══════════════════════════════════════════════════════════
-// Helpers
-// ══════════════════════════════════════════════════════════
-
 // PTE permission bits
 const PTE_V: u64 = 1 << 0;
 const PTE_R: u64 = 1 << 1;
@@ -40,10 +36,6 @@ fn make_pte(r: bool, w: bool, x: bool, u: bool) -> u64 {
     }
     pte
 }
-
-// ══════════════════════════════════════════════════════════
-// 1. Basic Operations
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn lookup_miss_on_empty() {
@@ -72,10 +64,6 @@ fn insert_and_lookup_hit() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Permission Bit Extraction
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn permissions_extracted_correctly() {
     let mut tlb = Tlb::new(16);
@@ -99,10 +87,6 @@ fn permissions_extracted_correctly() {
     tlb.insert(Vpn::new(0x13), Ppn::new(0x103), make_pte(true, true, true, true), Asid::new(0));
     assert!(tlb.lookup(Vpn::new(0x13), Asid::new(0)).unwrap().u);
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Aliasing / Conflict Misses
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn aliasing_eviction() {
@@ -136,10 +120,6 @@ fn tag_mismatch() {
     assert_eq!(tlb.lookup(alias_vpn, Asid::new(0)), None, "Tag mismatch should result in miss");
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. Flushing
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn flush_clears_entries() {
     let mut tlb = Tlb::new(16);
@@ -154,10 +134,6 @@ fn flush_clears_entries() {
     assert_eq!(tlb.lookup(Vpn::new(0x1), Asid::new(0)), None);
     assert_eq!(tlb.lookup(Vpn::new(0x2), Asid::new(0)), None);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Capacity
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn fill_capacity() {
@@ -177,18 +153,12 @@ fn fill_capacity() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. ASID Tagging
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn asid_isolation() {
     let mut tlb = Tlb::new(256);
     let vpn = Vpn::new(0x42);
 
-    // Insert same VPN with different ASIDs into different index slots
-    // Since TLB is direct-mapped, same VPN maps to same index — last write wins.
-    // Instead, test that lookup with wrong ASID misses.
+    // Direct-mapped TLB: same VPN with different ASIDs would overwrite. Test ASID-mismatch miss.
     tlb.insert(vpn, Ppn::new(0x100), PTE_V | PTE_R, Asid::new(1));
     assert!(tlb.lookup(vpn, Asid::new(1)).is_some(), "Same ASID should hit");
     assert_eq!(tlb.lookup(vpn, Asid::new(2)), None, "Different ASID should miss");

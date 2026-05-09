@@ -98,17 +98,14 @@ impl WriteCombiningBuffer {
 
         self.access_counter += 1;
 
-        // Try to find an existing entry for this cache line
         for entry in &mut self.entries {
             if entry.active && entry.line_addr == line_addr {
-                // Coalesce: merge bytes into existing entry
                 Self::write_bytes(entry, offset, data, width_bytes);
                 entry.lru_counter = self.access_counter;
                 return None;
             }
         }
 
-        // No existing entry — try to find a free slot
         for entry in &mut self.entries {
             if !entry.active {
                 entry.active = true;
@@ -121,11 +118,9 @@ impl WriteCombiningBuffer {
             }
         }
 
-        // All entries occupied — evict LRU
         let lru_idx = self.find_lru();
         let evicted_addr = self.entries[lru_idx].line_addr;
 
-        // Reset the entry for the new line
         self.entries[lru_idx].line_addr = line_addr;
         self.entries[lru_idx].valid_mask = 0;
         self.entries[lru_idx].data = [0; 64];

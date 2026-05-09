@@ -6,10 +6,6 @@
 use rvsim_core::common::error::Trap;
 use rvsim_core::core::units::lsu::unaligned;
 
-// ══════════════════════════════════════════════════════════
-// 1. Alignment checking
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn byte_access_always_aligned() {
     // Size=1 is always aligned regardless of address.
@@ -63,10 +59,6 @@ fn zero_size_always_aligned() {
     assert!(unaligned::is_aligned(0xDEAD, 0));
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Trap generation
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn load_misaligned_trap_contains_address() {
     let trap = unaligned::load_misaligned_trap(0x1003);
@@ -90,10 +82,6 @@ fn store_misaligned_trap_max_address() {
     let trap = unaligned::store_misaligned_trap(u64::MAX);
     assert_eq!(trap, Trap::StoreAddressMisaligned(u64::MAX));
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Split load
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn split_load_single_byte() {
@@ -133,10 +121,6 @@ fn split_load_aligned_word_matches_direct_read() {
     let result = unaligned::split_load(0, 4, |addr| bytes[addr as usize]);
     assert_eq!(result, 0xDEADBEEF);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Split store
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn split_store_single_byte() {
@@ -183,10 +167,6 @@ fn split_store_then_load_round_trip() {
     let loaded = unaligned::split_load(3, 8, |addr| mem[addr as usize]);
     assert_eq!(loaded, val);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Cache line crossing detection
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn aligned_access_no_cache_line_crossing() {
@@ -239,10 +219,6 @@ fn different_cache_line_sizes() {
     assert!(!unaligned::crosses_cache_line(126, 2, 128));
     assert!(unaligned::crosses_cache_line(127, 2, 128));
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Latency calculation for unaligned accesses
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn aligned_access_zero_latency() {

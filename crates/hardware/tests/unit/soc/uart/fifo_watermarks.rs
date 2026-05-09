@@ -87,8 +87,7 @@ fn uart_ier_write_and_read() {
 fn uart_iir_no_interrupt_initially() {
     let mut uart = Uart::new(0, true, true);
     let iir = uart.read_u8(2);
-    // Bit 0 should be 1 (no interrupt pending) per 16550 spec
-    // IIR has bits 7:6 set, plus the ID
+    // 16550: IIR bit 0 = 1 means "no interrupt pending".
     assert_ne!(iir & 0x01, 0, "No interrupt pending initially");
 }
 

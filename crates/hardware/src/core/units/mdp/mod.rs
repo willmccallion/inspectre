@@ -9,17 +9,12 @@
 pub use self::mem_dep_predictor::MdpStats;
 pub use self::mem_dep_unit::{MemDepState, MemDepUnit};
 
-/// Memory dependence predictor trait and prediction types.
 mod mem_dep_predictor;
 
-/// Blind (conservative) predictor — always waits for all older stores.
 mod blind;
 
-/// Store-set predictor (Chrysos & Emer 1998).
 mod store_set;
 
-/// Newtypes for store-set predictor internals.
 mod types;
 
-/// Gem5-style dependency tracker with wakeup.
 mod mem_dep_unit;

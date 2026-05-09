@@ -1,9 +1,4 @@
-//! Binary Loader and System Initialization.
-//!
-//! This module provides utilities for loading binaries and setting up the initial CPU state. It performs:
-//! 1. **Binary loading:** Reads kernel, firmware, or bare-metal binaries from disk into a byte buffer.
-//! 2. **Kernel boot:** Loads `OpenSBI`, kernel image, and DTB at fixed addresses and sets PC and privilege.
-//! 3. **Bare-metal fallback:** When no `OpenSBI` is present, sets up MRET trampoline and MEPC for direct boot.
+//! Binary Loader and System Initialization (ELF + kernel/OpenSBI/DTB).
 
 use crate::common::{PhysAddr, SimError};
 use crate::config::Config;
@@ -18,10 +13,6 @@ use std::fs;
 
 /// Loads a binary file from disk into a byte vector.
 ///
-/// # Arguments
-///
-/// * `path` - Path to the binary file.
-///
 /// # Errors
 ///
 /// Returns [`SimError::FileRead`] if the file cannot be opened or read.
@@ -33,14 +24,6 @@ pub fn load_binary(path: &str) -> Result<Vec<u8>, SimError> {
 ///
 /// If `OpenSBI` is found, loads it at `ram_base`, kernel at `ram_base + 0x200000`, DTB at `ram_base + 0x2200000`,
 /// and sets PC to `OpenSBI` with a0/a1/a2 for DTB. Otherwise uses an MRET trampoline at `ram_base` and sets MEPC to kernel.
-///
-/// # Arguments
-///
-/// * `cpu` - Mutable reference to the CPU state.
-/// * `config` - System configuration (RAM base, kernel offset).
-/// * `_disk_path` - Reserved for disk path; currently unused.
-/// * `dtb_path` - Optional path to the device tree blob; if provided, loaded at DTB address.
-/// * `kernel_path_override` - Optional kernel image path; overrides default `software/linux/output/Image`.
 ///
 /// # Errors
 ///
@@ -63,7 +46,6 @@ pub fn setup_kernel_load(
         let dtb_data = load_binary(&path)?;
         cpu.bus.load_binary_at(&dtb_data, PhysAddr::new(dtb_addr));
     } else {
-        // Generate DTB from SoC config when no external DTB is provided.
         let dtb_data = crate::sim::dtb::generate_dtb(config);
         cpu.bus.load_binary_at(&dtb_data, PhysAddr::new(dtb_addr));
     }
@@ -91,19 +73,12 @@ pub fn setup_kernel_load(
 
         cpu.pc = opensbi_addr;
         cpu.privilege = PrivilegeMode::Machine;
-        cpu.regs.write(abi::REG_A0, 0); // hartid
-        cpu.regs.write(abi::REG_A1, dtb_addr); // FDT address
+        cpu.regs.write(abi::REG_A0, 0);
+        cpu.regs.write(abi::REG_A1, dtb_addr);
 
         if sbi_path == sbi_dynamic_path {
-            // Build the fw_dynamic_info struct in RAM and pass its address in a2.
-            // struct fw_dynamic_info (each field is u64 on rv64):
-            //   magic:     0x4942534f ("OSBI")
-            //   version:   2
-            //   next_addr: kernel entry point
-            //   next_mode: 1 (Supervisor)
-            //   options:   0
-            //   boot_hart: -1 (any hart)
-            //   next_arg1: DTB address passed to next stage (kernel)
+            // fw_dynamic_info struct: magic, version, next_addr, next_mode,
+            // options, boot_hart, next_arg1 (each u64 on rv64).
             const FW_DYNAMIC_INFO_MAGIC: u64 = 0x4942534f;
             const FW_DYNAMIC_INFO_VERSION: u64 = 2;
             const NEXT_MODE_S: u64 = 1;
@@ -113,9 +88,9 @@ pub fn setup_kernel_load(
                 FW_DYNAMIC_INFO_VERSION,
                 kernel_addr,
                 NEXT_MODE_S,
-                0,        // options
-                u64::MAX, // boot_hart = any
-                dtb_addr, // next_arg1 = DTB for kernel
+                0,
+                u64::MAX,
+                dtb_addr,
             ];
             let mut info_bytes = Vec::with_capacity(56);
             for field in &fields {
@@ -162,10 +137,8 @@ pub fn try_load_elf(data: &[u8], bus: &mut Bus) -> Option<ElfLoadResult> {
     let file = object::File::parse(data).ok()?;
     let entry = file.entry();
 
-    // Load ELF segments into memory
     for segment in file.segments() {
         use object::ObjectSegment;
-        // We only care about loadable segments (PT_LOAD flags)
         let p_memsz = segment.size();
         if p_memsz == 0 {
             continue;
@@ -175,7 +148,6 @@ pub fn try_load_elf(data: &[u8], bus: &mut Bus) -> Option<ElfLoadResult> {
             if !seg_data.is_empty() {
                 bus.load_binary_at(seg_data, PhysAddr::new(paddr));
             }
-            // Zero-fill the BSS gap (p_memsz > p_filesz)
             let p_filesz = seg_data.len() as u64;
             if p_memsz > p_filesz {
                 let bss_start = paddr + p_filesz;
@@ -183,12 +155,10 @@ pub fn try_load_elf(data: &[u8], bus: &mut Bus) -> Option<ElfLoadResult> {
                 bus.load_binary_at(&vec![0u8; bss_size], PhysAddr::new(bss_start));
             }
         } else if p_memsz > 0 {
-            // No file data but memsz > 0: zero-fill the entire region
             bus.load_binary_at(&vec![0u8; p_memsz as usize], PhysAddr::new(paddr));
         }
     }
 
-    // Find tohost symbol
     let tohost_addr = file.symbols().find(|s| s.name() == Ok("tohost")).map(|s| s.address());
 
     Some(ElfLoadResult { entry, tohost_addr })
@@ -239,12 +209,9 @@ mod tests {
     #[test]
     fn test_setup_kernel_load_fallback() {
         let config = Config::default();
-        // Create an empty system.
         let system = crate::soc::builder::System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // We assume the OpenSBI files do not exist in the test environment,
-        // so it will hit the fallback path.
         setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
 
         let ram_base = config.system.ram_base;
@@ -254,6 +221,6 @@ mod tests {
         assert_eq!(cpu.privilege, PrivilegeMode::Machine);
         assert_eq!(cpu.csr_read(csr::MEPC), load_addr);
         assert_eq!(cpu.regs.read(abi::REG_A0), 0);
-        assert_eq!(cpu.regs.read(abi::REG_A1), ram_base + 0x2200000); // dtb_addr
+        assert_eq!(cpu.regs.read(abi::REG_A1), ram_base + 0x2200000);
     }
 }

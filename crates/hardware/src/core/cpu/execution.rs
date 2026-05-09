@@ -1,10 +1,4 @@
-//! Main Execution Loop.
-//!
-//! This module implements the core execution cycle of the CPU. It performs the following:
-//! 1. **Pipeline Coordination:** Orchestrates the movement of instructions through the pipeline.
-//! 2. **Interrupt Handling:** Monitors and processes timer, external, and software interrupts.
-//! 3. **Timing Management:** Updates simulation cycles and handles multi-cycle operation stalls.
-//! 4. **Observability:** Provides tracing and pipeline visualization for debugging.
+//! Main Execution Loop — pre/post-tick orchestration of pipeline, interrupts, and cycles.
 
 use super::Cpu;
 use crate::common::constants::{
@@ -55,8 +49,6 @@ impl Cpu {
                 } else {
                     let paddr = crate::common::PhysAddr::new(self.pc);
                     if self.bus.bus.is_valid_address(paddr) {
-                        // No TLB entry — likely M-mode with paging disabled;
-                        // treat PC as a physical address.
                         self.bus.bus.read_u32(paddr)
                     } else {
                         0

@@ -40,12 +40,9 @@ impl FoldedHistory {
             return;
         }
         let mask = (1u64 << w) - 1;
-        // Circular left rotate within fold_width bits.
         let msb = (self.val >> (w - 1)) & 1;
         self.val = ((self.val << 1) | msb) & mask;
-        // XOR in the new bit at position 0.
         self.val ^= new_bit as u64;
-        // XOR out the old (leaving) bit at its folded position.
         self.val ^= (old_bit as u64) << (self.hist_length % w);
         self.val &= mask;
     }
@@ -70,7 +67,6 @@ impl FoldedHistory {
 
         for word_idx in 0..num_words {
             let mut word = ghr.word(word_idx);
-            // Mask last word to hist_length boundary.
             let bits_in_word = (self.hist_length - word_idx * 64).min(64);
             if bits_in_word < 64 {
                 word &= (1u64 << bits_in_word) - 1;
@@ -79,7 +75,6 @@ impl FoldedHistory {
                 continue;
             }
 
-            // Fold 64-bit word into w bits by XOR-ing w-bit chunks.
             let mut folded = 0u64;
             let mut v = word;
             while v != 0 {
@@ -87,9 +82,6 @@ impl FoldedHistory {
                 v >>= w;
             }
 
-            // Rotate to correct alignment: bit position `word_idx*64 + b` in the
-            // GHR maps to CSR position `(word_idx*64 + b) % w`. The fold above
-            // placed bits as if `word_idx*64 == 0`, so rotate left by the offset.
             let rot = (word_idx * 64) % w;
             if rot > 0 {
                 folded = ((folded << rot) | (folded >> (w - rot))) & mask;

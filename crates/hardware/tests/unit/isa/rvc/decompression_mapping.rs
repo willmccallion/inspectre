@@ -14,10 +14,6 @@ use rvsim_core::isa::rv64i::funct3 as i_f3;
 use rvsim_core::isa::rv64i::funct7 as i_f7;
 use rvsim_core::isa::rv64i::opcodes as i_op;
 
-// ──────────────────────────────────────────────────────────
-// Helper: decode expanded instruction for field checks
-// ──────────────────────────────────────────────────────────
-
 /// Expand a 16-bit compressed instruction and decode the resulting 32-bit instruction.
 fn expand_and_decode(cinst: u16) -> rvsim_core::isa::instruction::Decoded {
     let expanded = expand(cinst);
@@ -25,18 +21,9 @@ fn expand_and_decode(cinst: u16) -> rvsim_core::isa::instruction::Decoded {
     decode(expanded)
 }
 
-// ══════════════════════════════════════════════════════════
-// Quadrant 0 (bits 1:0 = 00)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn rvc_c_addi4spn() {
     // C.ADDI4SPN rd', nzuimm → ADDI rd'+8, x2, nzuimm
-    // Encoding: funct3=000 | imm[5:4|9:6|2|3] | rd' | 00
-    // Let's encode nzuimm=16 (smallest non-zero aligned), rd'=0 → x8
-    // imm bits: [9:6]=0, [5:4]=01, [3]=0, [2]=0 → nzuimm=16
-    // inst[12:5] encode the immediate, inst[4:2] encode rd'
-    // bit layout: [12:11]=imm[5:4], [10:7]=imm[9:6], [6]=imm[2], [5]=imm[3], [4:2]=rd', [1:0]=00
     let cinst: u16 = 0b0000_1000_0000_0000; // nzuimm=16, rd'=0(x8)
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -56,9 +43,6 @@ fn rvc_c_addi4spn_zero_is_illegal() {
 #[test]
 fn rvc_c_lw() {
     // C.LW rd', offset(rs1') → LW rd'+8, offset(rs1'+8)
-    // funct3=010, offset 5-bit scaled by 4
-    // Encode: rs1'=0(x8), rd'=1(x9), offset=0
-    // bits: [15:13]=010 [12:10]=imm [9:7]=rs1' [6:5]=imm [4:2]=rd' [1:0]=00
     let cinst: u16 = 0b0100_0000_0000_0100; // rs1'=0(x8), rd'=1(x9), offset=0
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_LOAD);
@@ -70,7 +54,6 @@ fn rvc_c_lw() {
 #[test]
 fn rvc_c_ld() {
     // C.LD rd', offset(rs1') → LD rd'+8, offset(rs1'+8)
-    // funct3=011
     let cinst: u16 = 0b0110_0000_0010_0000;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_LOAD);
@@ -80,7 +63,6 @@ fn rvc_c_ld() {
 #[test]
 fn rvc_c_fld() {
     // C.FLD rd', offset(rs1') → FLD rd'+8, offset(rs1'+8)
-    // funct3=001
     let cinst: u16 = 0b0010_0000_0010_0000;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, f_op::OP_LOAD_FP);
@@ -90,7 +72,6 @@ fn rvc_c_fld() {
 #[test]
 fn rvc_c_sw() {
     // C.SW rs2', offset(rs1') → SW rs2'+8, offset(rs1'+8)
-    // funct3=110
     let cinst: u16 = 0b1100_0000_0010_0000;
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -102,7 +83,6 @@ fn rvc_c_sw() {
 #[test]
 fn rvc_c_sd() {
     // C.SD rs2', offset(rs1') → SD rs2'+8, offset(rs1'+8)
-    // funct3=111
     let cinst: u16 = 0b1110_0000_0010_0000;
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -114,7 +94,6 @@ fn rvc_c_sd() {
 #[test]
 fn rvc_c_fsd() {
     // C.FSD rs2', offset(rs1') → FSD rs2'+8, offset(rs1'+8)
-    // funct3=101
     let cinst: u16 = 0b1010_0000_0010_0000;
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -122,15 +101,9 @@ fn rvc_c_fsd() {
     assert_eq!(d.opcode, f_op::OP_STORE_FP);
 }
 
-// ══════════════════════════════════════════════════════════
-// Quadrant 1 (bits 1:0 = 01)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn rvc_c_addi() {
-    // C.ADDI rd, nzimm → ADDI rd, rd, nzimm
-    // funct3=000, rd=1(x1), nzimm=1
-    // [12]=0, [11:7]=00001(rd=1), [6:2]=00001(imm[4:0]=1), [1:0]=01
+    // C.ADDI rd, nzimm → ADDI rd, rd, nzimm. Encoded: rd=1(x1), nzimm=1.
     let cinst: u16 = 0b0000_0000_1000_0101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -151,7 +124,6 @@ fn rvc_c_addi_negative() {
 #[test]
 fn rvc_c_addiw() {
     // C.ADDIW rd, imm → ADDIW rd, rd, imm
-    // funct3=001, rd=5, imm=3
     let cinst: u16 = 0b0010_0010_1000_1101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM_32);
@@ -170,7 +142,6 @@ fn rvc_c_addiw_rd0_illegal() {
 #[test]
 fn rvc_c_li() {
     // C.LI rd, imm → ADDI rd, x0, imm
-    // funct3=010, rd=3, imm=7
     let cinst: u16 = 0b0100_0001_1001_1101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -181,11 +152,7 @@ fn rvc_c_li() {
 
 #[test]
 fn rvc_c_addi16sp() {
-    // C.ADDI16SP nzimm → ADDI x2, x2, nzimm (rd=2)
-    // funct3=011, rd=2
-    // nzimm encoding: bit12=nzimm[9], bit6=nzimm[4], bit5=nzimm[6],
-    //                 bits[4:3]=nzimm[8:7], bit2=nzimm[5]
-    // For nzimm=16: nzimm[4]=1 → bit6=1, all others 0
+    // C.ADDI16SP nzimm → ADDI x2, x2, nzimm (rd=2). Encoded: nzimm=16.
     let cinst: u16 = 0b0110_0001_0100_0001; // bit6=1 → nzimm[4]=1 → nzimm=16
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -197,7 +164,6 @@ fn rvc_c_addi16sp() {
 #[test]
 fn rvc_c_lui() {
     // C.LUI rd, nzimm → LUI rd, nzimm (rd != 0, 2)
-    // funct3=011, rd=3, nzimm[5]=0, nzimm[4:0]=00001 → nzimm=1
     let cinst: u16 = 0b0110_0001_1000_0101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_LUI);
@@ -207,7 +173,6 @@ fn rvc_c_lui() {
 #[test]
 fn rvc_c_srli() {
     // C.SRLI rd', shamt → SRLI rd'+8, rd'+8, shamt
-    // funct3=100, funct2=00, rd'=0(x8), shamt=1
     let cinst: u16 = 0b1000_0000_0000_0101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -218,7 +183,6 @@ fn rvc_c_srli() {
 #[test]
 fn rvc_c_srai() {
     // C.SRAI rd', shamt → SRAI rd'+8, rd'+8, shamt
-    // funct3=100, funct2=01
     let cinst: u16 = 0b1000_0100_0000_0101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -229,7 +193,6 @@ fn rvc_c_srai() {
 #[test]
 fn rvc_c_andi() {
     // C.ANDI rd', imm → ANDI rd'+8, rd'+8, imm
-    // funct3=100, funct2=10
     let cinst: u16 = 0b1000_1000_0000_1101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -240,7 +203,6 @@ fn rvc_c_andi() {
 #[test]
 fn rvc_c_sub() {
     // C.SUB rd', rs2' → SUB rd'+8, rd'+8, rs2'+8
-    // funct3=100, funct2=11, bit12=0, sub_op=00
     let cinst: u16 = 0b1000_1100_0000_0101;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_REG);
@@ -300,12 +262,7 @@ fn rvc_c_addw() {
 
 #[test]
 fn rvc_c_j() {
-    // C.J offset → JAL x0, offset
-    // funct3=101 (bits[15:13])
-    // offset bits: bits[5:3]→offset[3:1], bit[11]→offset[4], bit[2]→offset[5],
-    //              bit[7]→offset[6], bit[6]→offset[7], bits[10:9]→offset[9:8],
-    //              bit[8]→offset[10], bit[12]→offset[11]
-    // For offset=2: need offset[1]=1 → bit3=1, all other offset bits=0
+    // C.J offset → JAL x0, offset.
     let cinst: u16 = 0xA009; // 0b1010_0000_0000_1001: funct3=101, bit3=1, op=01
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -317,7 +274,6 @@ fn rvc_c_j() {
 #[test]
 fn rvc_c_beqz() {
     // C.BEQZ rs1', offset → BEQ rs1'+8, x0, offset
-    // funct3=110
     let cinst: u16 = 0b1100_0000_0000_0101; // rs1'=0(x8), small offset
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -331,7 +287,6 @@ fn rvc_c_beqz() {
 #[test]
 fn rvc_c_bnez() {
     // C.BNEZ rs1', offset → BNE rs1'+8, x0, offset
-    // funct3=111
     let cinst: u16 = 0b1110_0000_0000_0101;
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -341,14 +296,9 @@ fn rvc_c_bnez() {
     assert_eq!(d.rs1, RegIdx::new(8));
 }
 
-// ══════════════════════════════════════════════════════════
-// Quadrant 2 (bits 1:0 = 10)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn rvc_c_slli() {
     // C.SLLI rd, shamt → SLLI rd, rd, shamt
-    // funct3=000, rd=1, shamt=4
     let cinst: u16 = 0b0000_0000_1001_0010;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_IMM);
@@ -367,9 +317,7 @@ fn rvc_c_slli_rd0_illegal() {
 
 #[test]
 fn rvc_c_lwsp() {
-    // C.LWSP rd, offset(sp) → LW rd, offset(x2)
-    // funct3=010, rd=1
-    // offset[5]=bit12, offset[4:2]=bits[6:4], offset[7:6]=bits[3:2]
+    // C.LWSP rd, offset(sp) → LW rd, offset(x2).
     let cinst: u16 = 0b0100_0000_1000_0010; // rd=1, offset=0
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_LOAD);
@@ -388,7 +336,6 @@ fn rvc_c_lwsp_rd0_illegal() {
 #[test]
 fn rvc_c_ldsp() {
     // C.LDSP rd, offset(sp) → LD rd, offset(x2)
-    // funct3=011
     let cinst: u16 = 0b0110_0000_1000_0010;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_LOAD);
@@ -406,7 +353,6 @@ fn rvc_c_ldsp_rd0_illegal() {
 #[test]
 fn rvc_c_fldsp() {
     // C.FLDSP rd, offset(sp) → FLD rd, offset(x2)
-    // funct3=001
     let cinst: u16 = 0b0010_0000_1000_0010;
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, f_op::OP_LOAD_FP);
@@ -417,7 +363,6 @@ fn rvc_c_fldsp() {
 #[test]
 fn rvc_c_jr() {
     // C.JR rs1 → JALR x0, rs1, 0 (bit12=0, rs2=0, rs1!=0)
-    // funct3=100
     let cinst: u16 = 0b1000_0010_1000_0010; // rs1=5, rs2=0, bit12=0
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_JALR);
@@ -428,7 +373,6 @@ fn rvc_c_jr() {
 #[test]
 fn rvc_c_mv() {
     // C.MV rd, rs2 → ADD rd, x0, rs2 (bit12=0, rs2!=0)
-    // funct3=100
     let cinst: u16 = 0b1000_0001_1001_0110; // rd=3, rs2=5, bit12=0
     let d = expand_and_decode(cinst);
     assert_eq!(d.opcode, i_op::OP_REG);
@@ -472,7 +416,6 @@ fn rvc_c_add() {
 #[test]
 fn rvc_c_swsp() {
     // C.SWSP rs2, offset(sp) → SW rs2, offset(x2)
-    // funct3=110
     let cinst: u16 = 0b1100_0000_0000_1110; // rs2=3, offset=0
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -486,7 +429,6 @@ fn rvc_c_swsp() {
 #[test]
 fn rvc_c_sdsp() {
     // C.SDSP rs2, offset(sp) → SD rs2, offset(x2)
-    // funct3=111
     let cinst: u16 = 0b1110_0000_0000_1110; // rs2=3, offset=0
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -499,7 +441,6 @@ fn rvc_c_sdsp() {
 #[test]
 fn rvc_c_fsdsp() {
     // C.FSDSP rs2, offset(sp) → FSD rs2, offset(x2)
-    // funct3=101
     let cinst: u16 = 0b1010_0000_0000_1110; // rs2=3, offset=0
     let expanded = expand(cinst);
     assert_ne!(expanded, 0);
@@ -507,10 +448,6 @@ fn rvc_c_fsdsp() {
     assert_eq!(d.opcode, f_op::OP_STORE_FP);
     assert_eq!(d.rs1, RegIdx::new(2));
 }
-
-// ══════════════════════════════════════════════════════════
-// Edge cases
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn rvc_quadrant_3_is_not_compressed() {

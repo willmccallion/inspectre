@@ -5,10 +5,6 @@
 
 use rvsim_core::soc::memory::buffer::DramBuffer;
 
-// ══════════════════════════════════════════════════════════
-// 1. Allocation and size
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn buffer_allocation_size() {
     let buf = DramBuffer::new(4096);
@@ -22,10 +18,6 @@ fn buffer_initial_zeroed() {
         assert_eq!(buf.read_u8(i), 0, "Byte {} should be 0", i);
     }
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. Byte read/write
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn buffer_write_read_u8() {
@@ -47,10 +39,6 @@ fn buffer_write_u8_all_values() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Slice read/write
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn buffer_write_slice_read_slice() {
     let buf = DramBuffer::new(256);
@@ -69,10 +57,6 @@ fn buffer_write_slice_at_end() {
     assert_eq!(buf.read_u8(255), 0x04);
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. Index trait
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn buffer_index_read() {
     let buf = DramBuffer::new(64);
@@ -87,20 +71,12 @@ fn buffer_index_mut_write() {
     assert_eq!(buf.read_u8(10), 0xFF);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Raw pointer
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn buffer_as_ptr_not_null() {
     let buf = DramBuffer::new(64);
     assert!(!buf.as_ptr().is_null());
     assert!(!buf.as_mut_ptr().is_null());
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Large allocation
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn buffer_large_allocation() {
@@ -112,10 +88,6 @@ fn buffer_large_allocation() {
     buf.write_u8(size - 1, 0xFF);
     assert_eq!(buf.read_u8(size - 1), 0xFF);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. Overwrite
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn buffer_overwrite_byte() {

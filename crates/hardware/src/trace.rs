@@ -29,14 +29,7 @@
 //! | `trace_csr!`       | `rvsim::csr`        | CSR reads/writes with before/after values |
 //! | `trace_fwd!`       | `rvsim::fwd`        | Store-to-load forwarding, ordering violations |
 
-// ---------------------------------------------------------------------------
-// Fetch (F1 + F2): PC gen, I-TLB, I-cache misses, branch prediction events
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Fetch1 / Fetch2 pipeline stages.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::fetch=trace`.
-/// Target: `rvsim::fetch`
 #[macro_export]
 macro_rules! trace_fetch {
     ($guard:expr; $($arg:tt)*) => {
@@ -46,14 +39,7 @@ macro_rules! trace_fetch {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Decode: raw instruction bits, RVC expansion, illegal instruction detection
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Decode pipeline stage.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::decode=trace`.
-/// Target: `rvsim::decode`
 #[macro_export]
 macro_rules! trace_decode {
     ($guard:expr; $($arg:tt)*) => {
@@ -63,14 +49,7 @@ macro_rules! trace_decode {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Rename: arch→phys register mapping, ROB/SB/LQ alloc, free list state
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Rename pipeline stage.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::rename=trace`.
-/// Target: `rvsim::rename`
 #[macro_export]
 macro_rules! trace_rename {
     ($guard:expr; $($arg:tt)*) => {
@@ -80,14 +59,7 @@ macro_rules! trace_rename {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Issue: wakeup broadcast, select (oldest-ready), FU structural hazards
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Issue Queue (wakeup/select).
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::issue=trace`.
-/// Target: `rvsim::issue`
 #[macro_export]
 macro_rules! trace_issue {
     ($guard:expr; $($arg:tt)*) => {
@@ -97,14 +69,7 @@ macro_rules! trace_issue {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Execute: operand values, ALU/FPU result, branch/jump resolution
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Execute pipeline stage.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::execute=trace`.
-/// Target: `rvsim::execute`
 #[macro_export]
 macro_rules! trace_execute {
     ($guard:expr; $($arg:tt)*) => {
@@ -114,14 +79,7 @@ macro_rules! trace_execute {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Memory (Mem1 + Mem2): VA→PA translation, cache access, MSHR, forwarding
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Memory1 and Memory2 pipeline stages.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::mem=trace`.
-/// Target: `rvsim::mem`
 #[macro_export]
 macro_rules! trace_mem {
     ($guard:expr; $($arg:tt)*) => {
@@ -131,14 +89,7 @@ macro_rules! trace_mem {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Writeback: ROB entry marked complete, result value
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Writeback pipeline stage.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::writeback=trace`.
-/// Target: `rvsim::writeback`
 #[macro_export]
 macro_rules! trace_writeback {
     ($guard:expr; $($arg:tt)*) => {
@@ -148,14 +99,7 @@ macro_rules! trace_writeback {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Commit: instruction retirement, register writes, CSR application, traps
-// ---------------------------------------------------------------------------
-
 /// Trace event for the Commit pipeline stage.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::commit=trace`.
-/// Target: `rvsim::commit`
 #[macro_export]
 macro_rules! trace_commit {
     ($guard:expr; $($arg:tt)*) => {
@@ -165,14 +109,7 @@ macro_rules! trace_commit {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Branch: prediction made, outcome, misprediction flush
-// ---------------------------------------------------------------------------
-
 /// Trace event for branch prediction events.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::branch=trace`.
-/// Target: `rvsim::branch`
 #[macro_export]
 macro_rules! trace_branch {
     ($guard:expr; $($arg:tt)*) => {
@@ -182,14 +119,7 @@ macro_rules! trace_branch {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Trap: exception / interrupt entry, MRET/SRET return
-// ---------------------------------------------------------------------------
-
 /// Trace event for trap and interrupt handling.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::trap=trace`.
-/// Target: `rvsim::trap`
 #[macro_export]
 macro_rules! trace_trap {
     ($guard:expr; $($arg:tt)*) => {
@@ -199,14 +129,7 @@ macro_rules! trace_trap {
     };
 }
 
-// ---------------------------------------------------------------------------
-// CSR: reads and writes with before/after values
-// ---------------------------------------------------------------------------
-
 /// Trace event for CSR reads and writes.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::csr=trace`.
-/// Target: `rvsim::csr`
 #[macro_export]
 macro_rules! trace_csr {
     ($guard:expr; $($arg:tt)*) => {
@@ -216,14 +139,7 @@ macro_rules! trace_csr {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Forwarding: store-to-load forwarding hits and ordering violations
-// ---------------------------------------------------------------------------
-
 /// Trace event for store-to-load forwarding and memory ordering violations.
-///
-/// Enabled by the runtime guard (`cpu.trace`) + `RUST_LOG=rvsim::fwd=trace`.
-/// Target: `rvsim::fwd`
 #[macro_export]
 macro_rules! trace_fwd {
     ($guard:expr; $($arg:tt)*) => {
@@ -232,11 +148,6 @@ macro_rules! trace_fwd {
         }
     };
 }
-
-// ---------------------------------------------------------------------------
-// Helper: format a u64 as "0x{:016x}" without allocating a String.
-// Use inside trace macros as: addr = %crate::trace::hex(some_u64)
-// ---------------------------------------------------------------------------
 
 /// Wraps a `u64` so it formats as `0x0000000000000000` in tracing fields.
 ///

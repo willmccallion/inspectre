@@ -5,8 +5,6 @@
 //!
 //! Encoding reference: RISC-V Bitmanip Extension v1.0.0, Chapter 2-5.
 
-// ── Zba: Address generation ──────────────────────────────────────────────────
-
 /// sh1add, sh2add, sh3add (`OP_REG` funct7).
 pub const SH_ADD: u32 = 0b0010000;
 
@@ -16,8 +14,6 @@ pub const ADD_UW: u32 = 0b0000100;
 /// slli.uw (`OP_IMM_32`, funct3=001, top 6 bits of funct7).
 /// Full funct7 = 0b0000100, but only top 6 bits are checked for shifts.
 pub const SLLI_UW: u32 = 0b0000100;
-
-// ── Zbb: Basic bit manipulation ──────────────────────────────────────────────
 
 /// andn, orn, xnor (`OP_REG` funct7).
 pub const LOGICAL_NEG: u32 = 0b0100000;
@@ -50,12 +46,8 @@ pub const REV8: u32 = 0b0110101;
 /// zext.h (`OP_REG_32` funct7 = 0b0000100, funct3 = 0b100).
 pub const ZEXT_H: u32 = 0b0000100;
 
-// ── Zbc: Carry-less multiplication ───────────────────────────────────────────
-
 /// clmul, clmulh, clmulr (`OP_REG` funct7).
 pub const CLMUL: u32 = 0b0000101;
-
-// ── Zbs: Single-bit operations ───────────────────────────────────────────────
 
 /// bclr / bclri (`OP_REG` / `OP_IMM` funct7).
 pub const BCLR: u32 = 0b0100100;
@@ -69,13 +61,9 @@ pub const BINV: u32 = 0b0110100;
 /// bset / bseti (`OP_REG` / `OP_IMM` funct7).
 pub const BSET: u32 = 0b0010100;
 
-// ── Zbkb: Bitwise operations for cryptography ───────────────────────────────
-
 /// pack, packh (`OP_REG` funct7), packw (`OP_REG_32` funct7).
 /// Shares the value with `ADD_UW/ZEXT_H`; distinguished by opcode and funct3.
 pub const PACK: u32 = 0b0000100;
-
-// ── Zbkx: Crossbar permutations for cryptography ────────────────────────────
 
 /// xperm4, xperm8 (`OP_REG` funct7).
 /// Shares the value with `BSET/ORC_B`; distinguished by funct3.

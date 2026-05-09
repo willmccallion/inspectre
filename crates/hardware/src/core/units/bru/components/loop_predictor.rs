@@ -73,7 +73,6 @@ impl LoopPredictor {
                 entry.current_iter = entry.current_iter.saturating_add(1);
                 entry.age = entry.age.saturating_add(1).min(3);
             } else {
-                // Loop exit.
                 if entry.trip_count == 0 {
                     entry.trip_count = entry.current_iter;
                     entry.confidence = 1;

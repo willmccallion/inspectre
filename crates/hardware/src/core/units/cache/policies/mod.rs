@@ -10,19 +10,14 @@
 //! - `Plru`: Pseudo-LRU (Tree-based).
 //! - `Random`: Random selection.
 
-/// First-In, First-Out replacement policy.
 pub mod fifo;
 
-/// Least Recently Used replacement policy.
 pub mod lru;
 
-/// Most Recently Used replacement policy.
 pub mod mru;
 
-/// Pseudo-LRU (tree-based) replacement policy.
 pub mod plru;
 
-/// Random replacement policy.
 pub mod random;
 
 pub use fifo::FifoPolicy;

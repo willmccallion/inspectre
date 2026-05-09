@@ -1,27 +1,11 @@
-//! Memory controller implementations for latency modeling.
-//!
-//! This module provides:
-//! 1. **SimpleController:** Fixed latency per access (no row-buffer modeling).
-//! 2. **DramController:** Multi-bank, row-buffer-aware latency with CAS, RAS,
-//!    precharge, tRRD, and periodic refresh for realistic DRAM timing.
-//!
-//! Controllers are `Send + Sync` for use with the Python bindings and multi-threaded simulation.
+//! Memory controllers: `SimpleController` (fixed latency) and `DramController`
+//! (multi-bank, row-buffer-aware with refresh).
 
 /// Trait for memory controller implementations that report access latency in cycles.
 ///
 /// Implementors must be `Send + Sync` for thread-safe use with the bus and Python bindings.
 pub trait MemoryController: Send + Sync {
-    /// Returns the number of cycles required for an access to the given address.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Physical address being accessed.
-    /// * `current_cycle` - The current simulation cycle (used for time-dependent
-    ///   modeling such as bank busy states and refresh).
-    ///
-    /// # Returns
-    ///
-    /// Latency in simulation cycles.
+    /// Returns the latency in cycles for an access to `addr` at `current_cycle`.
     fn access_latency(&mut self, addr: u64, current_cycle: u64) -> u64;
 }
 
@@ -131,8 +115,6 @@ impl DramController {
     }
 
     /// Determines the bank index for a given address.
-    ///
-    /// Bank selection uses the bits just above the row-offset bits:
     /// `bank = (addr >> row_shift) % num_banks`
     #[inline]
     const fn bank_index(&self, addr: u64) -> usize {
@@ -145,9 +127,8 @@ impl DramController {
         addr & self.row_mask
     }
 
-    /// Handles refresh: if `current_cycle` has reached or passed the next
-    /// refresh deadline, all banks are marked busy for `t_rfc` cycles.
-    /// Returns the earliest cycle at which the caller can proceed.
+    /// Marks all banks busy for `t_rfc` cycles if a refresh is due. Returns
+    /// the earliest cycle the caller can proceed.
     fn handle_refresh(&mut self, current_cycle: u64) -> u64 {
         if self.t_refi == 0 {
             return current_cycle;
@@ -157,12 +138,10 @@ impl DramController {
 
         while effective_cycle >= self.next_refresh_cycle {
             let refresh_end = self.next_refresh_cycle + self.t_rfc;
-            // All banks become unavailable until refresh completes.
             for bank in &mut self.banks {
                 if bank.busy_until < refresh_end {
                     bank.busy_until = refresh_end;
                 }
-                // Refresh closes all open rows.
                 bank.open_row = None;
             }
             self.next_refresh_cycle += self.t_refi;
@@ -174,8 +153,7 @@ impl DramController {
         effective_cycle
     }
 
-    /// Enforces tRRD spacing and performs a row activation. Returns the
-    /// ready cycle after activation constraints are applied.
+    /// Enforces tRRD spacing and performs a row activation.
     const fn activate(&mut self, mut ready_cycle: u64) -> u64 {
         if let Some(last_act) = self.last_activate_cycle {
             let earliest_activate = last_act + self.t_rrd;
@@ -190,26 +168,21 @@ impl DramController {
 
 impl MemoryController for DramController {
     fn access_latency(&mut self, addr: u64, current_cycle: u64) -> u64 {
-        // 1. Handle any pending refresh.
         let mut ready_cycle = self.handle_refresh(current_cycle);
 
         let bank_idx = self.bank_index(addr);
         let row = self.row_addr(addr);
 
-        // 2. Wait for the target bank to be free.
         if ready_cycle < self.banks[bank_idx].busy_until {
             ready_cycle = self.banks[bank_idx].busy_until;
         }
 
-        // 3. Determine row hit / miss / cold-start latency.
         match self.banks[bank_idx].open_row {
             Some(open_row) if open_row == row => {
-                // Row hit — just CAS (but must wait for bank to be free).
                 self.banks[bank_idx].busy_until = ready_cycle + self.t_cas;
                 (ready_cycle - current_cycle) + self.t_cas
             }
             Some(_) => {
-                // Row miss — precharge + tRRD wait + activate + CAS.
                 ready_cycle += self.t_pre;
                 ready_cycle = self.activate(ready_cycle);
                 self.banks[bank_idx].open_row = Some(row);
@@ -217,7 +190,6 @@ impl MemoryController for DramController {
                 (ready_cycle - current_cycle) + self.t_ras + self.t_cas
             }
             None => {
-                // Cold start — tRRD wait + activate + CAS.
                 ready_cycle = self.activate(ready_cycle);
                 self.banks[bank_idx].open_row = Some(row);
                 self.banks[bank_idx].busy_until = ready_cycle + self.t_ras;

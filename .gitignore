@@ -30,3 +30,4 @@ testing/vector/results/
 # Nix flake dev shell
 .nix-toolchain-bin/
 .direnv/
+.claude/

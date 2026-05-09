@@ -12,34 +12,21 @@
 use rvsim_core::core::pipeline::signals::AluOp;
 use rvsim_core::core::units::alu::Alu;
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-// Named constants for readability. Every magic number in a test vector should
-// be traceable to an architectural boundary condition.
-
 const ZERO: u64 = 0;
 const ONE: u64 = 1;
-const NEG1: u64 = -1i64 as u64; // 0xFFFF_FFFF_FFFF_FFFF
+const NEG1: u64 = -1i64 as u64;
 
-// RV64 signed boundaries
-const I64_MAX: u64 = i64::MAX as u64; // 0x7FFF_FFFF_FFFF_FFFF
-const I64_MIN: u64 = i64::MIN as u64; // 0x8000_0000_0000_0000
+const I64_MAX: u64 = i64::MAX as u64;
+const I64_MIN: u64 = i64::MIN as u64;
+const U64_MAX: u64 = u64::MAX;
 
-// RV64 unsigned boundary
-const U64_MAX: u64 = u64::MAX; // 0xFFFF_FFFF_FFFF_FFFF
+const I32_MAX: u64 = i32::MAX as u64;
+const I32_MIN: u64 = i32::MIN as i64 as u64;
+const U32_MAX: u64 = u32::MAX as u64;
 
-// RV32 signed boundaries (as 64-bit values)
-const I32_MAX: u64 = i32::MAX as u64; // 0x0000_0000_7FFF_FFFF
-const I32_MIN: u64 = i32::MIN as i64 as u64; // 0xFFFF_FFFF_8000_0000
-
-// RV32 unsigned boundary
-const U32_MAX: u64 = u32::MAX as u64; // 0x0000_0000_FFFF_FFFF
-
-// Useful patterns
 const ALTERNATING_A: u64 = 0xAAAA_AAAA_AAAA_AAAA;
 const ALTERNATING_5: u64 = 0x5555_5555_5555_5555;
-const HIGH_BIT_32: u64 = 0x8000_0000; // Bit 31 set
-
-// ─── Helper ──────────────────────────────────────────────────────────────────
+const HIGH_BIT_32: u64 = 0x8000_0000;
 
 /// Execute an ALU operation. Thin wrapper to keep test lines short.
 fn alu(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
@@ -50,10 +37,6 @@ fn alu(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
 fn sext32(val: u32) -> u64 {
     val as i32 as i64 as u64
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  ADD / ADDW
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn add_rv64_zero_plus_zero() {
@@ -141,8 +124,7 @@ fn addw_negative_result_sign_extends() {
 
 #[test]
 fn addw_ignores_upper_32_bits_of_inputs() {
-    // Upper bits of inputs should be ignored; result is sign-extended from bit 31.
-    // 0xDEAD_0000_0000_0001 + 0xBEEF_0000_0000_0002 → ADDW should see 1 + 2 = 3
+    // ADDW sees only the low 32 bits: 1 + 2 = 3.
     assert_eq!(alu(AluOp::Add, 0xDEAD_0000_0000_0001, 0xBEEF_0000_0000_0002, true), 3);
 }
 
@@ -151,10 +133,6 @@ fn addw_u32_max_plus_1() {
     // 0xFFFF_FFFF + 1 = 0x1_0000_0000 → truncated to 32-bit = 0, sign-extended = 0
     assert_eq!(alu(AluOp::Add, U32_MAX, ONE, true), 0);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SUB / SUBW
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn sub_rv64_zero_minus_zero() {
@@ -215,10 +193,6 @@ fn subw_overflow_wraps_and_sign_extends() {
 fn subw_ignores_upper_bits() {
     assert_eq!(alu(AluOp::Sub, 0xFF00_0000_0000_000A, 0xAB00_0000_0000_0003, true), 7);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  MUL / MULW
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn mul_rv64_zero_times_anything() {
@@ -282,10 +256,6 @@ fn mulw_ignores_upper_bits() {
     assert_eq!(alu(AluOp::Mul, 0xFFFF_FFFF_0000_0003, 0xFFFF_FFFF_0000_0004, true), 12);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  MULH / MULHSU / MULHU
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn mulh_zero() {
     assert_eq!(alu(AluOp::Mulh, ZERO, 42, false), 0);
@@ -329,10 +299,6 @@ fn mulhsu_positive_times_positive() {
 
 #[test]
 fn mulhsu_negative_times_unsigned() {
-    // (-1 signed) * (u64::MAX unsigned)
-    // = -1 * (2^64 - 1) = -(2^64 - 1) = -2^64 + 1
-    // 128-bit: 0xFFFF_FFFF_FFFF_FFFF_0000_0000_0000_0001
-    // Wait, let me compute: (-1i128) * (0xFFFF_FFFF_FFFF_FFFFu128 as i128)
     let a_s = -1i128;
     let b_u = u64::MAX as u128 as i128;
     let expected = ((a_s * b_u) >> 64) as u64;
@@ -392,10 +358,6 @@ fn mul_mulh_overflow_detection_with_overflow() {
     let sign_ext = if (lo as i64) < 0 { NEG1 } else { 0 };
     assert_ne!(hi, sign_ext, "MULH should indicate overflow occurred");
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  DIV / DIVW  (Signed Division)
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// RISC-V spec section 7.2: Division by zero returns -1 (all bits set).
 #[test]
@@ -487,10 +449,6 @@ fn divw_ignores_upper_bits() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  DIVU / DIVUW  (Unsigned Division)
-// ═════════════════════════════════════════════════════════════════════════════
-
 /// RISC-V spec section 7.2: Unsigned division by zero returns 2^XLEN - 1.
 #[test]
 fn divu_rv64_divide_by_zero() {
@@ -545,8 +503,7 @@ fn divuw_divide_by_zero() {
 /// for the zero check itself, the semantic intent matters.
 #[test]
 fn divuw_divide_by_zero_upper_bits_set() {
-    // b = 0x1_0000_0000 → b[31:0] = 0 → divide by zero
-    // This should return 0xFFFF_FFFF_FFFF_FFFF regardless of upper bits.
+    // b[31:0] == 0 means divide-by-zero, regardless of the upper bits being set.
     let b_with_upper_bits = 0x0000_0001_0000_0000_u64;
     assert_eq!(alu(AluOp::Divu, 42, b_with_upper_bits, true), NEG1);
 }
@@ -558,8 +515,6 @@ fn divuw_basic() {
 
 #[test]
 fn divuw_high_bit_set_is_unsigned() {
-    // 0x8000_0000 / 1 = 0x8000_0000 (treated as 2^31 unsigned, not -2^31)
-    // Sign-extended result: 0xFFFF_FFFF_8000_0000
     assert_eq!(alu(AluOp::Divu, HIGH_BIT_32, ONE, true), sext32(0x8000_0000));
 }
 
@@ -577,8 +532,7 @@ fn divuw_u32_max_by_2() {
 
 #[test]
 fn divuw_ignores_upper_input_bits() {
-    // a = 0xFFFF_FFFF_0000_0064, b = 0xFFFF_FFFF_0000_0007
-    // DIVUW sees a[31:0]=100, b[31:0]=7 → 14
+    // DIVUW sees a[31:0]=100, b[31:0]=7 → 14.
     assert_eq!(alu(AluOp::Divu, 0xFFFF_FFFF_0000_0064, 0xFFFF_FFFF_0000_0007, true), 14);
 }
 
@@ -586,15 +540,8 @@ fn divuw_ignores_upper_input_bits() {
 /// The quotient 0x8000_0001 has bit 31 set → must become 0xFFFF_FFFF_8000_0001.
 #[test]
 fn divuw_result_sign_extends_when_bit31_set() {
-    // 0xFFFF_FFFE / 1 = 0xFFFF_FFFE → sign-extended = 0xFFFF_FFFF_FFFF_FFFE
-    // But more interesting: pick values where quotient has bit 31 set.
-    // 0x8000_0002 / 1 = 0x8000_0002 → sign-extended
     assert_eq!(alu(AluOp::Divu, 0x8000_0002, ONE, true), sext32(0x8000_0002));
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  REM / REMW  (Signed Remainder)
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// RISC-V spec section 7.2: Remainder by zero returns the dividend.
 #[test]
@@ -670,8 +617,7 @@ fn remw_remainder_by_zero() {
 /// not the full 64-bit value of `a`.
 #[test]
 fn remw_remainder_by_zero_upper_bits_must_be_ignored() {
-    // a = 0xDEAD_BEEF_0000_002A, b = 0
-    // Result must be sext(0x0000_002A) = 42, NOT 0xDEAD_BEEF_0000_002A
+    // Result must be sext(a[31:0]) = 42, NOT the full 64-bit `a`.
     let a = 0xDEAD_BEEF_0000_002A_u64;
     assert_eq!(alu(AluOp::Rem, a, ZERO, true), sext32(0x0000_002A));
 }
@@ -699,10 +645,6 @@ fn remw_basic() {
 fn remw_negative_result_sign_extends() {
     assert_eq!(alu(AluOp::Rem, -100i64 as u64, 7, true), sext32(-2i32 as u32));
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  REMU / REMUW  (Unsigned Remainder)
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// RISC-V spec: Unsigned remainder by zero returns the dividend.
 #[test]
@@ -757,8 +699,6 @@ fn remuw_remainder_by_zero() {
 /// not the raw 64-bit `a`.
 #[test]
 fn remuw_remainder_by_zero_upper_bits_must_be_ignored() {
-    // a = 0xDEAD_BEEF_0000_002A, b = 0
-    // REMUW must return sext(a[31:0]) = sext(0x2A) = 42
     let a = 0xDEAD_BEEF_0000_002A_u64;
     assert_eq!(alu(AluOp::Remu, a, ZERO, true), sext32(0x0000_002A));
 }
@@ -822,10 +762,6 @@ fn remuw_identity_divuw_mul_remuw() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  CROSS-CUTTING: Alternating bit patterns & power-of-two boundaries
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn add_rv64_alternating_bits() {
     // 0xAAAA... + 0x5555... = 0xFFFF...
@@ -864,10 +800,6 @@ fn rem_rv64_power_of_two() {
 fn remu_rv64_power_of_two() {
     assert_eq!(alu(AluOp::Remu, 100, 64, false), 36);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  CROSS-CUTTING: Verify *W operations always produce sign-extended results
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// Every *W operation must produce a value where bits [63:32] are all copies
 /// of bit 31. This property must hold regardless of input.

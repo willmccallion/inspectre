@@ -1,10 +1,4 @@
-//! Memory Access Helpers.
-//!
-//! This module provides the interface between the CPU and the memory subsystem.
-//! It performs the following:
-//! 1. **Address Translation:** Interfaces with the MMU to convert virtual to physical addresses.
-//! 2. **Cache Simulation:** Models the behavior of L1, L2, and L3 caches during memory access.
-//! 3. **Latency Modeling:** Calculates timing penalties for cache hits, misses, and bus transit.
+//! Memory Access Helpers — CPU/memory interface (translation, cache, latency).
 
 use super::Cpu;
 use crate::common::{AccessType, PhysAddr, TranslationResult, Trap, VirtAddr};
@@ -13,15 +7,6 @@ use crate::core::units::mmu::pmp::PmpResult;
 
 impl Cpu {
     /// Translates a virtual address to a physical address using the MMU.
-    ///
-    /// # Arguments
-    ///
-    /// * `vaddr` - The virtual address to translate.
-    /// * `access` - The type of memory access (Fetch/Read/Write).
-    ///
-    /// # Returns
-    ///
-    /// A `TranslationResult` containing the physical address or a trap if translation fails.
     pub fn translate(
         &mut self,
         vaddr: VirtAddr,
@@ -35,8 +20,7 @@ impl Cpu {
             // translation (RISC-V Privileged Spec §3.7).  M-mode with no
             // matching entries gets full access, so this is transparent to
             // programs that do not configure PMP.
-            let is_machine =
-                self.privilege == crate::core::arch::mode::PrivilegeMode::Machine;
+            let is_machine = self.privilege == crate::core::arch::mode::PrivilegeMode::Machine;
             let pmp_result = self.pmp.check(
                 paddr.val(),
                 size,
@@ -251,7 +235,6 @@ impl Cpu {
                 + self.bus.bus.calculate_transit_time(64);
         }
 
-        // ── L1 ──────────────────────────────────────────────────────────────────
         let (l1_hit, _l1_pen, l1_evictions, l1_prefetches) = if is_inst {
             if self.l1_i_cache.enabled {
                 self.l1_i_cache.access_tracked_split(raw_addr, false, WB_LAT)
@@ -295,7 +278,6 @@ impl Cpu {
             self.stats.dcache_misses += 1;
         }
 
-        // ── L2 ──────────────────────────────────────────────────────────────────
         if self.l2_cache.enabled {
             total_penalty += self.l2_cache.latency;
             let (l2_hit, _l2_pen, l2_evictions, l2_prefetches) =
@@ -330,7 +312,6 @@ impl Cpu {
             self.stats.l2_misses += 1;
         }
 
-        // ── L3 ──────────────────────────────────────────────────────────────────
         if self.l3_cache.enabled {
             total_penalty += self.l3_cache.latency;
             let (l3_hit, _l3_pen, l3_evictions, l3_prefetches) =
@@ -361,8 +342,7 @@ impl Cpu {
             self.stats.l3_misses += 1;
         }
 
-        // ── DRAM (all caches missed) ────────────────────────────────────────────
-        // Only now do we consult the stateful DRAM controller, so its bank,
+        // Consult the stateful DRAM controller only on full miss so its bank,
         // row-buffer, and refresh state reflects real memory traffic only.
         let ram_latency = self.bus.mem_controller.access_latency(raw_addr, self.stats.cycles);
         total_penalty += self.bus.bus.calculate_transit_time(8);
@@ -385,12 +365,10 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // RAM_BASE = 0x8000_0000 by default. It's a valid address.
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert_eq!(result.paddr.val(), 0x8000_0000);
         assert!(result.trap.is_none());
 
-        // Test invalid address translation trap in direct mode
         let result = cpu.translate(VirtAddr::new(0xFFFF_FFFF_FFFF_FFFF), AccessType::Fetch, 4);
         assert!(result.trap.is_some());
     }
@@ -404,12 +382,9 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // Configure PMP entry 0: TOR covering [0, 0x9000_0000), locked, no
-        // permissions.  Locked entries apply even to M-mode.
         cpu.pmp.set_addr(0, 0x9000_0000u64 >> 2);
-        cpu.pmp.set_cfg(0, 0x88); // A=TOR(1<<3), L=locked(1<<7), R=0,W=0,X=0
+        cpu.pmp.set_cfg(0, 0x88);
 
-        // Drop to S-mode so the locked entry denies the access.
         cpu.privilege = PrivilegeMode::Supervisor;
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
@@ -423,7 +398,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // No PMP entries configured — M-mode gets full access per spec §3.7.1.
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert!(result.trap.is_none(), "M-mode should have full access with no PMP entries");
         assert_eq!(result.paddr.val(), 0x8000_0000);

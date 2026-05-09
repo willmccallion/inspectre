@@ -1,10 +1,4 @@
 //! Control and Status Register (CSR) definitions and operations.
-//!
-//! This module implements the CSR subsystem for the RISC-V processor. It provides:
-//! 1. **Address Definitions:** Constants for all standard machine and supervisor CSRs.
-//! 2. **Field Masks:** Bitmasks and shifts for status, ISA, and translation control.
-//! 3. **Register Storage:** The `Csrs` struct for maintaining architectural state.
-//! 4. **Access Logic:** Standardized read and write operations for register interaction.
 
 use crate::common::CsrAddr;
 
@@ -234,10 +228,9 @@ pub const MIP_MEIP: u64 = 1 << 11;
 /// Simulation panic CSR address (custom, for debugging).
 pub const CSR_SIM_PANIC: CsrAddr = CsrAddr::from_u32(0x8FF);
 
-// ── Sdtrig (debug trigger) CSRs ──────────────────────────────────────────────
-// These are implemented as read-zero / write-ignored stubs so that software
-// that probes for trigger support doesn't take an illegal-instruction trap.
-// Actual hardware trigger functionality is not implemented.
+// Sdtrig CSRs are read-zero / write-ignored stubs so software that probes for
+// trigger support doesn't take an illegal-instruction trap. Actual hardware
+// trigger functionality is not implemented.
 
 /// Trigger select register (Sdtrig).
 pub const TSELECT: CsrAddr = CsrAddr::from_u32(0x7A0);
@@ -526,15 +519,7 @@ pub struct Csrs {
 }
 
 impl Csrs {
-    /// Reads a CSR value by its address.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The CSR address.
-    ///
-    /// # Returns
-    ///
-    /// The 64-bit value stored in the specified CSR, or 0 if the address is not recognized.
+    /// Reads a CSR value by its address. Returns 0 for unrecognized addresses.
     pub const fn read(&self, addr: CsrAddr) -> u64 {
         match addr.as_u32() {
             x if x == FFLAGS.as_u32() => self.fflags & 0x1F,
@@ -590,11 +575,6 @@ impl Csrs {
     }
 
     /// Writes a value to a CSR by its address.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The CSR address.
-    /// * `val` - The 64-bit value to write.
     pub const fn write(&mut self, addr: CsrAddr, val: u64) {
         match addr.as_u32() {
             x if x == FFLAGS.as_u32() => self.fflags = val & 0x1F,
@@ -642,8 +622,6 @@ impl Csrs {
                 self.vxsat = val & 0x1;
                 self.vxrm = (val >> 1) & 0x3;
             }
-            // VL, VTYPE, VLENB are not writable via CSR instructions
-            // (only writable by vsetvl family, handled in execute stage)
             _ => {}
         }
     }
@@ -679,7 +657,6 @@ mod tests {
         csrs.write(SATP, SATP_MODE_SV39 << SATP_MODE_SHIFT | 0xabc);
         assert_eq!(csrs.read(SATP), SATP_MODE_SV39 << SATP_MODE_SHIFT | 0xabc);
 
-        // SATP write with invalid mode falls back to BARE
         csrs.write(SATP, 0xF << SATP_MODE_SHIFT | 0xdef);
         assert_eq!(csrs.read(SATP), SATP_MODE_BARE << SATP_MODE_SHIFT | 0xdef);
 
@@ -694,7 +671,7 @@ mod tests {
         assert_eq!(csrs.read(FRM), 0x3);
         assert_eq!(csrs.read(FFLAGS), 0xA);
 
-        csrs.write(CsrAddr::from_u32(9999), 0x1); // invalid csr
-        assert_eq!(csrs.read(CsrAddr::from_u32(9999)), 0x0); // returns 0
+        csrs.write(CsrAddr::from_u32(9999), 0x1);
+        assert_eq!(csrs.read(CsrAddr::from_u32(9999)), 0x0);
     }
 }

@@ -1,11 +1,4 @@
-//! Trap Handling Logic.
-//!
-//! This module implements the trap and exception handling logic for the CPU. It performs
-//! the following:
-//! 1. **Trap Dispatch:** Identifies the trap cause and determines the appropriate handler mode.
-//! 2. **Delegation:** Handles the delegation of traps from Machine mode to Supervisor mode.
-//! 3. **Context Saving:** Updates CSRs (`mepc`, `mcause`, `mtval`, etc.) and modifies privilege state.
-//! 4. **Return Handling:** Implements `MRET` and `SRET` instructions for returning from trap handlers.
+//! Trap and exception dispatch, delegation, and MRET/SRET return handling.
 
 use super::Cpu;
 use crate::common::Trap;
@@ -19,11 +12,6 @@ use crate::trace_trap;
 
 impl Cpu {
     /// Handles a trap (exception or interrupt).
-    ///
-    /// # Arguments
-    ///
-    /// * `cause` - The type of trap that occurred.
-    /// * `epc` - The Exception Program Counter (PC where the trap occurred).
     pub fn trap(&mut self, cause: &Trap, epc: u64) {
         self.load_reservation = None;
 
@@ -51,7 +39,6 @@ impl Cpu {
                     return;
                 }
 
-                // Unknown syscall in direct mode — treat as fatal.
                 eprintln!(
                     "\n[!] Unhandled ecall in direct mode: a7={val_a7} a0={val_a0} at PC {epc:#x}"
                 );
@@ -59,7 +46,6 @@ impl Cpu {
                 return;
             }
 
-            // Non-ecall traps in direct mode are fatal.
             if matches!(cause, Trap::IllegalInstruction(0)) {
                 self.exit_code = Some(0);
                 return;
@@ -133,10 +119,6 @@ impl Cpu {
         let delegate_to_s =
             (self.privilege <= PrivilegeMode::Supervisor) && ((deleg_mask >> code) & 1) != 0;
 
-        // Delegation is determined solely by medeleg/mideleg per the RISC-V
-        // privileged spec.  A previous workaround forced delegation to S-mode
-        // when stvec was set; this was spec-violating and has been removed.
-
         let tval = match *cause {
             Trap::InstructionAddressMisaligned(a)
             | Trap::InstructionAccessFault(a)
@@ -209,7 +191,7 @@ impl Cpu {
 
     /// Executes the `MRET` instruction (Return from Machine Mode).
     pub(crate) const fn do_mret(&mut self) {
-        self.clear_reservation(); // MRET invalidates reservations
+        self.clear_reservation();
         self.pc = self.csrs.mepc & !1;
         let mstatus = self.csrs.mstatus;
         let mpp = (mstatus >> csr::MSTATUS_MPP_SHIFT) & csr::MSTATUS_MPP_MASK;
@@ -234,7 +216,7 @@ impl Cpu {
 
     /// Executes the `SRET` instruction (Return from Supervisor Mode).
     pub(crate) const fn do_sret(&mut self) {
-        self.clear_reservation(); // SRET invalidates reservations
+        self.clear_reservation();
         self.pc = self.csrs.sepc & !1;
         let sstatus = self.csrs.sstatus;
         let spp = (sstatus & csr::MSTATUS_SPP) != 0;
@@ -297,14 +279,13 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // Install a trap handler — trap dispatch should use the standard path.
         cpu.csrs.mtvec = 0x8000_1000;
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
 
         assert!(cpu.exit_code.is_none(), "should not be fatal when mtvec is set");
         assert_eq!(cpu.csrs.mepc, 0x400);
-        assert_eq!(cpu.csrs.mcause, 3); // BREAKPOINT
-        assert_eq!(cpu.csrs.mtval, 0x400); // ebreak PC written to mtval
+        assert_eq!(cpu.csrs.mcause, 3);
+        assert_eq!(cpu.csrs.mtval, 0x400);
         assert_eq!(cpu.pc, 0x8000_1000);
     }
 
@@ -315,7 +296,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // No trap handler — should be fatal.
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
         assert_eq!(cpu.exit_code, Some(1));
     }
@@ -327,7 +307,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
 
-        // With mtvec set, ecall dispatches to the handler (not SYS_EXIT).
         cpu.csrs.mtvec = 0x8000_2000;
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x500);
 

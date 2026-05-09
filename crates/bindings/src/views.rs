@@ -11,7 +11,6 @@ use crate::cpu::PyCpu;
 
 const fn csr_addr_to_name(addr: u64) -> Option<&'static str> {
     match addr {
-        // Supervisor
         0x100 => Some("sstatus"),
         0x104 => Some("sie"),
         0x105 => Some("stvec"),
@@ -21,7 +20,6 @@ const fn csr_addr_to_name(addr: u64) -> Option<&'static str> {
         0x143 => Some("stval"),
         0x144 => Some("sip"),
         0x180 => Some("satp"),
-        // Machine
         0x300 => Some("mstatus"),
         0x301 => Some("misa"),
         0x302 => Some("medeleg"),
@@ -33,13 +31,11 @@ const fn csr_addr_to_name(addr: u64) -> Option<&'static str> {
         0x342 => Some("mcause"),
         0x343 => Some("mtval"),
         0x344 => Some("mip"),
-        // Counters
         0xC00 => Some("cycle"),
         0xC01 => Some("time"),
         0xC02 => Some("instret"),
         0xB00 => Some("mcycle"),
         0xB02 => Some("minstret"),
-        // Sstc
         0x14D => Some("stimecmp"),
         _ => None,
     }

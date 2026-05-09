@@ -18,10 +18,6 @@ use rvsim_core::common::{CsrAddr, RegIdx};
 use rvsim_core::isa::decode::decode;
 use rvsim_core::isa::instruction::InstructionBits;
 
-// ──────────────────────────────────────────────────────────
-// Encoding helpers (construct raw 32-bit instructions)
-// ──────────────────────────────────────────────────────────
-
 /// Encode an R-type instruction.
 fn r_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, rs2: u32, funct7: u32) -> u32 {
     (funct7 & 0x7F) << 25
@@ -99,10 +95,6 @@ fn r4_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, rs2: u32, rs3: u32, fmt:
         | (opcode & 0x7F)
 }
 
-// ──────────────────────────────────────────────────────────
-// Import opcode/funct constants
-// ──────────────────────────────────────────────────────────
-
 use rvsim_core::isa::privileged::opcodes as sys_op;
 use rvsim_core::isa::rv64a::funct5 as a_f5;
 use rvsim_core::isa::rv64a::opcodes as a_op;
@@ -115,10 +107,6 @@ use rvsim_core::isa::rv64i::funct7 as i_f7;
 use rvsim_core::isa::rv64i::opcodes as i_op;
 use rvsim_core::isa::rv64m::funct3 as m_f3;
 use rvsim_core::isa::rv64m::opcodes as m_op;
-
-// ══════════════════════════════════════════════════════════
-// 1. InstructionBits trait — field extraction
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn field_extraction_opcode() {
@@ -196,10 +184,6 @@ fn field_extraction_all_zeros() {
     assert_eq!(inst.rs3(), RegIdx::new(0));
     assert_eq!(inst.csr(), CsrAddr::from_u32(0));
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. R-Type: RV64I base register-register
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_r_type_add() {
@@ -280,10 +264,6 @@ fn decode_r_type_and() {
     assert_eq!(d.funct3, i_f3::AND);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. R-Type: RV64I word operations (OP_REG_32)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_r_type_addw() {
     let inst = r_type(i_op::OP_REG_32, 5, i_f3::ADD_SUB, 10, 15, i_f7::DEFAULT);
@@ -324,10 +304,6 @@ fn decode_r_type_sraw() {
     assert_eq!(d.opcode, i_op::OP_REG_32);
     assert_eq!(d.funct7, i_f7::SRA);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. R-Type: M-extension (multiply/divide)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_r_type_mul() {
@@ -425,10 +401,6 @@ fn decode_r_type_remuw() {
     assert_eq!(d.funct3, m_f3::REMU);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. I-Type: OP_IMM (ADDI, SLTI, SLTIU, XORI, ORI, ANDI)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_i_type_addi_positive() {
     let inst = i_type(i_op::OP_IMM, 5, i_f3::ADD_SUB, 10, 42);
@@ -503,7 +475,6 @@ fn decode_i_type_andi() {
     assert_eq!(d.imm, 0x3F);
 }
 
-// Shift immediates (encoded in I-type with shamt in lower bits)
 #[test]
 fn decode_i_type_slli() {
     // SLLI rd, rs1, shamt: funct7=0, shamt in imm[5:0]
@@ -531,10 +502,6 @@ fn decode_i_type_srai() {
     assert_eq!(d.imm & 0x3F, 3);
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. I-Type: OP_IMM_32 (ADDIW, SLLIW, SRLIW, SRAIW)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_i_type_addiw() {
     let inst = i_type(i_op::OP_IMM_32, 1, i_f3::ADD_SUB, 2, -100);
@@ -550,10 +517,6 @@ fn decode_i_type_slliw() {
     assert_eq!(d.opcode, i_op::OP_IMM_32);
     assert_eq!(d.funct3, i_f3::SLL);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. I-Type: Loads (OP_LOAD)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_load_lb() {
@@ -607,7 +570,6 @@ fn decode_load_lwu() {
     assert_eq!(d.funct3, i_f3::LWU);
 }
 
-// FP loads
 #[test]
 fn decode_load_flw() {
     let inst = i_type(f_op::OP_LOAD_FP, 1, i_f3::LW, 2, 64);
@@ -623,10 +585,6 @@ fn decode_load_fld() {
     assert_eq!(d.opcode, f_op::OP_LOAD_FP);
     assert_eq!(d.imm, -32);
 }
-
-// ══════════════════════════════════════════════════════════
-// 8. S-Type: Stores (OP_STORE, OP_STORE_FP)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_store_sb() {
@@ -686,10 +644,6 @@ fn decode_store_fsd() {
     assert_eq!(d.imm, -16);
 }
 
-// ══════════════════════════════════════════════════════════
-// 9. B-Type: Branches
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_branch_beq() {
     let inst = b_type(i_op::OP_BRANCH, i_f3::BEQ, 5, 6, 64);
@@ -741,10 +695,6 @@ fn decode_branch_bgeu() {
     assert_eq!(d.imm, -4096);
 }
 
-// ══════════════════════════════════════════════════════════
-// 10. U-Type: LUI, AUIPC
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_lui() {
     let inst = u_type(i_op::OP_LUI, 5, 0xDEADB);
@@ -772,10 +722,6 @@ fn decode_lui_sign_extension() {
     assert_eq!(d.imm, 0x80000000u32 as i32 as i64);
     assert!(d.imm < 0, "U-type with bit 31 set must sign-extend to negative");
 }
-
-// ══════════════════════════════════════════════════════════
-// 11. J-Type: JAL
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_jal_positive() {
@@ -809,10 +755,6 @@ fn decode_jal_max_negative() {
     assert_eq!(d.imm, -1048576);
 }
 
-// ══════════════════════════════════════════════════════════
-// 12. I-Type: JALR
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_jalr() {
     let inst = i_type(i_op::OP_JALR, 1, 0, 5, 8);
@@ -829,10 +771,6 @@ fn decode_jalr_negative() {
     let d = decode(inst);
     assert_eq!(d.imm, -4);
 }
-
-// ══════════════════════════════════════════════════════════
-// 13. R-Type: Floating-point arithmetic (OP_FP)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_fp_fadd_s() {
@@ -951,7 +889,6 @@ fn decode_fp_fmv_w_x() {
     assert_eq!(d.funct7, f_f7::FMV_F_X);
 }
 
-// Double-precision variants
 #[test]
 fn decode_fp_fadd_d() {
     let inst = r_type(f_op::OP_FP, 1, 0, 2, 3, d_f7::FADD_D);
@@ -994,10 +931,6 @@ fn decode_fp_fcvt_d_s() {
     assert_eq!(d.funct7, f_f7::FCVT_DS);
 }
 
-// ══════════════════════════════════════════════════════════
-// 14. R4-Type: FMA (FMADD, FMSUB, FNMADD, FNMSUB)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_fmadd_s() {
     let inst = r4_type(f_op::OP_FMADD, 1, 0, 2, 3, 4, 0b00);
@@ -1037,10 +970,6 @@ fn decode_fmadd_d() {
     assert_eq!(d.opcode, f_op::OP_FMADD);
     // fmt=01 distinguishes D from S in the funct7 lower bits
 }
-
-// ══════════════════════════════════════════════════════════
-// 15. Atomic (OP_AMO)
-// ══════════════════════════════════════════════════════════
 
 /// Encode an AMO instruction: funct5 | aq | rl | rs2 | rs1 | funct3 | rd | opcode
 fn amo_type(funct5: u32, aq: bool, rl: bool, rs2: u32, rs1: u32, funct3: u32, rd: u32) -> u32 {
@@ -1137,10 +1066,6 @@ fn decode_amo_maxu() {
     assert_eq!(d.funct7 >> 2, a_f5::AMOMAXU);
 }
 
-// ══════════════════════════════════════════════════════════
-// 16. System instructions
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_ecall() {
     let d = decode(sys_op::ECALL);
@@ -1219,10 +1144,6 @@ fn decode_csrrci() {
     assert_eq!(d.funct3, sys_op::CSRRCI);
 }
 
-// ══════════════════════════════════════════════════════════
-// 17. FENCE / FENCE.I
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn decode_fence() {
     let inst = i_type(i_op::OP_MISC_MEM, 0, i_f3::FENCE, 0, 0x0FF);
@@ -1238,10 +1159,6 @@ fn decode_fence_i() {
     assert_eq!(d.opcode, i_op::OP_MISC_MEM);
     assert_eq!(d.funct3, i_f3::FENCE_I);
 }
-
-// ══════════════════════════════════════════════════════════
-// 18. Immediate edge-case round-trip properties
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn i_type_imm_round_trip_all_values() {
@@ -1290,10 +1207,6 @@ fn u_type_imm_round_trip() {
         assert_eq!(d.imm, expected, "U-type round-trip failed for imm20={imm20:#x}");
     }
 }
-
-// ══════════════════════════════════════════════════════════
-// 19. NOP encoding
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn decode_nop() {

@@ -1,10 +1,4 @@
-//! CSR Access Logic.
-//!
-//! This module implements the Control and Status Register (CSR) access mechanisms for the CPU.
-//! It performs the following:
-//! 1. **Read Operations:** Retrieves CSR values while handling architectural side effects.
-//! 2. **Write Operations:** Updates CSR state and triggers necessary system updates (e.g., TLB flushes).
-//! 3. **Side Effect Management:** Handles interrupt inhibition and status bit synchronization.
+//! CSR Access Logic with read/write side effects (TLB flushes, interrupt synchronization).
 
 use super::Cpu;
 use crate::common::{CsrAddr, Trap};
@@ -78,14 +72,6 @@ impl Cpu {
     }
 
     /// Reads a value from a Control and Status Register (CSR).
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The CSR address.
-    ///
-    /// # Returns
-    ///
-    /// The current 64-bit value of the specified CSR.
     pub fn csr_read(&self, addr: CsrAddr) -> u64 {
         let raw = addr.as_u32();
         match raw {
@@ -193,11 +179,6 @@ impl Cpu {
     }
 
     /// Writes a value to a Control and Status Register (CSR).
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The CSR address.
-    /// * `val` - The 64-bit value to write to the register.
     pub fn csr_write(&mut self, addr: CsrAddr, val: u64) {
         let raw = addr.as_u32();
         match raw {
@@ -363,7 +344,6 @@ impl Cpu {
 
                 self.csrs.satp = new_val;
 
-                // Flush BOTH instruction and data caches
                 let _ = self.l1_i_cache.invalidate_all();
                 let _ = self.l1_d_cache.flush();
 
@@ -392,7 +372,7 @@ impl Cpu {
                     // mcontrol: accept supported fields, force action=0, dmode=0
                     const MCONTROL_MASK: u64 = (0xFu64 << 60) // type
                         | (1 << 13) | (1 << 11) | (1 << 10)   // m, s, u
-                        | (1 << 9) | (1 << 8) | (1 << 7);     // execute, store, load
+                        | (1 << 9) | (1 << 8) | (1 << 7); // execute, store, load
                     self.csrs.tdata1[i] = val & MCONTROL_MASK;
                 } else {
                     // type=0 or unsupported: disable trigger
@@ -418,10 +398,16 @@ impl Cpu {
         let mte = (self.csrs.tcontrol >> 3) & 1 != 0;
         for i in 0..2usize {
             let tdata1 = self.csrs.tdata1[i];
-            if (tdata1 >> 60) & 0xF != 2 { continue; } // not mcontrol
-            if (tdata1 >> 9) & 1 == 0 { continue; }    // not execute trigger
+            if (tdata1 >> 60) & 0xF != 2 {
+                continue;
+            } // not mcontrol
+            if (tdata1 >> 9) & 1 == 0 {
+                continue;
+            } // not execute trigger
             let action = (tdata1 >> 19) & 0x3;
-            if action != 0 { continue; }               // only breakpoint exception
+            if action != 0 {
+                continue;
+            } // only breakpoint exception
             let mode_ok = match self.privilege {
                 PrivilegeMode::Machine => (tdata1 >> 13) & 1 != 0 && mte,
                 PrivilegeMode::Supervisor => (tdata1 >> 11) & 1 != 0,
@@ -440,10 +426,16 @@ impl Cpu {
         let mte = (self.csrs.tcontrol >> 3) & 1 != 0;
         for i in 0..2usize {
             let tdata1 = self.csrs.tdata1[i];
-            if (tdata1 >> 60) & 0xF != 2 { continue; }
-            if (tdata1 >> 7) & 1 == 0 { continue; }    // not load trigger
+            if (tdata1 >> 60) & 0xF != 2 {
+                continue;
+            }
+            if (tdata1 >> 7) & 1 == 0 {
+                continue;
+            } // not load trigger
             let action = (tdata1 >> 19) & 0x3;
-            if action != 0 { continue; }
+            if action != 0 {
+                continue;
+            }
             let mode_ok = match self.privilege {
                 PrivilegeMode::Machine => (tdata1 >> 13) & 1 != 0 && mte,
                 PrivilegeMode::Supervisor => (tdata1 >> 11) & 1 != 0,
@@ -462,10 +454,16 @@ impl Cpu {
         let mte = (self.csrs.tcontrol >> 3) & 1 != 0;
         for i in 0..2usize {
             let tdata1 = self.csrs.tdata1[i];
-            if (tdata1 >> 60) & 0xF != 2 { continue; }
-            if (tdata1 >> 8) & 1 == 0 { continue; }    // not store trigger
+            if (tdata1 >> 60) & 0xF != 2 {
+                continue;
+            }
+            if (tdata1 >> 8) & 1 == 0 {
+                continue;
+            } // not store trigger
             let action = (tdata1 >> 19) & 0x3;
-            if action != 0 { continue; }
+            if action != 0 {
+                continue;
+            }
             let mode_ok = match self.privilege {
                 PrivilegeMode::Machine => (tdata1 >> 13) & 1 != 0 && mte,
                 PrivilegeMode::Supervisor => (tdata1 >> 11) & 1 != 0,
@@ -494,7 +492,7 @@ mod tests {
         cpu.csr_write(csr::MSTATUS, 0xFFFF_FFFF_FFFF_FFFF);
 
         let mstatus = cpu.csr_read(csr::MSTATUS);
-        assert_ne!(mstatus, 0xFFFF_FFFF_FFFF_FFFF); // specific bits are masked out or preserved
+        assert_ne!(mstatus, 0xFFFF_FFFF_FFFF_FFFF);
 
         let sstatus = cpu.csr_read(csr::SSTATUS);
         assert_eq!(

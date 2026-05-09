@@ -14,10 +14,6 @@ fn make_virtio() -> VirtioBlock {
     VirtioBlock::new(0x1000_1000, 0x8000_0000, ram)
 }
 
-// ══════════════════════════════════════════════════════════
-// 1. Identification registers
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_magic_value() {
     let mut vio = make_virtio();
@@ -56,10 +52,6 @@ fn virtio_address_range() {
     assert_eq!(size, 0x1000);
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Status register
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_status_initial_zero() {
     let mut vio = make_virtio();
@@ -73,10 +65,6 @@ fn virtio_status_write_and_read() {
     assert_eq!(vio.read_u32(0x70), 0x0F);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Queue configuration
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_queue_num_max() {
     let mut vio = make_virtio();
@@ -87,8 +75,6 @@ fn virtio_queue_num_max() {
 fn virtio_queue_num_write_and_read() {
     let mut vio = make_virtio();
     vio.write_u32(0x38, 8);
-    // Queue num is write-only in some specs, but our impl stores it
-    // We verify through queue_ready
     vio.write_u32(0x44, 1);
     assert_eq!(vio.read_u32(0x44), 1);
 }
@@ -102,10 +88,6 @@ fn virtio_queue_ready() {
     assert_eq!(vio.read_u32(0x44), 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. Interrupt status
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn virtio_interrupt_status_initial_zero() {
     let mut vio = make_virtio();
@@ -115,16 +97,9 @@ fn virtio_interrupt_status_initial_zero() {
 #[test]
 fn virtio_interrupt_ack_clears_bits() {
     let mut vio = make_virtio();
-    // Manually we can't easily trigger an interrupt without full queue setup,
-    // but we can verify the ack mechanism
     vio.write_u32(0x64, 0x1); // Ack bit 0
-    // Since interrupt_status was 0, clearing doesn't change anything
     assert_eq!(vio.read_u32(0x60), 0);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Config space (disk capacity)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_capacity_empty_disk() {
@@ -154,10 +129,6 @@ fn virtio_tick_no_interrupt_initially() {
     let mut vio = make_virtio();
     assert!(!vio.tick());
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Device features
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn virtio_device_features_sel_0() {

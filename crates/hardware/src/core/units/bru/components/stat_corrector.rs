@@ -30,7 +30,6 @@ fn clamp_counter(val: i32, bits: usize) -> i8 {
 /// `[table * table_size + entry]` to eliminate double indirection.
 #[derive(Debug)]
 pub struct StatCorrector {
-    // --- GEHL tables ---
     /// Flattened GEHL counter tables: `num_tables * table_size` entries.
     counters: Vec<i8>,
     /// Number of active GEHL tables.
@@ -46,7 +45,6 @@ pub struct StatCorrector {
     /// GEHL counter bit width.
     counter_bits: usize,
 
-    // --- Bias tables (3 tables, Seznec CBP-5 design) ---
     /// Primary bias table: indexed by `PC ^ low_conf ^ pred_direction`.
     bias: Vec<i8>,
     /// Secondary bias table (SK): indexed by `PC ^ high_conf ^ pred_direction`.
@@ -58,7 +56,6 @@ pub struct StatCorrector {
     /// Bias counter bit width.
     bias_counter_bits: usize,
 
-    // --- Dynamic threshold (two-level: global + per-PC) ---
     /// Global threshold, stored `<<3` for sub-integer precision. Init = `initial_threshold << 3`.
     update_threshold: i32,
     /// Per-PC threshold adjustments (signed, -8..7 range by default).
@@ -66,7 +63,6 @@ pub struct StatCorrector {
     /// Mask for per-PC threshold table indexing.
     per_pc_threshold_mask: usize,
 
-    // --- Multi-tier chooser counters ---
     /// `FirstH` chooser: selects SC vs TAGE in the medium-confidence zone.
     first_h: i8,
     /// `SecondH` chooser: selects SC vs TAGE in the high-confidence narrow zone.
@@ -158,8 +154,6 @@ impl StatCorrector {
         (pc_hash ^ h as usize) & self.table_mask
     }
 
-    // --- Bias table indexing (Seznec CBP-5) ---
-
     #[inline]
     const fn bias_index(&self, pc: u64, meta: &TageScMeta) -> usize {
         let pc_hash = (pc >> 2) as usize;
@@ -226,12 +220,10 @@ impl StatCorrector {
         sum_abs: i32,
         thres: i32,
     ) -> bool {
-        // SC agrees with TAGE — no override.
         if sc_taken == meta.pred_taken {
             return false;
         }
 
-        // SC disagrees — multi-tier check.
         if sum_abs >= thres {
             return true;
         }
@@ -244,7 +236,6 @@ impl StatCorrector {
                 if sum_abs < quarter {
                     false
                 } else if sum_abs < half {
-                    // SecondH chooser zone
                     self.second_h >= 0
                 } else {
                     false
@@ -252,7 +243,6 @@ impl StatCorrector {
             }
             TageConfLevel::Medium => {
                 if sum_abs < quarter {
-                    // FirstH chooser zone
                     self.first_h >= 0
                 } else {
                     false
@@ -270,10 +260,8 @@ impl StatCorrector {
     /// to override. Weight of 3 matches the number of bias tables, ensuring
     /// the TAGE term provides meaningful pushback against bias-driven overrides.
     pub fn predict(&self, pc: u64, ghr: &Ghr, meta: &TageScMeta) -> (bool, ScSum) {
-        // Seed with TAGE provider confidence (centered counter).
         let mut sum: i32 = 2 * (meta.pred_ctr as i32) + 1;
 
-        // Bias tables: centered as 2*ctr+1.
         let bi = self.bias_index(pc, meta);
         sum += 2 * (self.bias[bi] as i32) + 1;
 
@@ -283,7 +271,6 @@ impl StatCorrector {
         let bbi = self.bias_bank_index(pc, meta);
         sum += 2 * (self.bias_bank[bbi] as i32) + 1;
 
-        // GEHL tables: centered as 2*ctr+1.
         for t in 0..self.num_tables {
             let idx = self.table_index(pc, ghr, t);
             sum += 2 * (self.counter(t, idx) as i32) + 1;
@@ -311,9 +298,7 @@ impl StatCorrector {
         let quarter = thres / 4;
         let half = thres / 2;
 
-        // Update FirstH/SecondH choosers when in their respective zones.
         if sc_taken != meta.pred_taken {
-            // SecondH zone: High conf + thres/4 <= |sum| < thres/2
             if meta.conf == TageConfLevel::High && sum_abs >= quarter && sum_abs < half {
                 if sc_taken == taken {
                     self.second_h = (self.second_h + 1).min(63);
@@ -321,7 +306,6 @@ impl StatCorrector {
                     self.second_h = (self.second_h - 1).max(-64);
                 }
             }
-            // FirstH zone: Medium conf + |sum| < thres/4
             if meta.conf == TageConfLevel::Medium && sum_abs < quarter {
                 if sc_taken == taken {
                     self.first_h = (self.first_h + 1).min(63);
@@ -331,24 +315,17 @@ impl StatCorrector {
             }
         }
 
-        // Threshold adaptation: only when SC disagrees with TAGE.
-        // SC disagrees and would have been right -> lower threshold (encourage overrides).
-        // SC disagrees and would have been wrong -> raise threshold (discourage overrides).
-        // SC agrees with TAGE -> no threshold change.
         if sc_taken != meta.pred_taken {
             let pc_idx = (pc >> 2) as usize & self.per_pc_threshold_mask;
             if sc_taken == taken {
-                // SC would have been right to override -> lower threshold.
                 self.update_threshold = (self.update_threshold - 1).max(0);
                 self.per_pc_threshold[pc_idx] = (self.per_pc_threshold[pc_idx] - 1).max(-16);
             } else {
-                // SC would have been wrong to override -> raise threshold.
                 self.update_threshold = (self.update_threshold + 1).min(511);
                 self.per_pc_threshold[pc_idx] = (self.per_pc_threshold[pc_idx] + 1).min(15);
             }
         }
 
-        // Training condition (Seznec's exact): sc_pred != taken || |sum| < threshold.
         let sc_pred = if self.override_decision(sc_taken, meta, sum_abs, thres) {
             sc_taken
         } else {
@@ -360,7 +337,6 @@ impl StatCorrector {
             return;
         }
 
-        // Update all 3 bias tables (bias_counter_bits clamp).
         let bbits = self.bias_counter_bits;
         let bi = self.bias_index(pc, meta);
         let v = self.bias[bi] as i32;
@@ -377,7 +353,6 @@ impl StatCorrector {
         self.bias_bank[bbi] =
             if taken { clamp_counter(v + 1, bbits) } else { clamp_counter(v - 1, bbits) };
 
-        // Update all GEHL tables (counter_bits clamp).
         let bits = self.counter_bits;
         for t in 0..self.num_tables {
             let idx = self.table_index(pc, ghr, t);

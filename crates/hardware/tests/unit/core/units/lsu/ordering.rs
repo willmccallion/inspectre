@@ -5,10 +5,6 @@
 
 use rvsim_core::core::units::lsu::ordering::{Fence, FenceSet};
 
-// ══════════════════════════════════════════════════════════
-// 1. FenceSet basics
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn fence_set_from_bits_all_zero() {
     let fs = FenceSet::from_bits(0b0000);
@@ -57,10 +53,6 @@ fn fence_set_round_trip() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Fence decode: IORW,IORW (full barrier)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn fence_full_barrier_iorw_iorw() {
     // FENCE IORW, IORW encoding: opcode=0x0F, pred=0b1111 (bits 27:24), succ=0b1111 (bits 23:20)
@@ -73,10 +65,6 @@ fn fence_full_barrier_iorw_iorw() {
     assert!(!fence.is_nop());
     assert!(!fence.is_tso());
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Fence decode: RW,RW (TSO-like)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn fence_rw_rw_is_tso() {
@@ -94,10 +82,6 @@ fn fence_rw_rw_is_tso() {
     assert!(!fence.is_full_barrier());
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. Fence decode: no bits (nop)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn fence_no_bits_is_nop() {
     let inst: u32 = 0x0000_000F; // pred=0, succ=0
@@ -108,10 +92,6 @@ fn fence_no_bits_is_nop() {
     assert!(fence.is_nop());
     assert!(!fence.is_full_barrier());
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Fence decode: W,R (store-load barrier)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn fence_w_r_store_load_barrier() {
@@ -131,10 +111,6 @@ fn fence_w_r_store_load_barrier() {
     assert!(!fence.is_nop());
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. Asymmetric pred/succ
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn fence_asymmetric_pred_succ() {
     // pred=IORW (0xF), succ=R (0b0010)
@@ -147,10 +123,6 @@ fn fence_asymmetric_pred_succ() {
     assert!(!fence.succ.w);
     assert!(!fence.is_full_barrier());
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. FenceSet individual bit flags
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn fence_set_only_i() {

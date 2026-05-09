@@ -110,13 +110,9 @@ class BranchPredictor:
                 else [5, 11, 22, 44, 89, 178, 356, 712]
             )
             self.tag_widths = (
-                tag_widths
-                if tag_widths is not None
-                else [8, 8, 9, 9, 10, 10, 11, 11]
+                tag_widths if tag_widths is not None else [8, 8, 9, 9, 10, 10, 11, 11]
             )
-            _validate_history_lengths(
-                self.history_lengths, "TAGE history_lengths"
-            )
+            _validate_history_lengths(self.history_lengths, "TAGE history_lengths")
 
         def __repr__(self) -> str:
             return (
@@ -202,9 +198,7 @@ class BranchPredictor:
                 else [5, 11, 22, 44, 89, 178, 356, 712]
             )
             self.tag_widths = (
-                tag_widths
-                if tag_widths is not None
-                else [8, 8, 9, 9, 10, 10, 11, 11]
+                tag_widths if tag_widths is not None else [8, 8, 9, 9, 10, 10, 11, 11]
             )
             self.sc_num_tables = sc_num_tables
             self.sc_table_size = sc_table_size
@@ -231,9 +225,7 @@ class BranchPredictor:
                 else [9, 9, 10, 10, 11, 11, 12, 12]
             )
             self.ittage_reset_interval = ittage_reset_interval
-            _validate_history_lengths(
-                self.history_lengths, "ScLTage history_lengths"
-            )
+            _validate_history_lengths(self.history_lengths, "ScLTage history_lengths")
             _validate_history_lengths(
                 self.ittage_history_lengths, "ScLTage ittage_history_lengths"
             )

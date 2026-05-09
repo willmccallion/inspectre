@@ -1,10 +1,8 @@
 //! CPU Core Definition and Initialization.
 //!
-//! This module defines the central `Cpu` structure, which holds all architectural
-//! processor state. The pipeline lives separately in `Simulator`; this struct owns:
-//! 1. **State Management:** Registers, program counter, and privilege modes.
-//! 2. **Memory Hierarchy:** MMU, TLBs, and multi-level cache simulations.
-//! 3. **System Integration:** System bus, devices, and RAM.
+//! Defines the central `Cpu` structure holding all architectural processor
+//! state. The pipeline lives separately in `Simulator`; this struct owns
+//! registers, MMU, caches, and the system bus.
 
 /// Control and Status Register access and management.
 pub mod csr;
@@ -115,17 +113,11 @@ pub struct Cpu {
     pub committed_next_pc: u64,
     /// Raw pointer to the start of simulated RAM.
     ///
-    /// # Safety Invariants
+    /// # Safety
     ///
-    /// This pointer must maintain the following invariants at all times:
-    /// - Points to a valid, allocated memory region of size `(ram_end - ram_start)` bytes
-    /// - The memory region remains valid for the entire lifetime of the `Cpu` instance
-    /// - All accesses must verify: `ram_start <= address < ram_end` before dereferencing
-    /// - The pointer is valid for both reads and writes (memory is mutable)
-    /// - Memory is properly aligned for the underlying allocation (even if individual
-    ///   accesses use `read_unaligned`/`write_unaligned`)
-    /// - No other code may free or reallocate this memory while the CPU exists
-    /// - The pointer remains valid across CPU state changes and pipeline operations
+    /// Must point to a valid, mutable memory region of size `ram_end - ram_start`
+    /// bytes that remains live for the lifetime of the `Cpu`. All accesses must
+    /// verify `ram_start <= address < ram_end` before dereferencing.
     pub ram_ptr: *mut u8,
     /// Physical address where RAM starts.
     pub ram_start: u64,
@@ -207,15 +199,6 @@ impl Cpu {
     }
 
     /// Creates a new CPU instance with the specified system and configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `system` - The SOC system containing the bus and devices.
-    /// * `config` - The simulator configuration parameters.
-    ///
-    /// # Returns
-    ///
-    /// A new `Cpu` instance initialized according to the provided configuration.
     pub fn new(mut system: System, config: &Config) -> Self {
         use crate::core::arch::csr::{
             MISA_DEFAULT_RV64IMAFDC, MISA_EXT_A, MISA_EXT_C, MISA_EXT_D, MISA_EXT_F, MISA_EXT_I,
@@ -318,9 +301,9 @@ impl Cpu {
                 if config.cache.l1_d.prefetcher != crate::config::Prefetcher::None
                     || config.cache.l2.prefetcher != crate::config::Prefetcher::None
                 {
-                    64 // Default filter size when any prefetcher is active
+                    64
                 } else {
-                    0 // Disabled when no prefetchers
+                    0
                 },
                 config.cache.l1_d.line_bytes,
             ),
@@ -384,10 +367,6 @@ impl Cpu {
     }
 
     /// Retrieves the exit code if the simulation has finished.
-    ///
-    /// # Returns
-    ///
-    /// `Some(u64)` containing the exit code if finished, otherwise `None`.
     pub const fn take_exit(&mut self) -> Option<u64> {
         self.exit_code.take()
     }
@@ -413,8 +392,8 @@ mod tests {
 
         cpu.set_reservation(PhysAddr::new(0x1000));
         assert!(cpu.check_reservation(PhysAddr::new(0x1000)));
-        assert!(cpu.check_reservation(PhysAddr::new(0x1008))); // same cache line
-        assert!(!cpu.check_reservation(PhysAddr::new(0x2000))); // different cache line
+        assert!(cpu.check_reservation(PhysAddr::new(0x1008)));
+        assert!(!cpu.check_reservation(PhysAddr::new(0x2000)));
 
         cpu.clear_reservation();
         assert!(!cpu.check_reservation(PhysAddr::new(0x1000)));

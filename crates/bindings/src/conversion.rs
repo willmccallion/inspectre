@@ -7,19 +7,7 @@ use pyo3::prelude::*;
 use rvsim_core::config::Config;
 use serde_json;
 
-/// Converts a Python dict to a simulator `Config`.
-///
-/// The dict is serialized to JSON and then deserialized into `Config`. Keys must match
-/// the Rust config structure (e.g., `general`, `system`, `memory`, `cache`, `pipeline`).
-///
-/// # Arguments
-///
-/// * `py` - Python interpreter handle.
-/// * `dict` - A Python dict (e.g., from `rvsim.config.SimConfig.to_dict()`).
-///
-/// # Returns
-///
-/// The deserialized `Config`, or a `PyErr` if the dict is invalid.
+/// Converts a Python dict to a simulator `Config` via JSON serialization.
 pub fn py_dict_to_config(py: Python<'_>, dict: &Bound<'_, PyAny>) -> PyResult<Config> {
     let json = py.import("json")?;
     let dumps = json.getattr("dumps")?;

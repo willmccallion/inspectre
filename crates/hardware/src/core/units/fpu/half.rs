@@ -21,11 +21,7 @@ pub const F16_NAN_BOX_MASK: u64 = 0xFFFF_FFFF_FFFF_0000;
 /// canonical quiet NaN if the value is not properly NaN-boxed.
 #[inline]
 pub const fn unbox_f16(val: u64) -> u16 {
-    if (val & F16_NAN_BOX_MASK) == F16_NAN_BOX_MASK {
-        val as u16
-    } else {
-        CANONICAL_NAN_F16
-    }
+    if (val & F16_NAN_BOX_MASK) == F16_NAN_BOX_MASK { val as u16 } else { CANONICAL_NAN_F16 }
 }
 
 /// Boxes an f16 bit pattern into a 64-bit NaN-boxed register value.
@@ -73,7 +69,6 @@ pub const fn f16_to_f32(h: u16) -> f32 {
         if mant == 0 {
             sign << 31
         } else {
-            // Subnormal: normalize the mantissa.
             let mut m = mant;
             let mut e: i32 = -14;
             while (m & 0x400) == 0 {
@@ -85,12 +80,10 @@ pub const fn f16_to_f32(h: u16) -> f32 {
             (sign << 31) | (new_exp << 23) | (m << 13)
         }
     } else if exp == 0x1F {
-        // Infinity or NaN: align mantissa to f32 positions. A quiet f16 NaN
-        // has its MSB (bit 9) set, which becomes bit 22 in f32 — still quiet.
+        // Inf/NaN: align mantissa to f32 positions; quiet f16 NaN's MSB stays quiet.
         (sign << 31) | (0xFF << 23) | (mant << 13)
     } else {
-        // Re-bias the exponent through i32 because the f16 path can pass exp
-        // values below 15, which would underflow as u32.
+        // Re-bias via i32: exp can be below 15 (would underflow u32).
         let new_exp = (exp as i32 - 15 + 127) as u32;
         (sign << 31) | (new_exp << 23) | (mant << 13)
     };
@@ -109,21 +102,16 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
     let raw_exp = ((bits >> 52) & 0x7FF) as i32;
     let raw_mant = bits & 0x000F_FFFF_FFFF_FFFF;
 
-    // NaN: any NaN input becomes the canonical quiet f16 NaN. No flags.
     if raw_exp == 0x7FF && raw_mant != 0 {
         return (CANONICAL_NAN_F16, FpFlags::NONE);
     }
-    // Infinity: preserve sign.
     if raw_exp == 0x7FF {
         return ((sign_u16 << 15) | 0x7C00, FpFlags::NONE);
     }
-    // Zero: preserve sign.
     if raw_exp == 0 && raw_mant == 0 {
         return (sign_u16 << 15, FpFlags::NONE);
     }
 
-    // Build the unbiased exponent and a significand with the leading 1 bit
-    // explicit at position 52. For f64 subnormals we normalize it first.
     let (unbiased, sig): (i32, u64) = if raw_exp == 0 {
         let mut m = raw_mant;
         let mut e: i32 = -1022;
@@ -138,16 +126,13 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
 
     let mut flags = FpFlags::NONE;
 
-    // Overflow: the value's magnitude is >= 2^16, which exceeds f16's
-    // largest finite (2^16 - 2^5).
     if unbiased >= 16 {
         flags = flags | FpFlags::OF | FpFlags::NX;
         return (overflow_result(sign_u16, rm), flags);
     }
 
-    // Below the smallest representable: 2^(-25) is half an f16 min subnormal
-    // (f16 min subnormal = 2^(-24)). Anything smaller rounds to 0 except
-    // for RDN of negatives / RUP of positives which round to min subnormal.
+    // 2^(-25) is half an f16 min subnormal; smaller rounds to 0 except
+    // RDN of negatives / RUP of positives, which round to min subnormal.
     if unbiased < -25 {
         flags = flags | FpFlags::UF | FpFlags::NX;
         let result = match rm {
@@ -158,11 +143,8 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
         return (result, flags);
     }
 
-    // Shift the 53-bit significand down into f16's 10-bit mantissa field,
-    // preserving guard/round/sticky below for rounding.
-    // Normal f16 target: shift = 42 (= 53 - 11 = mantissa width difference
-    // including the implicit bit).
-    // Subnormal target: shift more, losing leading bits.
+    // Normal target: shift = 53 - 11 (incl. implicit bit). Subnormal: shift
+    // more, losing leading bits. Lower bits become guard/round/sticky.
     let (f16_exp, shift): (u32, u32) = if unbiased >= -14 {
         ((unbiased + 15) as u32, 42)
     } else {
@@ -174,11 +156,8 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
     let sticky_mask = (1u64 << (shift - 1)) - 1;
     let sticky = (sig & sticky_mask) != 0;
 
-    let base_mant: u32 = if f16_exp > 0 {
-        (mant_shifted as u32) & 0x3FF
-    } else {
-        mant_shifted as u32
-    };
+    let base_mant: u32 =
+        if f16_exp > 0 { (mant_shifted as u32) & 0x3FF } else { mant_shifted as u32 };
 
     let inexact = round_bit != 0 || sticky;
     let round_up = match rm {
@@ -194,7 +173,6 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
     if round_up {
         mant_out += 1;
         if mant_out == 0x400 {
-            // Mantissa rolled over into the exponent.
             mant_out = 0;
             exp_out = if f16_exp == 0 { 1 } else { exp_out + 1 };
         }
@@ -203,14 +181,11 @@ pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
     if inexact {
         flags = flags | FpFlags::NX;
     }
-    // Underflow is raised when the rounded result is tiny (subnormal) AND
-    // inexact. Per IEEE 754-2008, this is the "after rounding" definition
-    // used by most FP units; RISC-V follows that convention.
+    // IEEE 754-2008 "after rounding" UF: tiny (subnormal) AND inexact.
     if f16_exp == 0 && inexact && exp_out == 0 {
         flags = flags | FpFlags::UF;
     }
 
-    // Rounding could push us into infinity.
     if exp_out >= 0x1F {
         flags = flags | FpFlags::OF | FpFlags::NX;
         return (overflow_result(sign_u16, rm), flags);

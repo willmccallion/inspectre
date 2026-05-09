@@ -152,10 +152,6 @@ pub struct MemWbEntry {
     pub exception_stage: Option<ExceptionStage>,
 }
 
-// ============================================================================
-// New 10-stage pipeline latch types (all carry RobTag)
-// ============================================================================
-
 /// Entry in Fetch1 -> Fetch2 latch.
 ///
 /// Carries PC and I-TLB/branch prediction results from PC generation
@@ -267,8 +263,7 @@ pub struct RenameIssueEntry {
 }
 
 /// Entry from Execute -> Memory1 latch.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ExMem1Entry {
     /// ROB tag.
     pub rob_tag: RobTag,
@@ -299,7 +294,6 @@ pub struct ExMem1Entry {
     /// Vector memory element metadata (None for scalar ops).
     pub vec_mem: Option<VecMemElement>,
 }
-
 
 /// Entry from Memory1 -> Memory2 latch.
 #[derive(Clone, Default, Debug)]

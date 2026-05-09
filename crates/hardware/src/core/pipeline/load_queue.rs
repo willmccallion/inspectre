@@ -237,9 +237,7 @@ impl LoadQueue {
         rob_tag: RobTag,
         elem_idx: Option<ElemIdx>,
     ) -> Option<&mut LoadQueueEntry> {
-        self.entries
-            .iter_mut()
-            .find(|e| e.valid && e.rob_tag == rob_tag && e.elem_idx == elem_idx)
+        self.entries.iter_mut().find(|e| e.valid && e.rob_tag == rob_tag && e.elem_idx == elem_idx)
     }
 }
 

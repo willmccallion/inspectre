@@ -1,12 +1,4 @@
-//! Device trait for memory-mapped I/O.
-//!
-//! This module defines the `Device` trait implemented by all bus-attached components. It provides:
-//! 1. **Identification:** `name` and `address_range` for bus routing.
-//! 2. **Access:** Byte, half, word, and doubleword read/write at device-relative offsets.
-//! 3. **Lifecycle:** Optional `tick` and IRQ reporting for timer and interrupt devices.
-//! 4. **Downcasting:** Optional casts to `Plic`, `Uart`, or `Memory` for device-specific access.
-//!
-//! All implementors must be `Send + Sync` for use with the Python bindings and multi-threaded simulation.
+//! `Device` trait implemented by all bus-attached MMIO/memory components.
 
 use crate::common::IrqId;
 use crate::soc::devices::{Clint, Plic, Uart};

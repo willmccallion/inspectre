@@ -11,8 +11,8 @@ use crate::core::Cpu;
 use crate::core::pipeline::latches::RenameIssueEntry;
 use crate::core::pipeline::rob::{Rob, RobState, RobTag};
 use crate::core::pipeline::signals::SystemOp;
-use crate::core::units::vpu::mem::{is_vec_load, is_vec_store};
 use crate::core::pipeline::store_buffer::StoreBuffer;
+use crate::core::units::vpu::mem::{is_vec_load, is_vec_store};
 use crate::trace_issue;
 
 use std::collections::VecDeque;
@@ -71,7 +71,6 @@ impl InOrderIssueUnit {
         for _ in 0..width {
             let Some(entry) = self.queue.front() else { break };
 
-            // Faulted instructions don't need operands — pass through
             if entry.trap.is_some() {
                 if let Some(e) = self.queue.pop_front() {
                     selected.push(e);
@@ -79,15 +78,11 @@ impl InOrderIssueUnit {
                 continue;
             }
 
-            // ── Serialization checks (matching O3 issue queue) ──────────
-
-            // System/CSR instructions are serializing: wait for all older
-            // instructions to complete before issuing.
+            // System/CSR instructions serialize: wait for all older to complete.
             if entry.ctrl.system_op != SystemOp::None && !rob.all_before_completed(entry.rob_tag) {
                 break;
             }
 
-            // FENCE: wait for older operations matching pred bits to complete.
             if entry.ctrl.system_op == SystemOp::Fence {
                 let pred_bits = ((entry.inst >> 24) & 0xF) as u8;
                 let pred_r = pred_bits & 0b0010 != 0;
@@ -97,31 +92,24 @@ impl InOrderIssueUnit {
                 }
             }
 
-            // Loads/stores: blocked by older in-flight FENCE with matching succ bits.
             if (entry.ctrl.mem_read || entry.ctrl.mem_write)
                 && rob.has_fence_blocking(entry.rob_tag, entry.ctrl.mem_read, entry.ctrl.mem_write)
             {
                 break;
             }
 
-            // Loads must wait for all older stores to have resolved addresses,
-            // otherwise store-to-load forwarding can miss an overlap.
+            // Loads need older store addresses resolved or forwarding can miss an overlap.
             if entry.ctrl.mem_read && store_buffer.has_unresolved_store_before(entry.rob_tag) {
                 break;
             }
 
-            // Vector memory ops access memory directly via the bus (in-order
-            // backend), bypassing the store buffer. They must wait for ALL
-            // older instructions to complete so that memory state is consistent.
+            // Vec mem ops bypass the store buffer; serialize them to keep memory consistent.
             if (is_vec_load(entry.ctrl.vec_op) || is_vec_store(entry.ctrl.vec_op))
                 && !rob.all_before_completed(entry.rob_tag)
             {
                 break;
             }
 
-            // ── Operand readiness ───────────────────────────────────────
-
-            // Try to read all source operands using tags captured at rename
             let rv1 = read_operand_by_tag(entry.rs1, entry.ctrl.rs1_fp, entry.rs1_tag, rob, cpu);
             let rv2 = read_operand_by_tag(entry.rs2, entry.ctrl.rs2_fp, entry.rs2_tag, rob, cpu);
             let rv3 = if entry.ctrl.rs3_fp {
@@ -137,7 +125,6 @@ impl InOrderIssueUnit {
                 issued.rv3 = v3;
                 selected.push(issued);
             } else {
-                // Head of queue blocked — in-order can't skip
                 trace_issue!(cpu.trace;
                     pc       = %crate::trace::Hex(entry.pc),
                     rs1      = entry.rs1.as_usize(),
@@ -191,26 +178,21 @@ fn read_operand_by_tag(
     rob: &Rob,
     cpu: &Cpu,
 ) -> Option<u64> {
-    // x0 is hardwired zero
     if !is_fp && reg.is_zero() {
         return Some(0);
     }
 
     tag.map_or_else(
         || {
-            // No in-flight producer at rename time — read from architectural register file
             let val = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
             Some(val)
         },
-        |t| {
-            // In-flight producer — check if ROB entry has completed
-            match rob.find_entry(t) {
-                Some(entry) if entry.state == RobState::Completed => entry.result,
-                Some(_) => None, // Not ready — stall
-                None => {
-                    // ROB entry gone (already committed) — value is in register file
-                    Some(if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) })
-                }
+        |t| match rob.find_entry(t) {
+            Some(entry) if entry.state == RobState::Completed => entry.result,
+            Some(_) => None,
+            None => {
+                // ROB entry already committed — value is in the register file.
+                Some(if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) })
             }
         },
     )

@@ -32,9 +32,7 @@ pub fn memory2_stage(
     let mut violation: Option<(RobTag, u64)> = None;
     let mut entries = std::mem::take(input);
 
-    // Sort by rob_tag to ensure entries are processed in program order.
-    // This prevents younger loads from stalling on unresolved older stores
-    // that are behind them in the latch, which would deadlock the pipeline.
+    // Process in program order so younger loads don't stall behind unresolved older stores.
     entries.sort_by_key(|e| e.rob_tag.0);
 
     output.clear();
@@ -42,7 +40,6 @@ pub fn memory2_stage(
     let mut iter = entries.into_iter();
 
     while let Some(mem) = iter.next() {
-        // Propagate traps
         if let Some(ref trap) = mem.trap {
             trace_trap!(cpu.trace;
                 event   = "propagate",
@@ -70,9 +67,7 @@ pub fn memory2_stage(
                 lr_sc: None,
                 vec_mem: mem.vec_mem,
             });
-            // Trap: remaining entries stay in the input latch for next cycle.
-            // They will be flushed by the commit-stage trap handler, but must
-            // not be silently dropped here or their ROB entries become orphans.
+            // Remaining entries stay in input — commit's trap handler flushes them.
             input.extend(iter);
             return violation;
         }
@@ -87,12 +82,9 @@ pub fn memory2_stage(
         let mut lr_sc: Option<LrScRecord> = None;
 
         if mem.ctrl.atomic_op != AtomicOp::None {
-            // Atomic operations
             match mem.ctrl.atomic_op {
                 AtomicOp::Lr => {
-                    // LR must read the globally-visible value, not a
-                    // locally-speculative one.  Stall until all older stores
-                    // to this address have drained.
+                    // LR reads the globally-visible value: stall on older stores to this addr.
                     if store_buffer.has_older_store_to(raw_paddr, mem.ctrl.width, mem.rob_tag) {
                         input.push(mem);
                         input.extend(iter);
@@ -103,20 +95,15 @@ pub fn memory2_stage(
                         MemWidth::Double => cpu.bus.bus.read_u64(raw_paddr),
                         _ => 0,
                     };
-                    // Defer reservation to commit — speculative LR must not
-                    // modify architectural reservation state.
+                    // Defer reservation to commit; speculative LR mustn't touch arch state.
                     lr_sc = Some(LrScRecord::Lr { paddr: raw_paddr });
                 }
                 AtomicOp::Sc => {
-                    // Optimistically assume SC succeeds: resolve the store
-                    // buffer and return 0 (success).  The commit stage will
-                    // verify the reservation and, if invalid, cancel the
-                    // store and flush the pipeline.
+                    // Assume SC succeeds; commit verifies the reservation and cancels on miss.
                     store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, mem.store_data);
-                    ld = 0; // optimistic success
+                    ld = 0;
                     lr_sc = Some(LrScRecord::Sc { paddr: raw_paddr });
 
-                    // Check for memory ordering violation (same as regular stores).
                     if let Some(ref lq) = load_queue
                         && let Some(violating_tag) =
                             lq.check_ordering_violation(raw_paddr, mem.ctrl.width, mem.rob_tag)
@@ -131,9 +118,7 @@ pub fn memory2_stage(
                     }
                 }
                 _ => {
-                    // AMO: atomic read-modify-write must operate on the
-                    // globally-visible value.  Stall until all older stores
-                    // to this address have drained, then read from memory.
+                    // AMO RMW operates on globally-visible value: stall on older stores here.
                     if store_buffer.has_older_store_to(raw_paddr, mem.ctrl.width, mem.rob_tag) {
                         input.push(mem);
                         input.extend(iter);
@@ -152,10 +137,8 @@ pub fn memory2_stage(
                         mem.ctrl.width,
                     );
 
-                    // Resolve store buffer with the computed new value
                     store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, new_val);
 
-                    // Check for memory ordering violation (same as regular stores).
                     if let Some(ref lq) = load_queue
                         && let Some(violating_tag) =
                             lq.check_ordering_violation(raw_paddr, mem.ctrl.width, mem.rob_tag)
@@ -170,15 +153,11 @@ pub fn memory2_stage(
                     }
 
                     ld = old_val;
-                    // Note: AMOs may optionally clear the reservation per
-                    // spec.  We skip this here because Memory2 is speculative
-                    // — clearing on squash would corrupt LR/SC pairs.
-                    // The reservation will be cleared by the next SC commit.
+                    // AMO reservation clear is deferred to the next SC commit (avoid squash corruption).
                 }
             }
         } else if mem.ctrl.mem_read {
-            // Check the scalar store buffer first, then the dedicated VSB for
-            // any older vec store whose elements are still in flight.
+            // Check scalar SB first, then VSB for older vec stores still in flight.
             let sb_result = store_buffer.forward_load(raw_paddr, mem.ctrl.width, mem.rob_tag);
             let fwd = match sb_result {
                 ForwardResult::Miss => match vec_store_buffer.as_deref() {
@@ -189,8 +168,7 @@ pub fn memory2_stage(
             };
             match fwd {
                 ForwardResult::Hit(forwarded) => {
-                    // Apply sign extension for signed loads (LB, LH, LW on RV64).
-                    // The store buffer returns raw masked data without sign extension.
+                    // SB returns raw masked data; apply sign extension for signed loads.
                     ld = if mem.ctrl.signed_load {
                         match mem.ctrl.width {
                             MemWidth::Byte => (forwarded as u8 as i8) as i64 as u64,
@@ -201,12 +179,11 @@ pub fn memory2_stage(
                     } else {
                         forwarded
                     };
-                    // NaN-boxing for FP loads forwarded from store buffer
                     if mem.ctrl.fp_reg_write {
                         match mem.ctrl.width {
                             MemWidth::Word => ld |= 0xFFFF_FFFF_0000_0000,
                             MemWidth::Half => {
-                                // Zfh flh: NaN-box to 64 bits (upper 48 = 1).
+                                // Zfh flh: NaN-box upper 48 bits.
                                 ld = (ld & 0xFFFF) | 0xFFFF_FFFF_FFFF_0000;
                             }
                             _ => {}
@@ -236,7 +213,6 @@ pub fn memory2_stage(
                     );
                 }
                 ForwardResult::Stall => {
-                    // Partial overlap — push back current + remaining entries
                     trace_fwd!(cpu.trace;
                         event           = "stall",
                         load_pc         = %crate::trace::Hex(mem.pc),
@@ -251,7 +227,6 @@ pub fn memory2_stage(
                     return violation;
                 }
                 ForwardResult::Miss => {
-                    // Read from memory/cache
                     trace_fwd!(cpu.trace;
                         event   = "miss",
                         load_pc = %crate::trace::Hex(mem.pc),
@@ -309,12 +284,11 @@ pub fn memory2_stage(
                         }
                     };
 
-                    // NaN-boxing for FP loads
                     if mem.ctrl.fp_reg_write {
                         match mem.ctrl.width {
                             MemWidth::Word => ld |= 0xFFFF_FFFF_0000_0000,
                             MemWidth::Half => {
-                                // Zfh flh: NaN-box to 64 bits (upper 48 = 1).
+                                // Zfh flh: NaN-box upper 48 bits.
                                 ld = (ld & 0xFFFF) | 0xFFFF_FFFF_FFFF_0000;
                             }
                             _ => {}
@@ -323,7 +297,6 @@ pub fn memory2_stage(
                 }
             }
 
-            // Fill load queue with completed data
             if let Some(ref mut lq) = load_queue {
                 let lq_elem = mem.vec_mem.as_ref().map(|vme| vme.elem_idx);
                 lq.fill_data(mem.rob_tag, lq_elem, ld);
@@ -342,10 +315,7 @@ pub fn memory2_stage(
                 "M2: load complete"
             );
         } else if mem.ctrl.mem_write {
-            // Stores: resolve store buffer with paddr + data, NO memory write.
-            //
-            // Vector store element micro-ops route their data into the
-            // dedicated `VecStoreBuffer`; scalar stores resolve their SB slot.
+            // Vector store elements go to VecStoreBuffer; scalar stores resolve their SB slot.
             if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store) {
                 if let Some(vsb) = vec_store_buffer.as_deref_mut() {
                     vsb.resolve_element(mem.rob_tag, raw_paddr, mem.store_data, mem.ctrl.width);
@@ -354,8 +324,6 @@ pub fn memory2_stage(
                 store_buffer.resolve(mem.rob_tag, mem.vaddr, raw_paddr, mem.store_data);
             }
 
-            // Check for memory ordering violation: did a younger load already
-            // execute with stale data at this address?
             if let Some(ref lq) = load_queue
                 && let Some(violating_tag) =
                     lq.check_ordering_violation(raw_paddr, mem.ctrl.width, mem.rob_tag)
@@ -369,7 +337,6 @@ pub fn memory2_stage(
                     violation_flush   = violating_tag.0,
                     "M2: memory ordering VIOLATION — younger load executed with stale data"
                 );
-                // Record the oldest violation (with the store PC for MDP training).
                 match violation {
                     None => violation = Some((violating_tag, mem.pc)),
                     Some((prev, _)) if violating_tag.is_older_than(prev) => {
@@ -378,10 +345,6 @@ pub fn memory2_stage(
                     _ => {}
                 }
             }
-
-            // Note: stores to the reservation address may clear the
-            // reservation, but this is deferred to commit to avoid
-            // corrupting LR/SC state on speculative squash.
 
             trace_mem!(cpu.trace;
                 stage      = "M2",
@@ -613,7 +576,12 @@ mod tests {
 
         // A younger load already executed to the same address
         load_queue.allocate(RobTag(5), crate::core::pipeline::signals::MemWidth::Word, None);
-        load_queue.fill_address(RobTag(5), None, VirtAddr::new(0x8000_0000), PhysAddr::new(0x8000_0000));
+        load_queue.fill_address(
+            RobTag(5),
+            None,
+            VirtAddr::new(0x8000_0000),
+            PhysAddr::new(0x8000_0000),
+        );
         load_queue.fill_data(RobTag(5), None, 0);
 
         let ctrl_store = ControlSignals {

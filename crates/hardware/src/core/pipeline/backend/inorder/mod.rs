@@ -105,16 +105,13 @@ impl InOrderEngine {
 
 impl ExecutionEngine for InOrderEngine {
     fn tick(&mut self, cpu: &mut Cpu, rename_output: &mut Vec<RenameIssueEntry>) {
-        // Backend stages run in reverse order (drain from commit to issue)
         self.cycle += 1;
 
-        // Drain completed MSHRs before anything else — parked loads need
-        // to re-enter the mem1→mem2 latch so they can complete.
+        // Drain MSHRs first so parked loads re-enter the mem1→mem2 latch.
         drain_mshr_completions(cpu, &mut self.mem1_mem2, self.cycle);
 
         let pc_before_commit = cpu.pc;
 
-        // Commit: retire from ROB head
         let trap_event = commit::commit_stage(
             cpu,
             &mut self.rob,
@@ -123,15 +120,14 @@ impl ExecutionEngine for InOrderEngine {
             &mut self.committed_rename_map,
             &mut self.free_list,
             self.width,
-            None, // in-order backend: no load queue
-            None, // in-order backend: no PRF
-            None, // in-order backend: no checkpoints
-            None, // in-order backend: no vec PRF
-            None, // in-order backend: no vec free list
-            None, // in-order backend: no VSB (vec stores complete in execute)
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
-        // Handle trap: flush everything
         if let Some((trap, pc)) = trap_event {
             self.flush(cpu);
             cpu.redirect_pending = true;
@@ -140,29 +136,24 @@ impl ExecutionEngine for InOrderEngine {
             return;
         }
 
-        // Handle MRET/SRET redirect: commit changed the PC, flush the
-        // entire backend so stale instructions fetched from the sequential
-        // path after MRET/SRET don't continue through the pipeline.
+        // MRET/SRET changed the PC; flush so post-redirect stale fetches don't proceed.
         if cpu.pc != pc_before_commit {
             self.flush(cpu);
             rename_output.clear();
             return;
         }
 
-        // Writeback: mark ROB entries as Completed
         writeback::writeback_stage(cpu, &mut self.mem2_wb, &mut self.rob);
 
-        // Memory2: D-cache access / store buffer resolution
         let _ = memory2::memory2_stage(
             cpu,
             &mut self.mem1_mem2,
             &mut self.mem2_wb,
             &mut self.store_buffer,
-            None, // in-order backend: no load queue
-            None, // in-order backend: no VSB
+            None,
+            None,
         );
 
-        // Memory1: address translation (gated by mem1_stall)
         if self.mem1_stall > 0 {
             self.mem1_stall -= 1;
             cpu.stats.stalls_mem += 1;
@@ -172,9 +163,8 @@ impl ExecutionEngine for InOrderEngine {
                 &mut self.execute_mem1,
                 &mut self.mem1_mem2,
                 self.cycle,
-                None, // in-order backend: no load queue
+                None,
             );
-            // Derive stall from the worst-case entry's complete_cycle
             self.mem1_stall = self
                 .mem1_mem2
                 .iter()
@@ -183,11 +173,9 @@ impl ExecutionEngine for InOrderEngine {
                 .unwrap_or(0);
         }
 
-        // Backpressure: if M1 hasn't consumed previous results, skip issue+execute
-        // to prevent new results from overwriting held entries.
+        // Skip issue+execute when M1 hasn't drained, so we don't overwrite held entries.
         let backpressured = !self.execute_mem1.is_empty();
 
-        // Issue + Execute: select and read operands via tags
         let (results, needs_flush) = if backpressured {
             (Vec::new(), false)
         } else {
@@ -195,9 +183,7 @@ impl ExecutionEngine for InOrderEngine {
             if issued.is_empty() && !self.issuer.is_empty() {
                 cpu.stats.stalls_data += 1;
             }
-            // Accumulate fp_flags from in-flight pipeline entries that
-            // haven't reached writeback/ROB yet, so CSR reads of fflags
-            // see flags from all older FP instructions.
+            // Aggregate in-flight fp_flags so CSR reads of fflags see older FP results.
             let mut inflight_fp_flags: u8 = 0;
             for e in &self.execute_mem1 {
                 inflight_fp_flags |= e.fp_flags;
@@ -212,53 +198,23 @@ impl ExecutionEngine for InOrderEngine {
         };
         self.execute_mem1.extend(results);
 
-        // If execute detected a misprediction / CSR / MRET / SRET / FENCE.I,
-        // flush the issue queue, any pending rename output, and the inter-stage
-        // latches between execute and the already-processed backend stages.
-        // The frontend latches will be flushed by Pipeline::tick() since execute
-        // updated cpu.pc. We flush here so that wrongly-fetched instructions
-        // don't continue flowing through the backend.
         if needs_flush {
             cpu.stats.stalls_control += 1;
             cpu.stats.pipeline_flushes += 1;
             self.issuer.flush();
             rename_output.clear();
-            // The mem1_stall was from a pre-branch instruction whose results
-            // are already in the later stages.  Clear it so that the branch
-            // entry in execute_mem1 can drain through M1 immediately, rather
-            // than being stuck behind a stale stall that blocks the entire
-            // backend via backpressure.
+            // mem1_stall was from a pre-branch op already past M1; clear so the branch can drain.
             self.mem1_stall = 0;
-            // Keep execute_mem1 (just produced), but flush the rest of the in-flight
-            // pipeline — those contain instructions from BEFORE the mispredicted branch
-            // that already drained through the backend. They're OK — they're in-order
-            // and must have been issued before the branch.
-            // However, the ROB may contain entries allocated by rename for instructions
-            // that were fetched after the branch. Flush those.
-            // In the in-order case, the last entry in execute_mem1 is the branch itself.
-            // All ROB entries after this one are speculative and must be flushed.
             if let Some(last) = self.execute_mem1.last() {
                 let keep_tag = last.rob_tag;
                 self.rob.flush_after(keep_tag);
-                // Only flush store buffer entries allocated after the branch.
-                // Pre-branch stores may still be in-flight (Ready but not yet
-                // Committed) and must be kept for correct store-to-load forwarding.
+                // Pre-branch SB entries (Ready but not Committed) must survive for forwarding.
                 self.store_buffer.flush_after(keep_tag);
             }
-            // Rebuild scoreboard from surviving ROB entries (pre-branch instructions
-            // that haven't committed yet still need their scoreboard entries).
             self.scoreboard.rebuild_from_rob(&self.rob);
         }
 
-        // Accept dispatched instructions from rename into the issue queue.
-        // We dispatch even during backpressure — the instructions sit in the
-        // FIFO until issue+execute can run again.  Skipping dispatch during
-        // backpressure would let rename keep allocating ROB entries (since
-        // can_accept() checks the *issue queue* size, not rename_output) while
-        // the issue queue stays the same size, eventually causing rename_output
-        // to outgrow the remaining issue capacity.  When dispatch finally runs,
-        // the excess entries are silently dropped, leaving their ROB slots
-        // permanently stuck in Issued state and deadlocking the pipeline.
+        // Dispatch even during backpressure: skipping it lets rename_output outgrow issue capacity.
         if !needs_flush {
             let rename_entries = std::mem::take(rename_output);
             if !rename_entries.is_empty() {
@@ -283,16 +239,12 @@ impl ExecutionEngine for InOrderEngine {
         self.mem1_mem2.clear();
         self.mem2_wb.clear();
         self.mem1_stall = 0;
-        // Flush all MSHRs — their parked entries are now invalid
         cpu.l1d_mshrs.flush();
-        // Reset speculative GHR to committed state — wrong-path branch
-        // outcomes may have been pushed into the speculative history.
         cpu.branch_predictor.repair_to_committed();
     }
 
     fn read_csr_speculative(&self, cpu: &crate::core::Cpu, addr: crate::common::CsrAddr) -> u64 {
-        // In-order serialization guarantees all older CSR writes have committed
-        // before a newer CSR read issues, so architectural state is correct.
+        // In-order serialization commits older CSR writes before any CSR read issues.
         cpu.csr_read(addr)
     }
 

@@ -34,17 +34,12 @@ impl Htif {
             return;
         }
         if val == 1 {
-            // Pass
             self.exit_signal.store(0, Ordering::Relaxed);
         } else if val & 1 != 0 {
-            // Fail — test number is val >> 1
             let test_num = val >> 1;
             eprintln!("[HTIF] FAIL: test case {test_num} (tohost={val:#x})");
             self.exit_signal.store(test_num, Ordering::Relaxed);
         } else {
-            // Even non-zero values are device commands in full HTIF.
-            // For riscv-tests we only care about the above cases, but store
-            // the raw value so the simulation exits rather than spinning.
             eprintln!("[HTIF] Unhandled tohost value: {val:#x}");
             self.exit_signal.store(val, Ordering::Relaxed);
         }
@@ -57,7 +52,6 @@ impl Device for Htif {
     }
 
     fn address_range(&self) -> (u64, u64) {
-        // tohost (8 bytes) + fromhost (8 bytes)
         (self.base_addr, 16)
     }
 

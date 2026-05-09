@@ -67,7 +67,6 @@ fn freg(idx: RegIdx) -> &'static str {
 ///
 /// * `inst` - The raw 32-bit instruction encoding.
 pub fn disassemble(inst: u32) -> String {
-    // Compressed instructions: expand to 32-bit equivalent first.
     if inst & 0x3 != 0x3 {
         let c_inst = inst as u16;
         let expanded = rvc::expand::expand(c_inst);
@@ -84,10 +83,8 @@ pub fn disassemble(inst: u32) -> String {
     let f3 = inst.funct3();
     let f7 = inst.funct7();
 
-    // Sign-extended I-type immediate.
     let imm_i = ((inst as i32) >> 20) as i64;
 
-    // S-type immediate.
     let imm_s = {
         let lo = (inst >> 7) & 0x1F;
         let hi = (inst >> 25) & 0x7F;
@@ -96,15 +93,12 @@ pub fn disassemble(inst: u32) -> String {
     };
 
     match opcode {
-        // ── R-type register-register ──────────────────────
         i_op::OP_REG => disasm_op_reg(rd, rs1, rs2, f3, f7, false),
         i_op::OP_REG_32 => disasm_op_reg(rd, rs1, rs2, f3, f7, true),
 
-        // ── I-type immediate arithmetic ───────────────────
         i_op::OP_IMM => disasm_op_imm(rd, rs1, f3, imm_i, false),
         i_op::OP_IMM_32 => disasm_op_imm(rd, rs1, f3, imm_i, true),
 
-        // ── Loads ─────────────────────────────────────────
         i_op::OP_LOAD => {
             let mn = match f3 {
                 i_f3::LB => "lb",
@@ -126,7 +120,6 @@ pub fn disassemble(inst: u32) -> String {
             }
         },
 
-        // ── Stores ────────────────────────────────────────
         i_op::OP_STORE => {
             let mn = match f3 {
                 i_f3::SB => "sb",
@@ -145,7 +138,6 @@ pub fn disassemble(inst: u32) -> String {
             }
         },
 
-        // ── Branches ──────────────────────────────────────
         i_op::OP_BRANCH => {
             let mn = match f3 {
                 i_f3::BEQ => "beq",
@@ -156,7 +148,6 @@ pub fn disassemble(inst: u32) -> String {
                 i_f3::BGEU => "bgeu",
                 _ => "b??",
             };
-            // Decode B-type immediate
             let imm_b = {
                 let bit11 = (inst >> 7) & 1;
                 let bits4_1 = (inst >> 8) & 0xF;
@@ -168,7 +159,6 @@ pub fn disassemble(inst: u32) -> String {
             format!("{mn} {}, {}, {imm_b}", xreg(rs1), xreg(rs2))
         }
 
-        // ── U-type ────────────────────────────────────────
         i_op::OP_LUI => {
             let imm = ((inst & 0xFFFFF000) as i32) as i64;
             format!("lui {}, {:#x}", xreg(rd), (imm >> 12) & 0xFFFFF)
@@ -178,7 +168,6 @@ pub fn disassemble(inst: u32) -> String {
             format!("auipc {}, {:#x}", xreg(rd), (imm >> 12) & 0xFFFFF)
         }
 
-        // ── JAL ───────────────────────────────────────────
         i_op::OP_JAL => {
             let bits19_12 = (inst >> 12) & 0xFF;
             let bit11 = (inst >> 20) & 1;
@@ -189,15 +178,12 @@ pub fn disassemble(inst: u32) -> String {
             format!("jal {}, {imm}", xreg(rd))
         }
 
-        // ── JALR ──────────────────────────────────────────
         i_op::OP_JALR => {
             format!("jalr {}, {imm_i}({})", xreg(rd), xreg(rs1))
         }
 
-        // ── Floating-point arithmetic ─────────────────────
         f_op::OP_FP => disasm_op_fp(inst, rd, rs1, rs2, f3, f7),
 
-        // ── FMA ───────────────────────────────────────────
         f_op::OP_FMADD => {
             let p = fp_precision(f7);
             format!("fmadd.{p} {}, {}, {}, {}", freg(rd), freg(rs1), freg(rs2), freg(inst.rs3()))
@@ -215,10 +201,8 @@ pub fn disassemble(inst: u32) -> String {
             format!("fnmadd.{p} {}, {}, {}, {}", freg(rd), freg(rs1), freg(rs2), freg(inst.rs3()))
         }
 
-        // ── Atomic ────────────────────────────────────────
         a_op::OP_AMO => disasm_amo(rd, rs1, rs2, f3, f7),
 
-        // ── FENCE / System ────────────────────────────────
         i_op::OP_MISC_MEM => {
             if f3 == i_f3::FENCE_I {
                 "fence.i".to_string()
@@ -229,7 +213,6 @@ pub fn disassemble(inst: u32) -> String {
 
         sys_op::OP_SYSTEM => disasm_system(inst, rd, rs1, f3),
 
-        // ── Vector arithmetic (OP-V) ───────────────────────
         v_opcodes::OP_V => disasm_vec::disasm_vec_arith(inst),
 
         _ => format!("unknown ({inst:#010x})"),
@@ -240,7 +223,6 @@ pub fn disassemble(inst: u32) -> String {
 fn disasm_op_reg(rd: RegIdx, rs1: RegIdx, rs2: RegIdx, f3: u32, f7: u32, is_w: bool) -> String {
     let suffix = if is_w { "w" } else { "" };
 
-    // M-extension
     if f7 == m_op::M_EXTENSION {
         let mn = match f3 {
             m_f3::MUL => "mul",
@@ -295,7 +277,6 @@ fn disasm_op_imm(rd: RegIdx, rs1: RegIdx, f3: u32, imm: i64, is_w: bool) -> Stri
 
 /// Disassemble `OP_FP` (floating-point arithmetic).
 fn disasm_op_fp(inst: u32, rd: RegIdx, rs1: RegIdx, rs2: RegIdx, f3: u32, f7: u32) -> String {
-    // Determine precision from format bits (bits 26:25 of funct7)
     let is_double = (f7 & 1) != 0;
     let p = if is_double { "d" } else { "s" };
 
@@ -395,7 +376,6 @@ fn disasm_amo(rd: RegIdx, rs1: RegIdx, rs2: RegIdx, f3: u32, f7: u32) -> String 
 
 /// Disassemble system instructions.
 fn disasm_system(inst: u32, rd: RegIdx, rs1: RegIdx, f3: u32) -> String {
-    // Fixed-encoding system instructions
     match inst {
         sys_op::ECALL => return "ecall".to_string(),
         sys_op::EBREAK => return "ebreak".to_string(),
@@ -409,7 +389,6 @@ fn disasm_system(inst: u32, rd: RegIdx, rs1: RegIdx, f3: u32) -> String {
         return format!("sfence.vma {}, {}", xreg(rs1), xreg(inst.rs2()));
     }
 
-    // CSR instructions
     let csr = inst.csr();
     let mn = match f3 {
         sys_op::CSRRW => "csrrw",
@@ -426,14 +405,6 @@ fn disasm_system(inst: u32, rd: RegIdx, rs1: RegIdx, f3: u32) -> String {
 /// Determine FMA precision suffix from the format field (bits 26:25).
 #[allow(clippy::verbose_bit_mask)]
 const fn fp_precision(f7: u32) -> &'static str {
-    if (f7 >> 2) & 0x3 == 0 {
-        // Format bits in R4-type are bits 26:25 which map to funct7 bits 1:0
-        // after the rs3 field is separated. We check bit 0 of what remains.
-    }
-    // For R4-type, fmt is in bits 26:25 of the instruction, which is
-    // funct7 bits 1:0 once rs3 (bits 31:27) is removed.
-    // Since we receive the full funct7, and rs3 occupies bits 31:27,
-    // the fmt is bits 26:25. funct7 = bits 31:25, so fmt = funct7 & 0x3.
     let fmt = f7 & 0x3;
     if fmt == 1 { "d" } else { "s" }
 }

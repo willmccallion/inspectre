@@ -66,17 +66,14 @@ pub const fn crosses_cache_line(addr: u64, size: u64, cache_line_size: u64) -> b
 /// The additional latency penalty in cycles for this unaligned access.
 /// Returns 0 for aligned accesses.
 pub const fn calculate_unaligned_latency(addr: u64, size: u64, cache_line_size: u64) -> u64 {
-    // Aligned accesses have no penalty
     if is_aligned(addr, size) {
         return 0;
     }
 
-    // Unaligned access within a cache line: 1 cycle penalty
     if !crosses_cache_line(addr, size, cache_line_size) {
         return 1;
     }
 
-    // Unaligned access crossing cache line: 2 cycles penalty (potential two cache accesses)
     2
 }
 

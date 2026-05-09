@@ -35,14 +35,13 @@ pub struct GeoBankSet {
     /// Mask for indexing the tables.
     table_mask: usize,
 
-    // 4 speculative CSR arrays: idx, idx2, tag, tag2
     idx_csr: [FoldedHistory; MAX_BANKS],
     idx_csr2: [FoldedHistory; MAX_BANKS],
     tag_csr: [FoldedHistory; MAX_BANKS],
     tag_csr2: [FoldedHistory; MAX_BANKS],
 
-    // 4 committed CSR arrays: mirrors of the speculative CSRs, advanced
-    // incrementally via `update_committed_csrs()` at commit time.
+    /// Mirrors of the speculative CSRs, advanced incrementally via
+    /// `update_committed_csrs()` at commit time.
     committed_idx_csr: [FoldedHistory; MAX_BANKS],
     committed_idx_csr2: [FoldedHistory; MAX_BANKS],
     committed_tag_csr: [FoldedHistory; MAX_BANKS],
@@ -187,7 +186,6 @@ impl GeoBankSet {
             let hl = self.hist_lengths[i];
             let tw = self.tag_widths[i];
 
-            // Index CSRs
             let mut csr1 = FoldedHistory::new(self.table_bits, hl);
             csr1.recompute(ghr);
             let mut csr2 = FoldedHistory::new(self.table_bits.saturating_sub(1).max(1), hl);
@@ -195,7 +193,6 @@ impl GeoBankSet {
             indices[i] =
                 (pc_idx_hash as usize ^ csr1.val as usize ^ csr2.val as usize) & self.table_mask;
 
-            // Tag CSRs
             let mut tcsr1 = FoldedHistory::new(tw, hl);
             tcsr1.recompute(ghr);
             let mut tcsr2 = FoldedHistory::new(tw.saturating_sub(1).max(1), hl);

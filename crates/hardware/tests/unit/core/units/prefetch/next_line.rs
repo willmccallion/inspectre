@@ -8,10 +8,6 @@
 use rvsim_core::core::units::prefetch::NextLinePrefetcher;
 use rvsim_core::core::units::prefetch::Prefetcher;
 
-// ══════════════════════════════════════════════════════════
-// 1. Basic operation
-// ══════════════════════════════════════════════════════════
-
 /// Degree-1 prefetcher emits exactly one address — the next cache line.
 #[test]
 fn degree_1_emits_one_next_line() {
@@ -42,10 +38,6 @@ fn degree_4_emits_four_lines() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Alignment
-// ══════════════════════════════════════════════════════════
-
 /// Access within a line is aligned down before computing next line.
 #[test]
 fn mid_line_access_aligns_down() {
@@ -63,10 +55,6 @@ fn odd_offset_aligns() {
     assert_eq!(addrs[0], 0x1040);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Hit/Miss independence
-// ══════════════════════════════════════════════════════════
-
 /// NextLine prefetcher does NOT differentiate between hits and misses.
 #[test]
 fn hit_and_miss_produce_same_result() {
@@ -78,10 +66,6 @@ fn hit_and_miss_produce_same_result() {
     let on_miss = pf_miss.observe(addr, false);
     assert_eq!(on_hit, on_miss);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Different line sizes
-// ══════════════════════════════════════════════════════════
 
 /// 32-byte line size produces 32-byte-spaced prefetches.
 #[test]
@@ -99,10 +83,6 @@ fn line_size_128() {
     assert_eq!(addrs[0], 0x1080);
     assert_eq!(addrs[1], 0x1100);
 }
-
-// ══════════════════════════════════════════════════════════
-// 5. Edge cases
-// ══════════════════════════════════════════════════════════
 
 /// Degree 0 is clamped to 1 (implementation safeguard).
 #[test]

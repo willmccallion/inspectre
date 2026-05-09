@@ -1,12 +1,7 @@
 //! Configuration system for the RISC-V simulator.
 //!
-//! This module defines all configuration structures and enums used to parameterize
-//! the simulator. It provides:
-//! 1. **Defaults:** Baseline hardware constants (RAM, MMIO, cache, branch predictor).
-//! 2. **Structures:** Hierarchical config for general, system, memory, cache, and pipeline.
-//! 3. **Enums:** Memory controller, replacement policy, prefetcher, and branch predictor types.
-//!
-//! Configuration is supplied via JSON from the Python API (`SimConfig`) or use `Config::default()` for the CLI.
+//! Configuration is supplied via JSON from the Python API (`SimConfig`) or
+//! use `Config::default()` for the CLI.
 
 use crate::core::pipeline::backend::o3::fu_pool::FuConfig;
 use crate::core::pipeline::engine::BackendType;
@@ -637,10 +632,6 @@ impl SystemConfig {
 }
 
 impl Default for SystemConfig {
-    /// Creates a default system configuration.
-    ///
-    /// All MMIO base addresses, bus parameters, and kernel offset are set
-    /// to their default values from the `defaults` module.
     fn default() -> Self {
         Self {
             uart_base: defaults::UART_BASE,
@@ -828,10 +819,6 @@ impl MemoryConfig {
 }
 
 impl Default for MemoryConfig {
-    /// Creates a default memory configuration.
-    ///
-    /// Uses simple memory controller, default DRAM timing parameters,
-    /// and standard TLB size.
     fn default() -> Self {
         Self {
             ram_size: defaults::RAM_SIZE,
@@ -951,10 +938,6 @@ impl CacheConfig {
 }
 
 impl Default for CacheConfig {
-    /// Creates a default cache configuration.
-    ///
-    /// Cache is disabled by default, uses direct-mapped associativity,
-    /// LRU replacement, no prefetching, and minimal size.
     fn default() -> Self {
         Self {
             enabled: false,
@@ -1108,8 +1091,7 @@ pub struct PipelineConfig {
     /// `byte_mask` matches BOOM/Apple/Intel/AMD/ARM. `stall` matches Saturn.
     /// `off` always stalls.
     #[serde(default)]
-    pub vec_store_forwarding:
-        crate::core::pipeline::vec_store_buffer::VecStoreForwarding,
+    pub vec_store_forwarding: crate::core::pipeline::vec_store_buffer::VecStoreForwarding,
 }
 
 impl PipelineConfig {
@@ -1210,10 +1192,6 @@ impl PipelineConfig {
 }
 
 impl Default for PipelineConfig {
-    /// Creates a default pipeline configuration.
-    ///
-    /// Uses single-issue width, static branch predictor, and default
-    /// sizes for BTB and RAS structures.
     fn default() -> Self {
         Self {
             width: defaults::PIPELINE_WIDTH,

@@ -94,9 +94,7 @@ impl Tlb {
     pub fn lookup(&self, vpn: Vpn, asid: Asid) -> Option<TlbHit> {
         let idx = (vpn.val() as usize) & self.mask;
 
-        // SAFETY: idx is guaranteed to be < entries.len() by the mask operation above.
-        // The mask is constructed as (size - 1) where size is the length of entries,
-        // ensuring idx is always a valid index.
+        // SAFETY: mask = entries.len() - 1, so idx & mask is always in bounds.
         let entry = unsafe { self.entries.get_unchecked(idx) };
 
         if entry.valid && entry.vpn == vpn && (entry.global || entry.asid == asid) {
@@ -186,10 +184,6 @@ impl Tlb {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// L2 TLB — shared, set-associative
-// ════════════════════════════════════════════════════════════════════════
-
 /// Shared L2 TLB sitting between the per-access-type L1 TLBs and the
 /// hardware page table walker. 4-way set-associative with LRU replacement.
 #[derive(Debug)]
@@ -257,7 +251,6 @@ impl L2Tlb {
         let set = (vpn.val() as usize) & self.set_mask;
         let base = set * self.ways;
 
-        // Check for an existing entry with the same VPN (update in place).
         for w in 0..self.ways {
             let e = &self.entries[base + w];
             if e.valid && e.vpn == vpn && (e.global || e.asid == asid) {
@@ -267,7 +260,6 @@ impl L2Tlb {
             }
         }
 
-        // Find an invalid way first.
         for w in 0..self.ways {
             if !self.entries[base + w].valid {
                 self.write_entry(base + w, vpn, ppn, pte, asid);
@@ -276,7 +268,6 @@ impl L2Tlb {
             }
         }
 
-        // Evict LRU way (highest age value).
         let victim = self.lru_victim(set);
         self.write_entry(base + victim, vpn, ppn, pte, asid);
         self.touch_lru(set, victim);
@@ -322,8 +313,6 @@ impl L2Tlb {
         }
     }
 
-    // ── internal helpers ──────────────────────────────────────────────
-
     fn write_entry(&mut self, idx: usize, vpn: Vpn, ppn: Ppn, pte: u64, asid: Asid) {
         self.entries[idx] = TlbEntry {
             vpn,
@@ -342,7 +331,7 @@ impl L2Tlb {
     /// Reconstruct a raw PTE value from a `TlbEntry` so it can be
     /// passed to `Tlb::insert` when promoting from L2 to L1.
     const fn reconstruct_pte(e: &TlbEntry) -> u64 {
-        let mut pte: u64 = 1; // V bit
+        let mut pte: u64 = 1;
         if e.r {
             pte |= 1 << 1;
         }

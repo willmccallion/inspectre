@@ -7,10 +7,6 @@ use rvsim_core::common::IrqId;
 use rvsim_core::soc::devices::Device;
 use rvsim_core::soc::devices::uart::Uart;
 
-// ══════════════════════════════════════════════════════════
-// Data Transmission Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_transmit_data_via_thr() {
     let mut uart = Uart::new(0x1000_0000, true, true);
@@ -34,10 +30,6 @@ fn uart_transmit_full_message() {
         uart.write_u8(0, byte);
     }
 }
-
-// ══════════════════════════════════════════════════════════
-// DLAB Mode Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_dlab_set() {
@@ -93,10 +85,6 @@ fn uart_dlab_disable() {
     let lcr = uart.read_u8(3);
     assert_eq!(lcr & 0x80, 0);
 }
-
-// ══════════════════════════════════════════════════════════
-// Line Control Register Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_lcr_data_bits_5() {
@@ -154,10 +142,6 @@ fn uart_lcr_break_control() {
     assert_eq!(uart.read_u8(3) & 0x40, 0x40);
 }
 
-// ══════════════════════════════════════════════════════════
-// Interrupt Enable Register Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_ier_disable_all() {
     let mut uart = Uart::new(0, true, true);
@@ -200,10 +184,6 @@ fn uart_ier_enable_multiple() {
     assert_eq!(uart.read_u8(1), 0x0F);
 }
 
-// ══════════════════════════════════════════════════════════
-// Interrupt Identification Register Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_iir_no_interrupt_pending() {
     let mut uart = Uart::new(0, true, true);
@@ -218,10 +198,6 @@ fn uart_iir_fifo_enabled() {
     let _iir = uart.read_u8(2);
     // Bits 6-7 should indicate FIFO status
 }
-
-// ══════════════════════════════════════════════════════════
-// Modem Control Register Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_mcr_dtr() {
@@ -265,10 +241,6 @@ fn uart_mcr_all_bits() {
     assert_eq!(uart.read_u8(4), 0x1F);
 }
 
-// ══════════════════════════════════════════════════════════
-// Line Status Register Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_lsr_overrun_error() {
     let mut uart = Uart::new(0, true, true);
@@ -300,10 +272,6 @@ fn uart_lsr_break_interrupt() {
     // Check bit 4 (break interrupt)
     let _ = (lsr >> 4) & 1;
 }
-
-// ══════════════════════════════════════════════════════════
-// Multi-byte Read/Write Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_read_u16() {
@@ -341,10 +309,6 @@ fn uart_write_u64() {
     uart.write_u64(0, 0x4142434445464748);
 }
 
-// ══════════════════════════════════════════════════════════
-// Edge Cases and Invalid Access Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_invalid_register_read() {
     let mut uart = Uart::new(0, true, true);
@@ -364,10 +328,6 @@ fn uart_read_write_only_register() {
     let _ = uart.read_u8(2);
 }
 
-// ══════════════════════════════════════════════════════════
-// IRQ Tests
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn uart_irq_id() {
     let uart = Uart::new(0x1000_0000, true, true);
@@ -379,10 +339,6 @@ fn uart_tick_no_interrupt() {
     let mut uart = Uart::new(0, true, true);
     assert!(!uart.tick());
 }
-
-// ══════════════════════════════════════════════════════════
-// Configuration Scenarios
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_configure_9600_8n1() {
@@ -443,10 +399,6 @@ fn uart_reset_configuration() {
 
     assert_eq!(uart.read_u8(1), 0x00);
 }
-
-// ══════════════════════════════════════════════════════════
-// Scratch Register Tests
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn uart_scratch_all_zeros() {

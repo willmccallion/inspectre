@@ -1,10 +1,4 @@
-//! Physical and Virtual Address types.
-//!
-//! This module defines strong types for physical and virtual addresses to prevent
-//! accidental mixing of address spaces. It provides the following:
-//! 1. **Type Safety:** Distinguishes between virtual and physical address spaces at compile time.
-//! 2. **Address Manipulation:** Provides helper methods for extracting page offsets and raw values.
-//! 3. **MMU Integration:** Acts as the primary interface for memory translation operations.
+//! Strong newtypes for physical and virtual addresses, ASID, IRQ id, and page numbers.
 
 /// An Address Space Identifier (ASID) from SATP[59:44].
 ///
@@ -117,37 +111,18 @@ pub struct PhysAddr(pub u64);
 
 impl VirtAddr {
     /// Creates a new virtual address from a raw 64-bit value.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The raw 64-bit address value.
-    ///
-    /// # Returns
-    ///
-    /// A new `VirtAddr` instance wrapping the provided address.
     #[inline(always)]
     pub const fn new(addr: u64) -> Self {
         Self(addr)
     }
 
     /// Returns the raw 64-bit address value.
-    ///
-    /// # Returns
-    ///
-    /// The underlying 64-bit address value.
     #[inline(always)]
     pub const fn val(&self) -> u64 {
         self.0
     }
 
-    /// Extracts the page offset from the virtual address.
-    ///
-    /// The page offset is the lower 12 bits of the address, representing
-    /// the byte offset within a 4KB page.
-    ///
-    /// # Returns
-    ///
-    /// The page offset (0-4095) as a `u64`.
+    /// Returns the page offset (lower 12 bits) of the address.
     pub const fn page_offset(&self) -> u64 {
         self.0 & 0xFFF
     }
@@ -155,24 +130,12 @@ impl VirtAddr {
 
 impl PhysAddr {
     /// Creates a new physical address from a raw 64-bit value.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The raw 64-bit address value.
-    ///
-    /// # Returns
-    ///
-    /// A new `PhysAddr` instance wrapping the provided address.
     #[inline(always)]
     pub const fn new(addr: u64) -> Self {
         Self(addr)
     }
 
     /// Returns the raw 64-bit address value.
-    ///
-    /// # Returns
-    ///
-    /// The underlying 64-bit address value.
     #[inline(always)]
     pub const fn val(&self) -> u64 {
         self.0

@@ -66,7 +66,6 @@ pub const fn vd(inst: u32) -> u8 {
 #[inline(always)]
 pub const fn simm5(inst: u32) -> i64 {
     let raw = ((inst >> 15) & 0x1F) as i32;
-    // Sign-extend from 5 bits
     ((raw << 27) >> 27) as i64
 }
 
@@ -109,42 +108,36 @@ mod tests {
 
     #[test]
     fn test_nf() {
-        // nf = 3 → bits 31:29 = 011
         let inst = 0b0110_0000_0000_0000_0000_0000_0000_0000_u32;
         assert_eq!(nf(inst), 3);
     }
 
     #[test]
     fn test_funct6() {
-        // funct6 = 0b101010 → bits 31:26
         let inst = 0b1010_1000_0000_0000_0000_0000_0000_0000_u32;
         assert_eq!(funct6(inst), 0b101010);
     }
 
     #[test]
     fn test_simm5_positive() {
-        // simm5 = 7 → bits 19:15 = 00111
         let inst = 0b0000_0000_0000_0011_1000_0000_0000_0000_u32;
         assert_eq!(simm5(inst), 7);
     }
 
     #[test]
     fn test_simm5_negative() {
-        // simm5 = -1 → bits 19:15 = 11111
         let inst = 0b0000_0000_0000_1111_1000_0000_0000_0000_u32;
         assert_eq!(simm5(inst), -1);
     }
 
     #[test]
     fn test_simm5_min() {
-        // simm5 = -16 → bits 19:15 = 10000
         let inst = 0b0000_0000_0000_1000_0000_0000_0000_0000_u32;
         assert_eq!(simm5(inst), -16);
     }
 
     #[test]
     fn test_vd_vs1_vs2() {
-        // vd=5, vs1=10, vs2=15
         let inst = (15u32 << 20) | (10u32 << 15) | (5u32 << 7);
         assert_eq!(vd(inst), 5);
         assert_eq!(vs1(inst), 10);
@@ -153,19 +146,19 @@ mod tests {
 
     #[test]
     fn test_zimm_vsetvli() {
-        let inst = 0x7FF << 20; // all 11 bits set
+        let inst = 0x7FF << 20;
         assert_eq!(zimm_vsetvli(inst), 0x7FF);
     }
 
     #[test]
     fn test_zimm_vsetivli() {
-        let inst = 0x3FF << 20; // all 10 bits set
+        let inst = 0x3FF << 20;
         assert_eq!(zimm_vsetivli(inst), 0x3FF);
     }
 
     #[test]
     fn test_uimm_vsetivli() {
-        let inst = 0x1F << 15; // all 5 bits set
+        let inst = 0x1F << 15;
         assert_eq!(uimm_vsetivli(inst), 31);
     }
 }

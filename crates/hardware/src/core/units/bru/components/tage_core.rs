@@ -174,7 +174,6 @@ impl TageCore {
     /// updates counters, useful bits, `USE_ALT_ON_NA`, and allocates on
     /// misprediction. Returns metadata for SC consumption.
     pub fn update(&mut self, pc: u64, taken: bool, _ghr: &Ghr) -> TageUpdateResult {
-        // Periodic useful-bit reset.
         self.clock_counter += 1;
         if self.clock_counter >= self.reset_interval {
             self.clock_counter = 0;
@@ -188,8 +187,7 @@ impl TageCore {
         let (indices, tags) = self.geo_banks.committed_all(pc);
         let num_banks = self.tables.len();
 
-        // Find provider (longest matching) and alt.
-        let mut provider = 0usize; // 0 = bimodal, 1+ = bank+1
+        let mut provider = 0usize;
         let mut alt = 0usize;
 
         for i in (0..num_banks).rev() {
@@ -219,7 +217,6 @@ impl TageCore {
             self.base[base_idx] >= 0
         };
 
-        // USE_ALT_ON_NA update.
         let provider_weak = provider > 0 && (prov_ctr == 0 || prov_ctr == -1);
         if provider_weak && prov_taken != alt_taken {
             if alt_taken == taken {
@@ -229,7 +226,6 @@ impl TageCore {
             }
         }
 
-        // Effective prediction after USE_ALT_ON_NA.
         let (eff_taken, eff_ctr) = if provider_weak && self.use_alt_on_na_ctr >= 0 {
             if alt > 0 {
                 let ctr = self.tables[alt - 1][indices[alt - 1]].ctr;
@@ -246,7 +242,6 @@ impl TageCore {
         let provider_mispred = prov_taken != taken;
         let tage_mispred = tage_taken != taken;
 
-        // Update provider counter.
         if provider > 0 {
             let bank_idx = provider - 1;
             let idx = indices[bank_idx];
@@ -260,7 +255,6 @@ impl TageCore {
                 e.ctr -= 1;
             }
 
-            // Useful bits.
             if !provider_mispred && (alt_taken != taken) && e.u < 3 {
                 e.u += 1;
             }
@@ -278,7 +272,6 @@ impl TageCore {
             }
         }
 
-        // Allocate on effective TAGE misprediction.
         if tage_mispred {
             let start_bank = if provider == 0 { 0 } else { provider };
 

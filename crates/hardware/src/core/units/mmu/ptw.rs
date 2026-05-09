@@ -186,7 +186,6 @@ fn page_table_walk_inner(
         let vpn_i = (vaddr.val() >> vpn_shift) & VPN_ENTRY_MASK;
         let pte_addr = (ppn_raw << PAGE_SHIFT) + (vpn_i * PTE_SIZE);
 
-        // PMP check on PTE read address (spec requires PMP enforcement on PTW accesses)
         if let Some(pmp_unit) = pmp {
             let pmp_result = pmp_unit.check(pte_addr, 8, true, false, false, false);
             if pmp_result != PmpResult::Allow {
@@ -233,9 +232,7 @@ fn page_table_walk_inner(
             return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
         }
 
-        // Software-managed A/D bits: fault instead of auto-setting.
-        // This matches spike's behavior where A=0 or D=0 triggers a
-        // page fault so the OS trap handler can set the bits.
+        // Software-managed A/D bits: fault to let the OS trap handler set them (matches spike).
         if mmu.software_ad_bits {
             if !pte.is_accessed() {
                 return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
@@ -247,9 +244,8 @@ fn page_table_walk_inner(
 
         let (new_pte, updated) = update_access_bits(pte, access);
 
-        // Defer A/D bit writes to commit — the instruction may be
-        // speculative and could be squashed. Writing A/D bits here
-        // would corrupt kernel page-table state irreversibly.
+        // Defer A/D bit writes to commit: speculative writes here would
+        // irreversibly corrupt kernel page-table state if the inst is squashed.
         let pte_update = if updated {
             cycles += PTE_UPDATE_CYCLES;
             Some(crate::common::error::PteUpdate {
@@ -268,16 +264,14 @@ fn page_table_walk_inner(
         let specific_4kb_ppn = Ppn::new(final_paddr >> PAGE_SHIFT);
         let vpn = Vpn::new((vaddr.val() >> PAGE_SHIFT) & VPN_MASK);
 
-        // Insert the *original* PTE bits into TLBs (without speculative
-        // A/D updates). After commit writes the A/D bits to RAM, the
-        // next access will re-walk and cache the correct state.
+        // Cache the *original* PTE bits (no speculative A/D); a re-walk
+        // after commit picks up the updated state from RAM.
         let pte_raw = pte.raw();
         if access == AccessType::Fetch {
             mmu.itlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
         } else {
             mmu.dtlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
         }
-        // Also populate the shared L2 TLB.
         mmu.l2_tlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
 
         return pte_update.map_or_else(

@@ -104,15 +104,7 @@ pub struct Uart {
 }
 
 impl Uart {
-    /// Creates a new UART device.
-    ///
-    /// Spawns a background thread to read from stdin.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_addr` - The base physical address of the UART device.
-    /// * `to_stderr` - When true, write output to stderr instead of stdout (for Python API).
-    /// * `quiet` - When true, all output is discarded (for scripting / benchmarks).
+    /// Creates a new UART device, spawning a background thread to read stdin.
     pub fn new(base_addr: u64, to_stderr: bool, quiet: bool) -> Self {
         let (tx, rx) = channel();
 
@@ -152,9 +144,7 @@ impl Uart {
         }
     }
 
-    /// Calculates the Interrupt Identity Register (IIR) value.
-    ///
-    /// Determines the highest priority pending interrupt.
+    /// Calculates the Interrupt Identity Register (IIR) value (highest priority pending interrupt).
     fn update_interrupts(&self) -> u8 {
         if (self.ier & IER_RDA) != 0 && !self.rx_queue.is_empty() {
             return IIR_RDA;
@@ -199,9 +189,7 @@ impl Uart {
         (self.lcr & LCR_DLAB) != 0
     }
 
-    /// Reads Receiver Buffer Register (RBR) or Divisor Latch Low (DLL).
-    ///
-    /// The register accessed depends on the DLAB bit in the LCR.
+    /// Reads Receiver Buffer Register (RBR) or Divisor Latch Low (DLL) based on DLAB.
     fn read_rbr_or_dll(&mut self) -> u8 {
         if self.dlab_set() {
             (self.div & 0xFF) as u8
@@ -210,16 +198,12 @@ impl Uart {
         }
     }
 
-    /// Reads Interrupt Enable Register (IER) or Divisor Latch High (DLM).
-    ///
-    /// The register accessed depends on the DLAB bit in the LCR.
+    /// Reads Interrupt Enable Register (IER) or Divisor Latch High (DLM) based on DLAB.
     const fn read_ier_or_dlm(&self) -> u8 {
         if self.dlab_set() { (self.div >> 8) as u8 } else { self.ier }
     }
 
-    /// Reads Interrupt Identity Register (IIR).
-    ///
-    /// Reading this register may clear pending interrupts (e.g., THRE).
+    /// Reads Interrupt Identity Register (IIR), clearing THRE if pending.
     fn read_iir(&mut self) -> u8 {
         let iir = self.update_interrupts();
         if iir == IIR_THRE {
@@ -229,8 +213,6 @@ impl Uart {
     }
 
     /// Reads Line Status Register (LSR).
-    ///
-    /// Indicates if data is ready or if the transmitter is empty.
     fn read_lsr(&self) -> u8 {
         let mut lsr = LSR_DEFAULT;
         if !self.rx_queue.is_empty() {
@@ -239,9 +221,7 @@ impl Uart {
         lsr
     }
 
-    /// Writes Transmitter Holding Register (THR) or Divisor Latch Low (DLL).
-    ///
-    /// The register accessed depends on the DLAB bit in the LCR.
+    /// Writes Transmitter Holding Register (THR) or Divisor Latch Low (DLL) based on DLAB.
     fn write_thr_or_dll(&mut self, val: u8) {
         if self.dlab_set() {
             self.div = (self.div & 0xFF00) | (val as u16);
@@ -250,10 +230,6 @@ impl Uart {
                 return;
             }
 
-            // Real hardware: each byte is shifted out on the wire as soon
-            // as the transmit shift register finishes. There is no software
-            // buffering — the character is visible immediately. We match
-            // this by writing every byte to the host immediately.
             if !self.quiet {
                 if self.to_stderr {
                     eprint!("{}", val as char);
@@ -268,9 +244,7 @@ impl Uart {
         }
     }
 
-    /// Writes Interrupt Enable Register (IER) or Divisor Latch High (DLM).
-    ///
-    /// The register accessed depends on the DLAB bit in the LCR.
+    /// Writes Interrupt Enable Register (IER) or Divisor Latch High (DLM) based on DLAB.
     const fn write_ier_or_dlm(&mut self, val: u8) {
         if self.dlab_set() {
             self.div = (self.div & 0x00FF) | ((val as u16) << 8);
@@ -284,16 +258,13 @@ impl Uart {
 }
 
 impl Device for Uart {
-    /// Returns the device name.
     fn name(&self) -> &'static str {
         "UART0"
     }
-    /// Returns the address range (Base, Size).
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x100)
     }
 
-    /// Reads a byte from the device.
     fn read_u8(&mut self, offset: u64) -> u8 {
         match offset {
             REG_RBR => self.read_rbr_or_dll(),
@@ -307,20 +278,16 @@ impl Device for Uart {
         }
     }
 
-    /// Reads a half-word (delegates to `read_u8`).
     fn read_u16(&mut self, offset: u64) -> u16 {
         self.read_u8(offset) as u16
     }
-    /// Reads a word (delegates to `read_u8`).
     fn read_u32(&mut self, offset: u64) -> u32 {
         self.read_u8(offset) as u32
     }
-    /// Reads a double-word (delegates to `read_u8`).
     fn read_u64(&mut self, offset: u64) -> u64 {
         self.read_u8(offset) as u64
     }
 
-    /// Writes a byte to the device.
     fn write_u8(&mut self, offset: u64, val: u8) {
         match offset {
             REG_THR => self.write_thr_or_dll(val),
@@ -332,22 +299,16 @@ impl Device for Uart {
         }
     }
 
-    /// Writes a half-word (delegates to `write_u8`).
     fn write_u16(&mut self, offset: u64, val: u16) {
         self.write_u8(offset, val as u8);
     }
-    /// Writes a word (delegates to `write_u8`).
     fn write_u32(&mut self, offset: u64, val: u32) {
         self.write_u8(offset, val as u8);
     }
-    /// Writes a double-word (delegates to `write_u8`).
     fn write_u64(&mut self, offset: u64, val: u64) {
         self.write_u8(offset, val as u8);
     }
 
-    /// Advances the device state.
-    ///
-    /// Polls stdin periodically and returns true if an interrupt is pending.
     fn tick(&mut self) -> bool {
         self.tick_count = self.tick_count.wrapping_add(1);
         if self.tick_count == 0 {
@@ -358,12 +319,10 @@ impl Device for Uart {
         (iir & IIR_NO_INTERRUPT) == 0
     }
 
-    /// Returns the Interrupt Request (IRQ) ID associated with this device.
     fn get_irq_id(&self) -> Option<IrqId> {
         Some(IrqId::new(10))
     }
 
-    /// Returns a mutable reference to the UART if this device is one.
     fn as_uart_mut(&mut self) -> Option<&mut Uart> {
         Some(self)
     }

@@ -478,8 +478,9 @@ fn fp_reduce_f16(
                 let acc_f64 = f16_to_f32(acc_bits) as f64;
                 let elem_f64 = f16_to_f32(elem_bits) as f64;
                 clear_host_fp_flags();
-                let sum =
-                    std::hint::black_box(std::hint::black_box(acc_f64) + std::hint::black_box(elem_f64));
+                let sum = std::hint::black_box(
+                    std::hint::black_box(acc_f64) + std::hint::black_box(elem_f64),
+                );
                 let host_flags = read_host_fp_flags();
                 let (rounded, round_flags) = f64_to_f16(sum, ctx.frm);
                 acc_bits = rounded;
@@ -545,10 +546,7 @@ fn exec_fp_widen_reduction(
         (Sew::E16, Sew::E32) if ctx.zvfh => {
             fp_widen_reduce_f16_to_f32(op, vpr, vs2, operand1, ctx, dst_sew)
         }
-        _ => unreachable!(
-            "widening FP reduction unsupported src={:?} dst={:?}",
-            src_sew, dst_sew
-        ),
+        _ => unreachable!("widening FP reduction unsupported src={:?} dst={:?}", src_sew, dst_sew),
     };
 
     vpr.write_element(vd, ElemIdx::new(0), dst_sew, result_bits);

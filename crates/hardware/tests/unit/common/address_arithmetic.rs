@@ -115,8 +115,6 @@ fn phys_addr_ordering() {
 /// holding the same underlying value.
 #[test]
 fn virt_and_phys_same_value_not_interchangeable() {
-    // VirtAddr and PhysAddr are distinct types; we verify they hold
-    // the same value independently.
     let v = VirtAddr::new(0x1234);
     let p = PhysAddr::new(0x1234);
     assert_eq!(v.val(), p.val());

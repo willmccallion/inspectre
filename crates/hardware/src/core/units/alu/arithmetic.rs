@@ -9,10 +9,8 @@
 
 use crate::core::pipeline::signals::AluOp;
 
-/// Number of bits in a 32-bit word (used for high-multiply shift).
 const WORD_BITS: u32 = 32;
 
-/// Number of bits in XLEN for RV64 (used for high-multiply shift).
 const XLEN_BITS: u32 = 64;
 
 /// Executes an integer arithmetic operation.
@@ -91,8 +89,6 @@ pub const fn execute(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
         }
         AluOp::Divu => {
             if is32 {
-                // Phase 0 fix: use u32 cast for unsigned zero-check, and
-                // sign-extend result from bit 31 via i32 (RISC-V spec §7.2).
                 if (b as u32) == 0 {
                     -1i64 as u64
                 } else {
@@ -121,7 +117,6 @@ pub const fn execute(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
         }
         AluOp::Remu => {
             if is32 {
-                // Phase 0 fix: use u32 cast for unsigned zero-check.
                 if (b as u32) == 0 {
                     // REMUW div-by-zero: return dividend[31:0] sign-extended
                     // to 64 bits (RISC-V spec §7.2).

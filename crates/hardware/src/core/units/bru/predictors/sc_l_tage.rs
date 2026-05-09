@@ -46,7 +46,6 @@ pub struct ScLTagePredictor {
     /// Shared TAGE direction core.
     tage: TageCore,
 
-    // Composable components
     loop_pred: LoopPredictor,
     sc: StatCorrector,
     ittage: Ittage,
@@ -84,18 +83,14 @@ impl ScLTagePredictor {
 
 impl BranchPredictor for ScLTagePredictor {
     fn predict_branch(&self, pc: u64) -> (bool, Option<u64>) {
-        // 1. TAGE base prediction.
         let meta = self.tage.predict(pc);
 
-        // 2. Loop predictor override.
         if let Some(loop_taken) = self.loop_pred.predict(pc) {
             return (loop_taken, if loop_taken { self.btb.lookup(pc) } else { None });
         }
 
-        // 3. SC correction.
         let (sc_taken, sc_sum) = self.sc.predict(pc, &self.spec_ghr, &meta);
 
-        // Cache predict-time SC metadata for use at update time.
         let cache_idx = (pc >> 2) as usize & SC_CACHE_MASK;
         self.sc_cache[cache_idx].set(ScCacheEntry { pc, meta: Some((meta, sc_sum)) });
 
@@ -105,12 +100,10 @@ impl BranchPredictor for ScLTagePredictor {
     fn update_branch(&mut self, pc: u64, taken: bool, target: Option<u64>, ghr_snapshot: &Ghr) {
         self.loop_pred.update(pc, taken);
 
-        // TAGE direction update — reads committed CSRs (O(num_banks) lookup).
         // Must happen BEFORE commit_advance so CSRs match current commit_ghr.
         let result = self.tage.update(pc, taken, &self.commit_ghr);
         let meta = result.meta;
 
-        // Update SC: use cached predict-time metadata if available, else reconstruct.
         let cache_idx = (pc >> 2) as usize & SC_CACHE_MASK;
         let cached = self.sc_cache[cache_idx].get();
         let (sc_meta, sc_sum) = if let Some((m, s)) = cached.meta.filter(|_| cached.pc == pc) {
@@ -121,15 +114,13 @@ impl BranchPredictor for ScLTagePredictor {
         };
         self.sc.update(pc, &self.commit_ghr, taken, &sc_meta, sc_sum);
 
-        // Update ITTAGE for indirect branches.
         if let Some(tgt) = target {
             self.ittage.update(pc, tgt, ghr_snapshot);
             self.btb.update(pc, tgt);
         }
 
-        // Advance committed CSRs AFTER update() reads them, but BEFORE
-        // commit_ghr.push() — FoldedHistory::update() needs to read the
-        // old bit at ghr.bit(hist_length - 1) before it's shifted out.
+        // Must happen AFTER update() reads CSRs, but BEFORE commit_ghr.push():
+        // FoldedHistory::update() needs ghr.bit(hist_length - 1) before shift.
         self.tage.commit_advance(taken, &self.commit_ghr);
         self.ittage.commit_advance(taken, &self.commit_ghr);
 

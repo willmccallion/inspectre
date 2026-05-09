@@ -82,8 +82,6 @@ fn vtype_str(zimm: u64) -> String {
     format!("{sew}, {lmul}, {ta}, {ma}")
 }
 
-// ── OP-V arithmetic ─────────────────────────────────────────────────────────
-
 /// Disassemble a vector arithmetic instruction (OP-V, opcode 0x57).
 pub(crate) fn disasm_vec_arith(inst: u32) -> String {
     let f3 = (inst >> 12) & 0x7;
@@ -98,11 +96,9 @@ pub(crate) fn disasm_vec_arith(inst: u32) -> String {
 
         vf3::OPIVV => {
             if f6val == 0b100111 {
-                // vmv<nr>r.v — whole register move
                 let nr = vs1 as u32 + 1;
                 return format!("vmv{nr}r.v {}, {}", vreg(vd), vreg(vs2));
             }
-            // funct6=0b001110 is vrgatherei16 under OPIVV (not vslideup)
             let mn = if f6val == 0b001110 { "vrgatherei16" } else { ivv_mnemonic(f6val) };
             format!("{mn}.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1))
         }
@@ -128,24 +124,21 @@ pub(crate) fn disasm_vec_arith(inst: u32) -> String {
 
 /// Disassemble vsetvli / vsetivli / vsetvl.
 fn disasm_cfg(inst: u32) -> String {
-    let rd = encoding::vd(inst); // rd is in bits 11:7
+    let rd = encoding::vd(inst);
     let rs1 = encoding::vs1(inst);
     let bit31 = (inst >> 31) & 1;
     let bit30 = (inst >> 30) & 1;
 
     if bit31 == 0 {
-        // vsetvli rd, rs1, zimm[10:0]
         let zimm = encoding::zimm_vsetvli(inst);
         let vt = vtype_str(zimm);
         format!("vsetvli {}, {}, {vt}", xreg(rd), xreg(rs1))
     } else if bit30 == 1 {
-        // vsetivli rd, uimm, zimm[9:0]
         let uimm = encoding::uimm_vsetivli(inst);
         let zimm = encoding::zimm_vsetivli(inst);
         let vt = vtype_str(zimm);
         format!("vsetivli {}, {uimm}, {vt}", xreg(rd))
     } else {
-        // vsetvl rd, rs1, rs2
         let rs2 = encoding::vs2(inst);
         format!("vsetvl {}, {}, {}", xreg(rd), xreg(rs1), xreg(rs2))
     }
@@ -208,7 +201,6 @@ const fn ivx_mnemonic(f6val: u32) -> &'static str {
 /// Disassemble OPMVV (funct3=010) — reductions, mul/div, mask, int extension.
 fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> String {
     match f6val {
-        // Reductions
         f6::VREDSUM => format!("vredsum.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VREDAND => format!("vredand.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VREDOR => format!("vredor.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
@@ -217,12 +209,10 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         f6::VREDMIN => format!("vredmin.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VREDMAXU => format!("vredmaxu.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VREDMAX => format!("vredmax.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // Averaging
         f6::VAADDU => format!("vaaddu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VAADD => format!("vaadd.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VASUBU => format!("vasubu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VASUB => format!("vasub.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // Mask logical (funct6 values overlap with comparison in OPIVV context)
         0b011000 => format!("vmandn.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
         0b011001 => format!("vmand.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
         0b011010 => format!("vmor.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
@@ -231,14 +221,12 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         0b011101 => format!("vmnand.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
         0b011110 => format!("vmnor.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
         0b011111 => format!("vmxnor.mm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // VRXUNARY0/VWXUNARY0 — vmv.x.s, vcpop.m, vfirst.m
         0b010000 => match vs1 {
             0b00000 => format!("vmv.x.s {}, {}", xreg(vd), vreg(vs2)),
             0b10000 => format!("vcpop.m {}, {}{vm}", xreg(vd), vreg(vs2)),
             0b10001 => format!("vfirst.m {}, {}{vm}", xreg(vd), vreg(vs2)),
             _ => format!("vwxunary0?? ({inst:#010x})"),
         },
-        // VXUNARY0 — vzext, vsext
         0b010010 => {
             let mn = match vs1 {
                 0b00010 => "vzext.vf8",
@@ -251,7 +239,6 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
             };
             format!("{mn} {}, {}{vm}", vreg(vd), vreg(vs2))
         }
-        // VMUNARY0 — vmsbf, vmsof, vmsif, viota, vid
         0b010100 => {
             let mn = match vs1 {
                 0b00001 => "vmsbf.m",
@@ -263,9 +250,7 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
             };
             format!("{mn} {}, {}{vm}", vreg(vd), vreg(vs2))
         }
-        // vcompress
         0b010111 => format!("vcompress.vm {}, {}, {}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // Mul/div
         f6::VDIVU => format!("vdivu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VDIV => format!("vdiv.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VREMU => format!("vremu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
@@ -278,7 +263,6 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         f6::VNMSUB => format!("vnmsub.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VMACC => format!("vmacc.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VNMSAC => format!("vnmsac.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
-        // Widening integer
         f6::VWADDU => format!("vwaddu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWADD => format!("vwadd.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWSUBU => format!("vwsubu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
@@ -287,7 +271,6 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         f6::VWADD_W => format!("vwadd.wv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWSUBU_W => format!("vwsubu.wv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWSUB_W => format!("vwsub.wv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // Widening multiply
         f6::VWMULU => format!("vwmulu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWMULSU => format!("vwmulsu.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VWMUL => format!("vwmul.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
@@ -304,17 +287,13 @@ fn disasm_opmvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
 /// Disassemble OPMVX (funct3=110).
 fn disasm_opmvx(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> String {
     match f6val {
-        // vmv.s.x
         0b010000 => format!("vmv.s.x {}, {}", vreg(vd), xreg(rs1)),
-        // vslide1up/down
         0b001110 => format!("vslide1up.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         0b001111 => format!("vslide1down.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
-        // Averaging
         f6::VAADDU => format!("vaaddu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VAADD => format!("vaadd.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VASUBU => format!("vasubu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VASUB => format!("vasub.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
-        // Mul/div
         f6::VDIVU => format!("vdivu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VDIV => format!("vdiv.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VREMU => format!("vremu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
@@ -327,7 +306,6 @@ fn disasm_opmvx(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
         f6::VNMSUB => format!("vnmsub.vx {}, {}, {}{vm}", vreg(vd), xreg(rs1), vreg(vs2)),
         f6::VMACC => format!("vmacc.vx {}, {}, {}{vm}", vreg(vd), xreg(rs1), vreg(vs2)),
         f6::VNMSAC => format!("vnmsac.vx {}, {}, {}{vm}", vreg(vd), xreg(rs1), vreg(vs2)),
-        // Widening integer
         f6::VWADDU => format!("vwaddu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWADD => format!("vwadd.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWSUBU => format!("vwsubu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
@@ -336,7 +314,6 @@ fn disasm_opmvx(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
         f6::VWADD_W => format!("vwadd.wx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWSUBU_W => format!("vwsubu.wx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWSUB_W => format!("vwsub.wx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
-        // Widening multiply
         f6::VWMULU => format!("vwmulu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWMULSU => format!("vwmulsu.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
         f6::VWMUL => format!("vwmul.vx {}, {}, {}{vm}", vreg(vd), vreg(vs2), xreg(rs1)),
@@ -373,22 +350,16 @@ fn disasm_opfvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         f6::VFSGNJ => format!("vfsgnj.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VFSGNJN => format!("vfsgnjn.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VFSGNJX => format!("vfsgnjx.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // VFUNARY0 — conversion unaries, sub-dispatch on vs1
         f6::VFUNARY0 => disasm_vfunary0(inst, vd, vs1, vs2, vm),
-        // VFUNARY1 — sqrt, rsqrt, rec, class
         f6::VFUNARY1 => disasm_vfunary1(inst, vd, vs1, vs2, vm),
-        // VWFUNARY0 — vfmv.f.s
         0b010000 => format!("vfmv.f.s {}, {}", freg(vd), vreg(vs2)),
-        // Comparisons
         f6::VMFEQ => format!("vmfeq.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VMFLE => format!("vmfle.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VMFORD => format!("vmford.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VMFLT => format!("vmflt.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VMFNE => format!("vmfne.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // FP arithmetic
         f6::VFDIV => format!("vfdiv.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VFMUL => format!("vfmul.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
-        // FMA
         f6::VFMADD => format!("vfmadd.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VFNMADD => format!("vfnmadd.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VFMSUB => format!("vfmsub.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
@@ -397,7 +368,6 @@ fn disasm_opfvv(inst: u32, f6val: u32, vd: u8, vs1: u8, vs2: u8, vm: &str) -> St
         f6::VFNMACC => format!("vfnmacc.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VFMSAC => format!("vfmsac.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
         f6::VFNMSAC => format!("vfnmsac.vv {}, {}, {}{vm}", vreg(vd), vreg(vs1), vreg(vs2)),
-        // Widening FP
         f6::VFWADD => format!("vfwadd.vv {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1)),
         f6::VFWREDUSUM => {
             format!("vfwredusum.vs {}, {}, {}{vm}", vreg(vd), vreg(vs2), vreg(vs1))
@@ -481,9 +451,7 @@ fn disasm_opfvf(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
         f6::VFSLIDE1DOWN => {
             format!("vfslide1down.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1))
         }
-        // VRFUNARY0 — vfmv.s.f
         0b010000 => format!("vfmv.s.f {}, {}", vreg(vd), freg(rs1)),
-        // Comparisons
         f6::VMFEQ => format!("vmfeq.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VMFLE => format!("vmfle.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VMFORD => format!("vmford.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
@@ -491,11 +459,9 @@ fn disasm_opfvf(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
         f6::VMFNE => format!("vmfne.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VMFGT => format!("vmfgt.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VMFGE => format!("vmfge.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
-        // FP arithmetic
         f6::VFDIV => format!("vfdiv.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VFRDIV => format!("vfrdiv.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VFMUL => format!("vfmul.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
-        // FMA
         f6::VFMADD => format!("vfmadd.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
         f6::VFNMADD => format!("vfnmadd.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
         f6::VFMSUB => format!("vfmsub.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
@@ -504,7 +470,6 @@ fn disasm_opfvf(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
         f6::VFNMACC => format!("vfnmacc.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
         f6::VFMSAC => format!("vfmsac.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
         f6::VFNMSAC => format!("vfnmsac.vf {}, {}, {}{vm}", vreg(vd), freg(rs1), vreg(vs2)),
-        // Widening FP
         f6::VFWADD => format!("vfwadd.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VFWSUB => format!("vfwsub.vf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
         f6::VFWADD_W => format!("vfwadd.wf {}, {}, {}{vm}", vreg(vd), vreg(vs2), freg(rs1)),
@@ -525,20 +490,17 @@ fn disasm_opfvf(inst: u32, f6val: u32, vd: u8, rs1: u8, vs2: u8, vm: &str) -> St
     }
 }
 
-// ── Vector loads ────────────────────────────────────────────────────────────
-
 /// Disassemble a vector load instruction (OP-LOAD-FP with vector funct3).
 pub(crate) fn disasm_vec_load(inst: u32) -> String {
     let f3 = (inst >> 12) & 0x7;
     let eew = eew_str(f3);
     let vd = encoding::vd(inst);
-    let rs1 = encoding::vs1(inst); // rs1 is in bits 19:15
+    let rs1 = encoding::vs1(inst);
     let mop_val = encoding::mop(inst);
     let nf_val = encoding::nf(inst);
     let vm = vm_suffix(inst);
 
     match mop_val {
-        // Unit-stride
         0b00 => {
             let lumop_val = encoding::lumop(inst);
             match lumop_val {
@@ -551,16 +513,13 @@ pub(crate) fn disasm_vec_load(inst: u32) -> String {
                     }
                 }
                 0b01000 => {
-                    // Whole-register load
                     let nregs = nf_val + 1;
                     format!("vl{nregs}re{eew}.v {}, ({})", vreg(vd), xreg(rs1))
                 }
                 0b01011 => {
-                    // Mask load
                     format!("vlm.v {}, ({})", vreg(vd), xreg(rs1))
                 }
                 0b10000 => {
-                    // Fault-only-first
                     if nf_val > 0 {
                         let seg = nf_val + 1;
                         format!("vlseg{seg}e{eew}ff.v {}, ({}){vm}", vreg(vd), xreg(rs1))
@@ -571,7 +530,6 @@ pub(crate) fn disasm_vec_load(inst: u32) -> String {
                 _ => format!("vl?? ({inst:#010x})"),
             }
         }
-        // Strided
         0b10 => {
             let rs2 = encoding::vs2(inst);
             if nf_val > 0 {
@@ -581,7 +539,6 @@ pub(crate) fn disasm_vec_load(inst: u32) -> String {
                 format!("vlse{eew}.v {}, ({}), {}{vm}", vreg(vd), xreg(rs1), xreg(rs2))
             }
         }
-        // Indexed unordered
         0b01 => {
             let vs2 = encoding::vs2(inst);
             if nf_val > 0 {
@@ -591,7 +548,6 @@ pub(crate) fn disasm_vec_load(inst: u32) -> String {
                 format!("vluxei{eew}.v {}, ({}), {}{vm}", vreg(vd), xreg(rs1), vreg(vs2))
             }
         }
-        // Indexed ordered
         0b11 => {
             let vs2 = encoding::vs2(inst);
             if nf_val > 0 {
@@ -605,20 +561,17 @@ pub(crate) fn disasm_vec_load(inst: u32) -> String {
     }
 }
 
-// ── Vector stores ───────────────────────────────────────────────────────────
-
 /// Disassemble a vector store instruction (OP-STORE-FP with vector funct3).
 pub(crate) fn disasm_vec_store(inst: u32) -> String {
     let f3 = (inst >> 12) & 0x7;
     let eew = eew_str(f3);
-    let vs3 = encoding::vd(inst); // store data register is in vd/rd position
+    let vs3 = encoding::vd(inst);
     let rs1 = encoding::vs1(inst);
     let mop_val = encoding::mop(inst);
     let nf_val = encoding::nf(inst);
     let vm = vm_suffix(inst);
 
     match mop_val {
-        // Unit-stride
         0b00 => {
             let sumop_val = encoding::sumop(inst);
             match sumop_val {
@@ -631,18 +584,15 @@ pub(crate) fn disasm_vec_store(inst: u32) -> String {
                     }
                 }
                 0b01000 => {
-                    // Whole-register store
                     let nregs = nf_val + 1;
                     format!("vs{nregs}r.v {}, ({})", vreg(vs3), xreg(rs1))
                 }
                 0b01011 => {
-                    // Mask store
                     format!("vsm.v {}, ({})", vreg(vs3), xreg(rs1))
                 }
                 _ => format!("vs?? ({inst:#010x})"),
             }
         }
-        // Strided
         0b10 => {
             let rs2 = encoding::vs2(inst);
             if nf_val > 0 {
@@ -652,7 +602,6 @@ pub(crate) fn disasm_vec_store(inst: u32) -> String {
                 format!("vsse{eew}.v {}, ({}), {}{vm}", vreg(vs3), xreg(rs1), xreg(rs2))
             }
         }
-        // Indexed unordered
         0b01 => {
             let vs2 = encoding::vs2(inst);
             if nf_val > 0 {
@@ -662,7 +611,6 @@ pub(crate) fn disasm_vec_store(inst: u32) -> String {
                 format!("vsuxei{eew}.v {}, ({}), {}{vm}", vreg(vs3), xreg(rs1), vreg(vs2))
             }
         }
-        // Indexed ordered
         0b11 => {
             let vs2 = encoding::vs2(inst);
             if nf_val > 0 {

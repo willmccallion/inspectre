@@ -7,19 +7,14 @@
 
 pub use self::branch_predictor::{BranchPredictor, Ghr};
 
-/// Branch predictor trait and common functionality.
 pub mod branch_predictor;
 
-/// Branch Target Buffer for storing predicted branch targets.
 pub mod btb;
 
-/// Return Address Stack for predicting return addresses.
 pub mod ras;
 
-/// Reusable building blocks and sub-predictors.
 pub mod components;
 
-/// Full branch predictor implementations.
 pub mod predictors;
 
 use self::predictors::{

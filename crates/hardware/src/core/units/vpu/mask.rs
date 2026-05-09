@@ -13,10 +13,6 @@ use crate::core::units::vpu::alu::{VecExecCtx, VecExecResult, VecOperand};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::vpu::types::{ElemIdx, VRegIdx, Vlmax};
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Returns `true` if `op` is a mask operation handled by this module.
 pub const fn is_mask_op(op: VectorOp) -> bool {
     matches!(
@@ -53,7 +49,6 @@ pub fn vec_mask_execute(
     ctx: &VecExecCtx,
 ) -> VecExecResult {
     match op {
-        // Mask-register logical
         VectorOp::VMAndMM
         | VectorOp::VMNandMM
         | VectorOp::VMAndnMM
@@ -63,26 +58,19 @@ pub fn vec_mask_execute(
         | VectorOp::VMXorMM
         | VectorOp::VMXnorMM => exec_mask_logical(op, vpr, vd, vs2, operand1, ctx),
 
-        // Mask scalar
         VectorOp::VCPopM => exec_vcpop(vpr, vs2, ctx),
         VectorOp::VFirstM => exec_vfirst(vpr, vs2, ctx),
 
-        // Mask-producing
         VectorOp::VMSbfM | VectorOp::VMSifM | VectorOp::VMSofM => {
             exec_mask_set(op, vpr, vd, vs2, ctx)
         }
 
-        // Mask misc
         VectorOp::VIotaM => exec_viota(vpr, vd, vs2, ctx),
         VectorOp::VIdV => exec_vid(vpr, vd, ctx),
 
         _ => unreachable!("not a mask op: {:?}", op),
     }
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 /// Read v0 mask bit for element `i`.
 #[inline]
@@ -113,10 +101,6 @@ const fn no_result() -> VecExecResult {
 const fn scalar_result(val: u64) -> VecExecResult {
     VecExecResult { vxsat: false, scalar_result: Some(val), fp_flags: FpFlags::NONE }
 }
-
-// ============================================================================
-// Mask-register logical
-// ============================================================================
 
 /// Compute the logical result for a single mask bit pair.
 #[inline]
@@ -149,7 +133,6 @@ fn exec_mask_logical(
     ctx: &VecExecCtx,
 ) -> VecExecResult {
     let vs1 = vs1_idx(operand1);
-    // Mask registers hold VLEN bits total.
     let vlen_bits = vpr.vlen().bits();
 
     for i in 0..vlen_bits {
@@ -157,7 +140,6 @@ fn exec_mask_logical(
             continue;
         }
         if i >= ctx.vl {
-            // Tail region.
             if ctx.vta.is_agnostic() {
                 vpr.write_mask_bit(vd, ElemIdx::new(i), true);
             }
@@ -171,10 +153,6 @@ fn exec_mask_logical(
 
     no_result()
 }
-
-// ============================================================================
-// Mask scalar: vcpop, vfirst
-// ============================================================================
 
 /// Execute `vcpop.m` — count set bits in the source mask register.
 ///
@@ -212,10 +190,6 @@ fn exec_vfirst(vpr: &impl VectorRegFile, vs2: VRegIdx, ctx: &VecExecCtx) -> VecE
     scalar_result(u64::MAX)
 }
 
-// ============================================================================
-// Mask-producing: vmsbf, vmsif, vmsof
-// ============================================================================
-
 /// Execute `vmsbf.m`, `vmsif.m`, or `vmsof.m`.
 ///
 /// These instructions scan `vs2` for the first set bit and produce a mask
@@ -233,9 +207,7 @@ fn exec_mask_set(
     vs2: VRegIdx,
     ctx: &VecExecCtx,
 ) -> VecExecResult {
-    // Total mask bits for tail handling.
     let vlen_bits = vpr.vlen().bits();
-    // Track whether we have found the first set bit in vs2.
     let mut found_first = false;
 
     for i in 0..vlen_bits {
@@ -243,13 +215,11 @@ fn exec_mask_set(
             continue;
         }
         if i >= ctx.vl {
-            // Tail region.
             if ctx.vta.is_agnostic() {
                 vpr.write_mask_bit(vd, ElemIdx::new(i), true);
             }
             continue;
         }
-        // Masking check.
         if !ctx.vm && !mask_active(vpr, i) {
             if ctx.vma.is_agnostic() {
                 vpr.write_mask_bit(vd, ElemIdx::new(i), true);
@@ -260,20 +230,15 @@ fn exec_mask_set(
         let src_bit = vpr.read_mask_bit(vs2, ElemIdx::new(i));
 
         let result = if found_first {
-            // After the first set bit: all three output 0.
             false
         } else if src_bit {
             found_first = true;
             match op {
-                // sbf: the first set bit itself is NOT included.
                 VectorOp::VMSbfM => false,
-                // sif: the first set bit IS included.
-                // sof: only the first set bit is set.
                 VectorOp::VMSifM | VectorOp::VMSofM => true,
                 _ => unreachable!(),
             }
         } else {
-            // Before the first set bit: sbf and sif output 1, sof outputs 0.
             match op {
                 VectorOp::VMSbfM | VectorOp::VMSifM => true,
                 VectorOp::VMSofM => false,
@@ -286,10 +251,6 @@ fn exec_mask_set(
 
     no_result()
 }
-
-// ============================================================================
-// Mask misc: viota, vid
-// ============================================================================
 
 /// Execute `viota.m` — prefix sum of mask bits.
 ///
@@ -396,8 +357,6 @@ mod tests {
             zvfh: false,
         }
     }
-
-    // ── Mask logical tests ────────────────────────────────────────────────
 
     #[test]
     fn test_vid_mf8_e8() {
@@ -523,8 +482,6 @@ mod tests {
         assert!(vpr.read_mask_bit(vd, ElemIdx::new(3)));
     }
 
-    // ── vcpop tests ───────────────────────────────────────────────────────
-
     #[test]
     fn test_vcpop_unmasked() {
         let mut vpr = test_vpr();
@@ -576,8 +533,6 @@ mod tests {
         assert_eq!(result.scalar_result, Some(2));
     }
 
-    // ── vfirst tests ──────────────────────────────────────────────────────
-
     #[test]
     fn test_vfirst_found() {
         let mut vpr = test_vpr();
@@ -617,8 +572,6 @@ mod tests {
         let result = exec_vfirst(&vpr, vs2, &ctx);
         assert_eq!(result.scalar_result, Some(2));
     }
-
-    // ── vmsbf / vmsif / vmsof tests ───────────────────────────────────────
 
     #[test]
     fn test_vmsbf() {
@@ -692,8 +645,6 @@ mod tests {
         }
     }
 
-    // ── viota tests ───────────────────────────────────────────────────────
-
     #[test]
     fn test_viota_basic() {
         let mut vpr = test_vpr();
@@ -716,8 +667,6 @@ mod tests {
         // Element 3: count of set bits in [0,3) = 2 (bits 0,2 set)
         assert_eq!(vpr.read_element(vd, ElemIdx::new(3), Sew::E32), 2);
     }
-
-    // ── vid tests ─────────────────────────────────────────────────────────
 
     #[test]
     fn test_vid_basic() {
@@ -756,8 +705,6 @@ mod tests {
         assert_eq!(vpr.read_element(vd, ElemIdx::new(2), Sew::E32), 2);
         assert_eq!(vpr.read_element(vd, ElemIdx::new(3), Sew::E32), 0xFF); // undisturbed
     }
-
-    // ── is_mask_op coverage ───────────────────────────────────────────────
 
     #[test]
     fn test_is_mask_op() {

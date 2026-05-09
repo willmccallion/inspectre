@@ -5,10 +5,6 @@
 
 use rvsim_core::core::units::bru::ras::Ras;
 
-// ══════════════════════════════════════════════════════════
-// 1. Basic push/pop
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn push_pop_single() {
     let mut ras = Ras::new(8);
@@ -38,10 +34,6 @@ fn push_pop_interleaved() {
     assert_eq!(ras.pop(), Some(0x100));
 }
 
-// ══════════════════════════════════════════════════════════
-// 2. Top (peek) without modifying state
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn top_returns_without_removing() {
     let mut ras = Ras::new(8);
@@ -56,10 +48,6 @@ fn top_on_empty_returns_none() {
     let ras = Ras::new(8);
     assert_eq!(ras.top(), None);
 }
-
-// ══════════════════════════════════════════════════════════
-// 3. Underflow safety
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn pop_empty_returns_none() {
@@ -84,10 +72,6 @@ fn multiple_pop_on_empty() {
     }
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. Overflow behaviour
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn overflow_overwrites_top() {
     // With capacity 4, pushing 5 entries should overwrite the last slot.
@@ -98,10 +82,7 @@ fn overflow_overwrites_top() {
     ras.push(0xD); // fills to capacity
     ras.push(0xE); // overflow: overwrites top (slot capacity-1)
 
-    // The top should now be the overwritten value
     assert_eq!(ras.pop(), Some(0xE), "Overflow overwrites top entry");
-    // What's under it depends on implementation; the important thing is
-    // the most recent address is accessible.
 }
 
 #[test]
@@ -114,14 +95,9 @@ fn capacity_1_always_holds_latest() {
     assert_eq!(ras.pop(), Some(0x200));
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Realistic call/return patterns
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn nested_calls() {
-    // main calls A, A calls B, B calls C.
-    // Returns should unwind in reverse: C→B, B→A, A→main.
+    // main→A→B→C, returns unwind C→B→A→main.
     let mut ras = Ras::new(16);
 
     ras.push(0x1004); // main→A return addr
@@ -144,10 +120,6 @@ fn recursive_calls() {
         assert_eq!(ras.pop(), Some(0x4000 + i * 4));
     }
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Edge cases
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn push_pop_at_exactly_capacity() {

@@ -3,7 +3,6 @@
 
 use rvsim_core::isa::disasm::disassemble;
 
-// RV64I Base Instructions
 #[test]
 fn test_rv64i_arithmetic() {
     assert!(disassemble(0x00B50533).starts_with("add"));
@@ -91,7 +90,6 @@ fn test_rv64i_upper() {
     assert!(auipc.starts_with("auipc"));
 }
 
-// RV64M Extension
 #[test]
 fn test_rv64m_multiply() {
     assert!(disassemble(0x02B50533).starts_with("mul"));
@@ -113,7 +111,6 @@ fn test_rv64m_divide() {
     assert!(disassemble(0x02B5753B).starts_with("remuw"));
 }
 
-// RV64A Extension
 #[test]
 fn test_rv64a_word() {
     assert!(disassemble(0x1005A52F).contains("lr.w"));
@@ -142,7 +139,6 @@ fn test_rv64a_double() {
     assert!(disassemble(0xA0C5B52F).contains("amomax.d"));
 }
 
-// RV64F Extension
 #[test]
 fn test_rv64f_loadstore() {
     assert!(disassemble(0x00052507).starts_with("flw"));
@@ -182,7 +178,6 @@ fn test_rv64f_compare() {
     assert!(fle.contains("f") && fle.contains(".s"));
 }
 
-// RV64D Extension
 #[test]
 fn test_rv64d_loadstore() {
     assert!(disassemble(0x00053507).starts_with("fld"));
@@ -204,7 +199,6 @@ fn test_rv64d_convert() {
     assert!(disassemble(0x40150553).contains("fcvt.s.d"));
 }
 
-// Privileged Instructions
 #[test]
 fn test_privileged_system() {
     assert_eq!(disassemble(0x00000073), "ecall");
@@ -244,7 +238,6 @@ fn test_privileged_fence() {
     assert!(fence_i.contains("fence.i"));
 }
 
-// Special cases
 #[test]
 fn test_pseudo_instructions() {
     // NOP (addi x0, x0, 0)

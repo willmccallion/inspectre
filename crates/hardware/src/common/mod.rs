@@ -1,12 +1,4 @@
-//! Common utilities and types used throughout the RISC-V system simulator.
-//!
-//! This module provides fundamental building blocks that are shared across all components
-//! of the simulator. It includes:
-//! 1. **Address Types:** Strong types for virtual and physical addresses.
-//! 2. **Constants:** System-wide constants for memory, instructions, and simulation.
-//! 3. **Memory Access:** Definitions for categorizing memory operations (Fetch/Read/Write).
-//! 4. **Error Handling:** Trap representations and address translation result types.
-//! 5. **Register Management:** A unified interface for GPR and FPR access.
+//! Common utilities and types shared across the simulator.
 
 /// Address type definitions (physical and virtual addresses).
 pub mod addr;

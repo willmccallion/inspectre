@@ -16,8 +16,6 @@
 use rvsim_core::core::pipeline::signals::AluOp;
 use rvsim_core::core::units::alu::Alu;
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
 const ZERO: u64 = 0;
 const ONE: u64 = 1;
 const NEG1: u64 = u64::MAX; // 0xFFFF_FFFF_FFFF_FFFF
@@ -27,8 +25,6 @@ const I64_MIN: u64 = i64::MIN as u64; // 0x8000_0000_0000_0000
 
 const I32_MIN_SEXT: u64 = i32::MIN as i64 as u64; // 0xFFFF_FFFF_8000_0000
 
-// ─── Helper ──────────────────────────────────────────────────────────────────
-
 fn alu(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
     Alu::execute(op, a, b, 0, is32)
 }
@@ -36,10 +32,6 @@ fn alu(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
 fn sext32(val: u32) -> u64 {
     val as i32 as i64 as u64
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SLL (Shift Left Logical — RV64)
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn sll_rv64_shift_by_zero() {
@@ -100,10 +92,6 @@ fn sll_rv64_power_of_two_generation() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SLLW (Shift Left Logical — RV32)
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn sllw_shift_by_zero() {
     // Result is sign-extended: 0xDEAD_BEEF has bit 31 set → negative
@@ -147,10 +135,6 @@ fn sllw_all_ones_shift_by_1() {
     // 0xFFFF_FFFF << 1 = 0xFFFF_FFFE → sign-extended
     assert_eq!(alu(AluOp::Sll, 0xFFFF_FFFF, 1, true), sext32(0xFFFF_FFFE));
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SRL (Shift Right Logical — RV64)
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn srl_rv64_shift_by_zero() {
@@ -208,10 +192,6 @@ fn srl_rv64_successive_shifts() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SRLW (Shift Right Logical — RV32)
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn srlw_shift_by_zero() {
     // 0xDEAD_BEEF as u32 >> 0 = 0xDEAD_BEEF → sign-extended (bit 31 set)
@@ -256,10 +236,6 @@ fn srlw_zero_fill_clears_sign_bit() {
 fn srlw_all_ones_shift_by_31() {
     assert_eq!(alu(AluOp::Srl, 0xFFFF_FFFF, 31, true), 1);
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  SRA (Shift Right Arithmetic — RV64)
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn sra_rv64_shift_by_zero() {
@@ -335,10 +311,6 @@ fn sra_rv64_progressive_shift_negative() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  SRAW (Shift Right Arithmetic — RV32)
-// ═════════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn sraw_shift_by_zero() {
     // 0x8000_0000 as i32 >> 0 = 0x8000_0000 → sign-extended
@@ -395,10 +367,6 @@ fn sraw_all_ones_stays_all_ones() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  Cross-cutting: All *W shift results must be sign-extended
-// ═════════════════════════════════════════════════════════════════════════════
-
 /// Every *W shift must produce a result where bits [63:32] are all copies
 /// of bit 31.
 #[test]
@@ -433,10 +401,6 @@ fn all_w_shift_results_are_sign_extended() {
         );
     }
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  Shift idioms commonly used by compilers
-// ═════════════════════════════════════════════════════════════════════════════
 
 /// Multiply by power of 2 via SLL.
 #[test]

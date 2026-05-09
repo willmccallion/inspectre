@@ -5,10 +5,6 @@
 
 use rvsim_core::core::units::mmu::pmp::{Pmp, PmpAddrMatch, PmpEntry, PmpResult};
 
-// ══════════════════════════════════════════════════════════
-// Constants
-// ══════════════════════════════════════════════════════════
-
 // Configuration byte helpers
 const R: u8 = 1 << 0;
 const W: u8 = 1 << 1;
@@ -17,10 +13,6 @@ const A_TOR: u8 = 1 << 3; // A = TOR (01 << 3)
 const A_NA4: u8 = 2 << 3; // A = NA4 (10 << 3)
 const A_NAPOT: u8 = 3 << 3; // A = NAPOT (11 << 3)
 const L: u8 = 1 << 7; // Lock bit
-
-// ══════════════════════════════════════════════════════════
-// 1. Address Match Mode Decoding
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn addr_match_off() {
@@ -41,10 +33,6 @@ fn addr_match_na4() {
 fn addr_match_napot() {
     assert_eq!(PmpAddrMatch::from_bits(3), PmpAddrMatch::Napot);
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. M-mode bypass when no entries configured
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn machine_mode_full_access_no_entries() {
@@ -68,10 +56,6 @@ fn machine_mode_exec_no_entries() {
     assert_eq!(result, PmpResult::Allow);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Non-M-mode gets NoMatch when no entries configured
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn user_mode_no_match_no_entries() {
     let pmp = Pmp::new();
@@ -79,15 +63,10 @@ fn user_mode_no_match_no_entries() {
     assert_eq!(result, PmpResult::NoMatch);
 }
 
-// ══════════════════════════════════════════════════════════
-// 4. TOR region
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn tor_permits_access_in_range() {
     let mut pmp = Pmp::new();
-    // Entry 0: TOR with addr = 0x2000 → range [0, 0x8000)
-    // pmpaddr is byte_addr >> 2
+    // TOR pmpaddr=0x2000 (byte_addr >> 2) → range [0, 0x8000).
     pmp.set_addr(0, 0x2000); // byte addr 0x8000
     pmp.set_cfg(0, A_TOR | R | W | X);
 
@@ -140,10 +119,6 @@ fn tor_denies_write_when_only_read_permitted() {
     assert_eq!(write_result, PmpResult::Deny);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. NA4 region
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn na4_matches_exactly_four_bytes() {
     let mut pmp = Pmp::new();
@@ -168,24 +143,10 @@ fn na4_matches_exactly_four_bytes() {
     assert_eq!(result, PmpResult::Deny);
 }
 
-// ══════════════════════════════════════════════════════════
-// 6. NAPOT region
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn napot_8_byte_region() {
     let mut pmp = Pmp::new();
-    // 8-byte NAPOT: trailing ones = 0 → size = 2^(0+3) = 8
-    // pmpaddr = base_addr >> 2, with 0 trailing ones
-    // For base = 0x1000: pmpaddr = 0x400
-    // But NAPOT encoding: pmpaddr = (base >> 2) | 0 → trailing = 0 means no trailing 1s
-    // Actually for 8 bytes: size = 8, trailing ones in pmpaddr = 0
-    // pmpaddr = (base >> 2) | ((size/8 - 1)) where size=8 → pmpaddr = base>>2 | 0
-    // Wait, let me re-derive:
-    //   size = 2^(trailing_ones + 3)
-    //   For 8 bytes: trailing_ones = 0, so pmpaddr has 0 trailing 1s
-    //   base = pmpaddr << 2 (with mask)
-    // pmpaddr for [0x1000, 0x1008): 0x1000 >> 2 = 0x400, and no trailing 1s
+    // [0x1000, 0x1008): 8-byte NAPOT → trailing_ones=0, pmpaddr = 0x1000 >> 2 = 0x400.
     pmp.set_addr(0, 0x400);
     pmp.set_cfg(0, A_NAPOT | R | W | X);
 
@@ -204,9 +165,7 @@ fn napot_8_byte_region() {
 #[test]
 fn napot_larger_region() {
     let mut pmp = Pmp::new();
-    // For a 32-byte region [0x1000, 0x1020):
-    //   size = 32 = 2^5 → trailing_ones = 5-3 = 2
-    //   pmpaddr = (0x1000 >> 2) | 0b11 = 0x400 | 0x3 = 0x403
+    // [0x1000, 0x1020): 32-byte NAPOT → trailing_ones=2, pmpaddr = (0x1000>>2) | 0b11 = 0x403.
     pmp.set_addr(0, 0x403);
     pmp.set_cfg(0, A_NAPOT | R);
 
@@ -219,10 +178,6 @@ fn napot_larger_region() {
     let result = pmp.check(0x1020, 1, true, false, false, false);
     assert_eq!(result, PmpResult::NoMatch);
 }
-
-// ══════════════════════════════════════════════════════════
-// 7. Permission checks
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn read_only_denies_write_and_exec() {
@@ -256,10 +211,6 @@ fn rwx_permits_all() {
     assert_eq!(pmp.check(0x1000, 4, false, true, false, false), PmpResult::Allow);
     assert_eq!(pmp.check(0x1000, 4, false, false, true, false), PmpResult::Allow);
 }
-
-// ══════════════════════════════════════════════════════════
-// 8. Locked entries
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn locked_entry_applies_to_machine_mode() {
@@ -302,10 +253,6 @@ fn locked_entry_cannot_be_modified() {
     assert_eq!(pmp.get_addr(0), 0x2000);
 }
 
-// ══════════════════════════════════════════════════════════
-// 9. Priority: first matching entry wins
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn first_matching_entry_wins() {
     let mut pmp = Pmp::new();
@@ -321,10 +268,6 @@ fn first_matching_entry_wins() {
     let result = pmp.check(0x1000, 4, false, true, false, false);
     assert_eq!(result, PmpResult::Deny);
 }
-
-// ══════════════════════════════════════════════════════════
-// 10. PmpEntry field accessors
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn pmp_entry_permission_accessors() {

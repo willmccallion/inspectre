@@ -93,7 +93,6 @@ impl FuType {
 
     /// Classify an instruction's FU type from its control signals.
     pub fn classify(ctrl: &ControlSignals) -> Self {
-        // Check vector operations first
         if ctrl.vec_op != VectorOp::None {
             return Self::classify_vec(ctrl.vec_op);
         }
@@ -149,14 +148,10 @@ impl FuType {
     const fn classify_vec(op: VectorOp) -> Self {
         use VectorOp::*;
         match op {
-            // Vector memory operations
             VLoadUnit | VStoreUnit | VLoadFF | VLoadMask | VStoreMask | VLoadWholeReg
             | VStoreWholeReg | VLoadStride | VStoreStride | VLoadIndexOrd | VStoreIndexOrd
             | VLoadIndexUnord | VStoreIndexUnord => Self::VecMem,
 
-            // Integer ALU: configuration + add/sub/logic/shift/compare/merge/ext/
-            // widening-add/sub/narrowing-shift/saturating/averaging/fixed-point/reductions
-            // + Zvbb bit-manipulation (vandn/vbrev*/vrev8/vclz/vctz/vcpop.v/vrol/vror/vwsll)
             Vsetvli | Vsetivli | Vsetvl | VAdd | VSub | VRsub | VAnd | VOr | VXor | VSll | VSrl
             | VSra | VMinU | VMin | VMaxU | VMax | VMerge | VMSeq | VMSne | VMSltu | VMSlt
             | VMSleu | VMSle | VMSgtu | VMSgt | VAdc | VMadc | VSbc | VMsbc | VWAddU | VWAdd
@@ -167,8 +162,7 @@ impl FuType {
             | VRedMax | VWRedSumU | VWRedSum
             | VAndN | VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV | VRol | VRor | VWsll
             | None
-            // Crypto ops live on the vector integer ALU (single-cycle ROM
-            // lookups and bitwise math; no separate FU is modelled for crypto).
+            // Crypto ops route to the vector integer ALU (no separate crypto FU is modelled).
             | VAesEm | VAesEf | VAesDm | VAesDf | VAesZ
             | VAesKf1 | VAesKf2
             | VSha2Ms | VSha2Ch | VSha2Cl
@@ -176,16 +170,12 @@ impl FuType {
             | VSm4R | VSm4K
             | VGhsh | VGmul => Self::VecIntAlu,
 
-            // Integer multiply: mul/mulh/macc/madd/widening mul + Zvbc carryless mul
             VMul | VMulh | VMulhu | VMulhsu | VMacc | VNMSac | VMadd | VNMSub | VWMulU | VWMul
             | VWMulSU | VWMaccU | VWMacc | VWMaccSU | VWMaccUS
             | VClMul | VClMulH => Self::VecIntMul,
 
-            // Integer divide/remainder
             VDivU | VDiv | VRemU | VRem => Self::VecIntDiv,
 
-            // FP ALU: fadd/fsub/fmin/fmax/fcmp/fcvt/fclass/fsgnj + widening/narrowing add/sub/cvt
-            // + FP reductions (ordered and unordered)
             VFAdd | VFSub | VFRSub | VFMin | VFMax | VFSgnj | VFSgnjn | VFSgnjx | VMFEq | VMFNe
             | VMFLt | VMFLe | VMFGt | VMFGe | VFClass | VFCvtXuF | VFCvtXF | VFCvtFXu | VFCvtFX
             | VFCvtRtzXuF | VFCvtRtzXF | VFWAdd | VFWSub | VFWAddW | VFWSubW | VFWCvtXuF
@@ -196,15 +186,11 @@ impl FuType {
                 Self::VecFpAlu
             }
 
-            // FP FMA: fmul/fmadd/fmsub/fnmadd/fnmsub/widening fmul/fmacc
             VFMul | VFMacc | VFNMacc | VFMSac | VFNMSac | VFMAdd | VFNMAdd | VFMSub | VFNMSub
             | VFWMul | VFWMacc | VFWNMacc | VFWMSac | VFWNMSac => Self::VecFpFma,
 
-            // FP div/sqrt
             VFDiv | VFRDiv | VFSqrt => Self::VecFpDivSqrt,
 
-            // Permutation: FP slides + mask logical/population/set-before/iota/id
-            // + integer slides/gathers/compress/whole-register moves/scalar↔vector moves
             VFSlide1Up | VFSlide1Down | VMAndMM | VMNandMM | VMAndnMM | VMOrMM | VMNorMM
             | VMOrnMM | VMXorMM | VMXnorMM | VCPopM | VFirstM | VMSbfM | VMSifM | VMSofM
             | VIotaM | VIdV | VMvXS | VMvSX | VSlideUp | VSlideDown | VSlide1Up | VSlide1Down
@@ -241,11 +227,7 @@ impl FuUnit {
     /// Returns the cycle at which the result will be ready.
     pub const fn acquire(&mut self, now: u64) -> u64 {
         let complete = now + self.latency;
-        self.busy_until = if self.is_pipelined {
-            now + 1 // pipelined: free next cycle
-        } else {
-            complete // non-pipelined: blocked until done
-        };
+        self.busy_until = if self.is_pipelined { now + 1 } else { complete };
         complete
     }
 
@@ -347,7 +329,6 @@ pub struct FuConfig {
     pub vec_permute_latency: u64,
 }
 
-// Serde default functions for vector FU config
 const fn default_num_vec_int_alu() -> usize {
     1
 }
@@ -471,7 +452,6 @@ impl FuPool {
         add(&mut units, FuType::Branch, config.num_branch, config.branch_latency, true);
         add(&mut units, FuType::Mem, config.num_mem, config.mem_latency, true);
 
-        // Vector FUs
         add(
             &mut units,
             FuType::VecIntAlu,
@@ -511,9 +491,7 @@ impl FuPool {
             true,
         );
 
-        // Safety net: guarantee at least 1 of each vector FU type exists.
-        // Custom fu_configs that only list scalar FUs would otherwise deadlock
-        // on any vector instruction.
+        // Guarantee at least one of each vector FU; scalar-only configs would deadlock vec ops.
         let vec_defaults: &[(FuType, u64, bool)] = &[
             (FuType::VecIntAlu, default_vec_int_alu_latency(), true),
             (FuType::VecIntMul, default_vec_int_mul_latency(), true),

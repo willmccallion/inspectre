@@ -61,21 +61,13 @@ impl Plic {
     }
 
     /// Updates the pending status of interrupts based on external signals.
-    ///
-    /// # Arguments
-    ///
-    /// * `mask` - A 64-bit mask where set bits indicate active interrupt lines.
     pub fn update_irqs(&mut self, mask: u64) {
         self.pending[0] = (mask & 0xFFFFFFFF) as u32;
         self.pending[1] = (mask >> 32) as u32;
     }
 
     /// Checks for pending interrupts that exceed the priority threshold.
-    ///
-    /// # Returns
-    ///
-    /// A tuple `(meip, seip)` indicating if a Machine External Interrupt
-    /// or Supervisor External Interrupt is pending.
+    /// Returns `(meip, seip)`.
     pub fn check_interrupts(&mut self) -> (bool, bool) {
         let mut meip = false;
         let mut seip = false;
@@ -110,7 +102,7 @@ impl Plic {
             for bit in 0..32 {
                 let irq_id = word * 32 + bit;
                 if irq_id == 0 {
-                    continue; // IRQ 0 is reserved
+                    continue;
                 }
                 if (active & (1 << bit)) != 0
                     && irq_id < self.priorities.len()
@@ -155,18 +147,13 @@ impl Plic {
 }
 
 impl Device for Plic {
-    /// Returns the device name.
     fn name(&self) -> &'static str {
         "PLIC"
     }
-    /// Returns the address range (Base, Size).
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x4000000)
     }
 
-    /// Reads a word (32-bit) from the device.
-    ///
-    /// Handles reads from Priority, Pending, Enable, Threshold, and Claim registers.
     fn read_u32(&mut self, offset: u64) -> u32 {
         #[allow(clippy::absurd_extreme_comparisons)]
         if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
@@ -194,9 +181,6 @@ impl Device for Plic {
                     return self.thresholds[ctx];
                 }
                 if reg == 4 {
-                    // Claim read: return the highest-priority pending IRQ
-                    // for this context. Per spec, claiming an interrupt
-                    // atomically clears its pending bit.
                     let irq_id = self.claims[ctx];
                     if irq_id > 0 && (irq_id as usize) < 1024 {
                         let idx = irq_id as usize / 32;
@@ -212,9 +196,6 @@ impl Device for Plic {
         0
     }
 
-    /// Writes a word (32-bit) to the device.
-    ///
-    /// Handles writes to Priority, Enable, Threshold, and Complete (Claim) registers.
     fn write_u32(&mut self, offset: u64, val: u32) {
         #[allow(clippy::absurd_extreme_comparisons)]
         if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
@@ -237,7 +218,6 @@ impl Device for Plic {
                     self.thresholds[ctx] = val;
                 }
                 if reg == 4 {
-                    // Completion write: clear pending bit for the completed IRQ
                     let irq_id = val;
                     if irq_id > 0 && (irq_id as usize) < 1024 {
                         let idx = irq_id as usize / 32;
@@ -252,20 +232,16 @@ impl Device for Plic {
         }
     }
 
-    /// Reads a byte (delegates to `read_u32`).
     fn read_u8(&mut self, offset: u64) -> u8 {
         (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u8
     }
-    /// Reads a half-word (delegates to `read_u32`).
     fn read_u16(&mut self, offset: u64) -> u16 {
         (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u16
     }
-    /// Reads a double-word (delegates to `read_u32`).
     fn read_u64(&mut self, offset: u64) -> u64 {
         self.read_u32(offset) as u64
     }
 
-    /// Writes a byte (read-modify-write into containing u32).
     fn write_u8(&mut self, offset: u64, val: u8) {
         let aligned = offset & !3;
         let byte_pos = (offset & 3) * 8;
@@ -274,7 +250,6 @@ impl Device for Plic {
         let new = (old & mask) | ((val as u32) << byte_pos);
         self.write_u32(aligned, new);
     }
-    /// Writes a half-word (read-modify-write into containing u32).
     fn write_u16(&mut self, offset: u64, val: u16) {
         let aligned = offset & !3;
         let byte_pos = (offset & 2) * 8;
@@ -283,20 +258,15 @@ impl Device for Plic {
         let new = (old & mask) | ((val as u32) << byte_pos);
         self.write_u32(aligned, new);
     }
-    /// Writes a double-word (delegates to `write_u32`).
     fn write_u64(&mut self, offset: u64, val: u64) {
         self.write_u32(offset, val as u32);
     }
 
-    /// Advances the device state.
-    ///
-    /// Checks for pending interrupts and returns true if any are asserted.
     fn tick(&mut self) -> bool {
         let (meip, seip) = self.check_interrupts();
         meip || seip
     }
 
-    /// Returns a mutable reference to the PLIC if this device is one.
     fn as_plic_mut(&mut self) -> Option<&mut Plic> {
         Some(self)
     }

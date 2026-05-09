@@ -1,10 +1,5 @@
-//! System interconnect (bus) for memory and MMIO access.
-//!
-//! This module implements the bus that routes physical address accesses to devices. It provides:
-//! 1. **Device registration:** Devices are added by address range and sorted for lookup.
-//! 2. **Access routing:** Read/write by address with last-device hint for throughput.
-//! 3. **Tick and IRQ:** Each device is ticked; PLIC aggregates IRQs for timer and external.
-//! 4. **Load and RAM pointer:** Binary loading and raw RAM pointer for CPU DMA-style access.
+//! System interconnect (bus) — routes physical accesses to devices, ticks
+//! devices, aggregates IRQs through PLIC, and exposes the RAM pointer.
 
 use super::devices::Device;
 use crate::common::PhysAddr;
@@ -44,15 +39,6 @@ impl std::fmt::Debug for Bus {
 
 impl Bus {
     /// Creates a new bus with the given width and latency.
-    ///
-    /// # Arguments
-    ///
-    /// * `width_bytes` - Transfer width in bytes (e.g., 8).
-    /// * `latency_cycles` - Base cycles per transaction.
-    ///
-    /// # Returns
-    ///
-    /// An empty bus with no devices; add devices with `add_device`.
     pub fn new(width_bytes: u64, latency_cycles: u64) -> Self {
         Self {
             devices: Vec::new(),
@@ -67,10 +53,6 @@ impl Bus {
     }
 
     /// Registers a device on the bus; devices are sorted by base address for lookup.
-    ///
-    /// # Arguments
-    ///
-    /// * `dev` - The device to add (must implement `Device` and be `Send + Sync`).
     pub fn add_device(&mut self, dev: Box<dyn Device + Send + Sync>) {
         self.devices.push(dev);
         self.devices.sort_by_key(|d| d.address_range().0);
@@ -81,28 +63,13 @@ impl Bus {
         self.last_device_idx = 0;
     }
 
-    /// Returns the number of cycles to transfer the given number of bytes on this bus.
-    ///
-    /// # Arguments
-    ///
-    /// * `bytes` - Number of bytes to transfer.
-    ///
-    /// # Returns
-    ///
-    /// Cycles = base latency plus ceiling(bytes / `width_bytes`) transfers.
+    /// Returns cycles = base latency plus ceiling(bytes / `width_bytes`) transfers.
     pub const fn calculate_transit_time(&self, bytes: usize) -> u64 {
         let transfers = (bytes as u64).div_ceil(self.width_bytes);
         self.latency_cycles + transfers
     }
 
     /// Writes a binary blob into memory at the given physical address.
-    ///
-    /// If a device claims the range, writes via that device; otherwise falls back to byte-by-byte write.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - Bytes to write.
-    /// * `addr` - Physical base address.
     pub fn load_binary_at(&mut self, data: &[u8], addr: PhysAddr) {
         if let Some((dev, offset)) = self.find_device(addr) {
             let (_, size) = dev.address_range();
@@ -116,15 +83,7 @@ impl Bus {
         }
     }
 
-    /// Returns whether the given physical address is backed by any device (e.g., RAM or MMIO).
-    ///
-    /// # Arguments
-    ///
-    /// * `paddr` - Physical address to check.
-    ///
-    /// # Returns
-    ///
-    /// `true` if some device's range contains `paddr`.
+    /// Returns whether the given physical address is backed by any device.
     pub fn is_valid_address(&self, paddr: PhysAddr) -> bool {
         let raw = paddr.val();
         if let Some(idx) = self.ram_idx {
@@ -142,12 +101,8 @@ impl Bus {
         false
     }
 
-    /// Advances all devices by one tick and updates PLIC; returns IRQ flags.
-    ///
-    /// # Returns
-    ///
-    /// (`timer_irq`, `msip`, `meip`, `seip`) for machine timer, machine software,
-    /// machine external, and supervisor external interrupts.
+    /// Advances all devices by one tick and updates PLIC.
+    /// Returns (`timer_irq`, `msip`, `meip`, `seip`).
     pub fn tick(&mut self) -> (bool, bool, bool, bool) {
         let mut timer_irq = false;
         let mut active_irqs = 0u64;
@@ -180,11 +135,7 @@ impl Bus {
         (timer_irq, msip, meip, seip)
     }
 
-    /// Returns whether the UART device has detected a kernel panic pattern (for test harnesses).
-    ///
-    /// # Returns
-    ///
-    /// `true` if kernel panic was detected.
+    /// Returns whether the UART device has detected a kernel panic pattern.
     pub fn check_kernel_panic(&mut self) -> bool {
         if let Some(idx) = self.uart_idx
             && idx < self.devices.len()
@@ -195,13 +146,7 @@ impl Bus {
         false
     }
 
-    /// Returns a raw pointer and (base, end) for the RAM region if present.
-    ///
-    /// Used by the CPU or loader for direct memory access (e.g., instruction fetch, DMA).
-    ///
-    /// # Returns
-    ///
-    /// `Some((ptr, base, end))` for RAM, or `None` if no RAM device is registered.
+    /// Returns `(ptr, base, end)` for the RAM region, or `None` if not present.
     pub fn get_ram_info(&mut self) -> Option<(*mut u8, u64, u64)> {
         if let Some(idx) = self.ram_idx
             && let Some(mem) = self.devices[idx].as_memory_mut()

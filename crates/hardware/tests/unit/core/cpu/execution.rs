@@ -112,8 +112,6 @@ fn test_tick_does_not_corrupt_state() {
 
     sim.tick().unwrap();
 
-    // Register x5 should still have value (unless instruction modifies it)
-    // At least verify register file is still accessible
     let _ = sim.cpu.regs.read(RegIdx::new(5));
 }
 

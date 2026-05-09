@@ -32,17 +32,8 @@ impl std::fmt::Debug for DramBuffer {
 }
 
 impl DramBuffer {
-    /// Creates a new DRAM buffer of the specified size.
-    ///
-    /// On Unix, uses `mmap` for lazy allocation; on other platforms, allocates a `Vec`.
-    ///
-    /// # Arguments
-    ///
-    /// * `size` - Size of the buffer in bytes.
-    ///
-    /// # Returns
-    ///
-    /// A new `DramBuffer`.
+    /// Creates a new DRAM buffer of `size` bytes.
+    /// On Unix, uses `mmap` for lazy allocation; otherwise allocates a `Vec`.
     ///
     /// # Panics
     ///
@@ -96,7 +87,7 @@ impl DramBuffer {
         self.ptr
     }
 
-    /// Reads a single byte safely.
+    /// Reads a single byte.
     ///
     /// # Panics
     ///
@@ -106,7 +97,7 @@ impl DramBuffer {
         unsafe { *self.ptr.add(offset) }
     }
 
-    /// Writes a single byte safely.
+    /// Writes a single byte.
     ///
     /// # Panics
     ///
@@ -118,7 +109,7 @@ impl DramBuffer {
         }
     }
 
-    /// Reads a slice of memory safely.
+    /// Reads a slice.
     ///
     /// # Panics
     ///
@@ -128,7 +119,7 @@ impl DramBuffer {
         unsafe { slice::from_raw_parts(self.ptr.add(offset), len) }
     }
 
-    /// Writes a slice of memory safely.
+    /// Writes a slice.
     ///
     /// # Panics
     ///
@@ -143,10 +134,6 @@ impl DramBuffer {
 }
 
 impl Drop for DramBuffer {
-    /// Deallocates the DRAM buffer.
-    ///
-    /// On Unix systems, unmaps the mmap'd memory. On other systems,
-    /// reconstructs the Vec to trigger its destructor.
     fn drop(&mut self) {
         if self.is_mmap {
             #[cfg(unix)]
@@ -163,17 +150,14 @@ impl Drop for DramBuffer {
 }
 
 impl Index<usize> for DramBuffer {
-    /// Output type for indexing operations (u8).
     type Output = u8;
 
-    /// Indexes into the buffer to read a byte.
     fn index(&self, index: usize) -> &Self::Output {
         unsafe { &*self.ptr.add(index) }
     }
 }
 
 impl IndexMut<usize> for DramBuffer {
-    /// Indexes into the buffer to write a byte.
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         unsafe { &mut *self.ptr.add(index) }
     }

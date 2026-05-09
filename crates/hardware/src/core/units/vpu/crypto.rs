@@ -92,10 +92,6 @@ fn write_egs8_u32(vpr: &mut impl VectorRegFile, vreg: VRegIdx, base_elem: usize,
     }
 }
 
-// ============================================================================
-// AES (Zvkned)
-// ============================================================================
-
 /// AES S-box (forward).
 const AES_SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -162,7 +158,6 @@ fn inv_sub_bytes(state: &mut [u8; 16]) {
 
 /// AES `ShiftRows`: rotate row r left by r bytes (column-major state).
 fn shift_rows(state: &mut [u8; 16]) {
-    // State[col*4 + row]. Row 0 unchanged. Row r rotated left by r.
     let s = *state;
     for c in 0..4 {
         for r in 0..4 {
@@ -386,10 +381,6 @@ fn aes_kf2(curr_key: [u32; 4], prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
     [w0, w1, w2, w3]
 }
 
-// ============================================================================
-// GHASH (Zvkg) — GF(2^128) multiply with reduction polynomial x^128 + x^7 + x^2 + x + 1
-// ============================================================================
-
 /// Reverse bits within each byte of a u32. Matches Spike's `ZVK_BREV8_32` macro.
 #[inline]
 const fn brev8_u32(mut x: u32) -> u32 {
@@ -441,10 +432,6 @@ fn gf128_mul(multiplier: [u32; 4], multiplicand: [u32; 4]) -> [u32; 4] {
 
     brev8_u32x4(z)
 }
-
-// ============================================================================
-// SHA-2 (Zvknha = SHA-256, Zvknhb adds SHA-512)
-// ============================================================================
 
 /// SHA-256 constants K[0..64] (round constants). Software pre-adds these
 /// to the message words and supplies the sum via vs1; the hardware path
@@ -504,22 +491,10 @@ const fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
     let w14 = vs1[2];
     let w15 = vs1[3];
 
-    let w16 = sha256_sigma1(w14)
-        .wrapping_add(w9)
-        .wrapping_add(sha256_sigma0(w1))
-        .wrapping_add(w0);
-    let w17 = sha256_sigma1(w15)
-        .wrapping_add(w10)
-        .wrapping_add(sha256_sigma0(w2))
-        .wrapping_add(w1);
-    let w18 = sha256_sigma1(w16)
-        .wrapping_add(w11)
-        .wrapping_add(sha256_sigma0(w3))
-        .wrapping_add(w2);
-    let w19 = sha256_sigma1(w17)
-        .wrapping_add(w12)
-        .wrapping_add(sha256_sigma0(w4))
-        .wrapping_add(w3);
+    let w16 = sha256_sigma1(w14).wrapping_add(w9).wrapping_add(sha256_sigma0(w1)).wrapping_add(w0);
+    let w17 = sha256_sigma1(w15).wrapping_add(w10).wrapping_add(sha256_sigma0(w2)).wrapping_add(w1);
+    let w18 = sha256_sigma1(w16).wrapping_add(w11).wrapping_add(sha256_sigma0(w3)).wrapping_add(w2);
+    let w19 = sha256_sigma1(w17).wrapping_add(w12).wrapping_add(sha256_sigma0(w4)).wrapping_add(w3);
     [w16, w17, w18, w19]
 }
 
@@ -527,10 +502,7 @@ const fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
 #[inline]
 const fn sha256_round(state: &mut [u32; 8], kw: u32) {
     let [a, b, c, d, e, f, g, h] = *state;
-    let t1 = h
-        .wrapping_add(sha256_sum1(e))
-        .wrapping_add(sha256_ch(e, f, g))
-        .wrapping_add(kw);
+    let t1 = h.wrapping_add(sha256_sum1(e)).wrapping_add(sha256_ch(e, f, g)).wrapping_add(kw);
     let t2 = sha256_sum0(a).wrapping_add(sha256_maj(a, b, c));
     *state = [t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g];
 }
@@ -568,10 +540,6 @@ fn sha256_compress_low(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
 fn sha256_compress_high(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
     sha256_compress(vd, vs2, vs1, [2, 3])
 }
-
-// ============================================================================
-// SM3 (Zvksh) — Chinese hash
-// ============================================================================
 
 /// SM3 P0 / P1 / FF / GG functions per GB/T 32905-2016.
 #[inline]
@@ -650,11 +618,8 @@ const fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
 
     // Round j = 2*rnd
     let j = 2 * rnd;
-    let ss1 = a
-        .rotate_left(12)
-        .wrapping_add(e)
-        .wrapping_add(sm3_t(j).rotate_left(j % 32))
-        .rotate_left(7);
+    let ss1 =
+        a.rotate_left(12).wrapping_add(e).wrapping_add(sm3_t(j).rotate_left(j % 32)).rotate_left(7);
     let ss2 = ss1 ^ a.rotate_left(12);
     let tt1 = sm3_ff(a, b, c, j).wrapping_add(d).wrapping_add(ss2).wrapping_add(x0);
     let tt2 = sm3_gg(e, f, g, j).wrapping_add(h).wrapping_add(ss1).wrapping_add(w0);
@@ -682,13 +647,17 @@ const fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
     let g2 = f1.rotate_left(19);
     let e2 = sm3_p0(tt2);
 
-    [bswap32(a2), bswap32(a1), bswap32(c2), bswap32(c1),
-     bswap32(e2), bswap32(e1), bswap32(g2), bswap32(g1)]
+    [
+        bswap32(a2),
+        bswap32(a1),
+        bswap32(c2),
+        bswap32(c1),
+        bswap32(e2),
+        bswap32(e1),
+        bswap32(g2),
+        bswap32(g1),
+    ]
 }
-
-// ============================================================================
-// SM4 (Zvksed) — Chinese block cipher
-// ============================================================================
 
 /// SM4 S-box.
 const SM4_SBOX: [u8; 256] = [
@@ -782,10 +751,6 @@ fn sm4_k(vd: [u32; 4], rnd: u32) -> [u32; 4] {
 #[allow(dead_code)]
 const _SM4_FK_USED: [u32; 4] = SM4_FK;
 
-// ============================================================================
-// Public dispatch
-// ============================================================================
-
 /// Execute a vector crypto instruction. Iterates over each EGS-sized element
 /// group within `[vstart, vl)` and applies the round function.
 ///
@@ -807,18 +772,15 @@ pub fn execute_crypto(
     broadcast_vs2: bool,
 ) {
     let egs = if matches!(op, VectorOp::VSm3Me | VectorOp::VSm3C) { EGS_SM3 } else { EGS_AES };
-    let _ = EGS_SHA; // SHA-256 uses EGS_AES (=4); kept named for clarity.
+    let _ = EGS_SHA;
 
-    // Spec: instruction is a no-op if vl < EGS for any group.
     if vl < egs {
         return;
     }
 
-    // For the .vs form, vs2 element group 0 is broadcast across all
-    // destination element groups. For the .vv form, key is per-group.
+    // .vs form: vs2 element group 0 is broadcast across all destination groups.
     let key_base = |base: usize| if broadcast_vs2 { 0 } else { base };
 
-    // Process groups starting at base elements 0, EGS, 2*EGS, ...
     let mut base = (vstart / egs) * egs;
     while base + egs <= vl {
         match op {
@@ -954,18 +916,18 @@ mod tests {
         // FIPS 197 Appendix B test vector: AES-128.
         // After round-0 AddRoundKey:
         let state_in = bytes_to_words([
-            0x19, 0x3d, 0xe3, 0xbe, 0xa0, 0xf4, 0xe2, 0x2b,
-            0x9a, 0xc6, 0x8d, 0x2a, 0xe9, 0xf8, 0x48, 0x08,
+            0x19, 0x3d, 0xe3, 0xbe, 0xa0, 0xf4, 0xe2, 0x2b, 0x9a, 0xc6, 0x8d, 0x2a, 0xe9, 0xf8,
+            0x48, 0x08,
         ]);
         // Round 1 expanded key (W[4..8]):
         let round_key = bytes_to_words([
-            0xa0, 0xfa, 0xfe, 0x17, 0x88, 0x54, 0x2c, 0xb1,
-            0x23, 0xa3, 0x39, 0x39, 0x2a, 0x6c, 0x76, 0x05,
+            0xa0, 0xfa, 0xfe, 0x17, 0x88, 0x54, 0x2c, 0xb1, 0x23, 0xa3, 0x39, 0x39, 0x2a, 0x6c,
+            0x76, 0x05,
         ]);
         // Round-1 output (state after MixColumns + AddRoundKey):
         let expected = bytes_to_words([
-            0xa4, 0x9c, 0x7f, 0xf2, 0x68, 0x9f, 0x35, 0x2b,
-            0x6b, 0x5b, 0xea, 0x43, 0x02, 0x6a, 0x50, 0x49,
+            0xa4, 0x9c, 0x7f, 0xf2, 0x68, 0x9f, 0x35, 0x2b, 0x6b, 0x5b, 0xea, 0x43, 0x02, 0x6a,
+            0x50, 0x49,
         ]);
         assert_eq!(aes_round_enc(state_in, round_key), expected);
     }
@@ -975,12 +937,12 @@ mod tests {
         // FIPS 197 key 0x2b7e1516..., round 0 is the original key.
         // Expected round-1 expansion (W[4..8]) from key schedule.
         let key0 = bytes_to_words([
-            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-            0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+            0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
+            0x4f, 0x3c,
         ]);
         let expected = bytes_to_words([
-            0xa0, 0xfa, 0xfe, 0x17, 0x88, 0x54, 0x2c, 0xb1,
-            0x23, 0xa3, 0x39, 0x39, 0x2a, 0x6c, 0x76, 0x05,
+            0xa0, 0xfa, 0xfe, 0x17, 0x88, 0x54, 0x2c, 0xb1, 0x23, 0xa3, 0x39, 0x39, 0x2a, 0x6c,
+            0x76, 0x05,
         ]);
         assert_eq!(aes_kf1(key0, 1), expected);
     }

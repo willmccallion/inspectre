@@ -26,13 +26,13 @@ use crate::core::pipeline::scoreboard::Scoreboard;
 use crate::core::pipeline::signals::{ControlFlow, VectorOp};
 use crate::core::pipeline::store_buffer::StoreBuffer;
 use crate::core::pipeline::vec_prf::VecPhysRegFile;
+use crate::core::pipeline::vec_prf::VecPrfView;
 use crate::core::pipeline::vec_store_buffer::VecStoreBuffer;
 use crate::core::units::bru::BranchPredictor;
 use crate::core::units::mdp::MemDepUnit;
 use crate::core::units::vpu::chaining::VecPendingResult;
 use crate::core::units::vpu::mem::{generate_element_addrs_vrf, is_vec_store};
 use crate::core::units::vpu::types::{ElemIdx, NumLanes, VRegIdx, VecPhysReg, Vlen};
-use crate::core::pipeline::vec_prf::VecPrfView;
 
 use self::fu_pool::{FuPool, FuType};
 use self::issue_queue::IssueQueue;
@@ -93,16 +93,7 @@ pub struct O3Engine {
     pub mdp: MemDepUnit,
     /// Checkpoint table for O(1) branch misprediction recovery.
     pub checkpoints: CheckpointTable,
-    /// Remaining stall cycles for in-progress squash recovery.
-    ///
-    /// Models the physical bandwidth limit of the ROB: the processor can only
-    /// process `width` ROB entries per cycle during squash (reclaiming physical
-    /// registers, cleaning up IQ/LSQ entries). While this counter is > 0,
-    /// dispatch is blocked (rename cannot send instructions to the backend).
-    ///
-    /// When no checkpoint is available, additional cycles are added for the
-    /// rename map rebuild (forward-walking surviving ROB entries at `width`
-    /// entries per cycle). Checkpoints eliminate this cost entirely.
+    /// Stall cycles remaining for in-progress squash recovery (blocks dispatch while > 0).
     pub squash_stall_remaining: u64,
     /// Vector physical register file (VLEN-bit storage per register + ready bits).
     pub vec_prf: VecPhysRegFile,
@@ -137,17 +128,7 @@ pub struct VecMemMicroOp {
     pub is_store: bool,
 }
 
-/// Tracks an in-flight vector memory instruction's per-element progress.
-///
-/// Vector memory ops have far more elements than a fixed-size LQ/SB can hold
-/// (e.g. e8/m8 at VLEN=128 → 128 elements vs default LQ=32). Wave-based issue
-/// generates all element micro-ops up front but only releases as many into
-/// the memory pipeline as the LQ has free slots; the remainder sit in
-/// `pending_micro_ops` and drain as elements complete at writeback.
-///
-/// Store data lives in `crate::core::pipeline::vec_store_buffer`, not here.
-/// This entry only tracks element-completion bookkeeping needed for chaining
-/// wakeup and ROB completion.
+/// Per-element progress tracker for an in-flight vec mem op (data lives in `vec_store_buffer`).
 #[derive(Debug, Clone)]
 pub struct VecMemInflight {
     /// ROB tag of the parent vector memory instruction.
@@ -172,13 +153,9 @@ impl O3Engine {
         let prf_gpr_size = config.pipeline.prf_gpr_size;
         let prf_fpr_size = config.pipeline.prf_fpr_size;
         let prf_total = prf_gpr_size + prf_fpr_size;
-        // GPR: arch regs 0..32 occupy slots 0..32; FPR: arch regs 0..32 occupy slots 32..64.
-        // Free list starts with slots 64..prf_total available.
-        let num_arch = 64; // 32 GPR + 32 FPR
+        // Slots 0..32 = GPR, 32..64 = FPR; free list starts at slot 64.
+        let num_arch = 64;
 
-        // Initialize PRF: identity-mapped slots (0..num_arch) are all ready with value 0.
-        // PhysReg(0) is hardwired zero (always ready). Regs 1..num_arch represent the
-        // initial architectural register state — all readable as 0 at startup.
         let mut prf = PhysRegFile::new(prf_total);
         prf.mark_arch_ready(num_arch);
 
@@ -216,10 +193,7 @@ impl O3Engine {
             vec_free_list: FreeList::new(config.pipeline.prf_vpr_size, 32),
             vec_pending: Vec::new(),
             num_vec_lanes: NumLanes::new(
-                config
-                    .pipeline
-                    .num_vec_lanes
-                    .unwrap_or_else(|| (config.pipeline.vlen / 64).max(1)),
+                config.pipeline.num_vec_lanes.unwrap_or_else(|| (config.pipeline.vlen / 64).max(1)),
             ),
             vec_mem_pending: std::collections::VecDeque::new(),
             vec_mem_inflight: Vec::new(),
@@ -232,29 +206,23 @@ impl O3Engine {
 
     /// Copy initial architectural register values into the identity-mapped PRF slots.
     ///
-    /// Must be called after the CPU's architectural register file has been initialized
-    /// (e.g., with the stack pointer) but before the first pipeline tick. The rename
-    /// map identity-maps arch reg `i` → PhysReg(i) for GPRs and arch reg `i` →
-    /// PhysReg(32 + i) for FPRs, so we write the CPU's register values into those slots.
+    /// Must be called after CPU register init but before the first pipeline tick.
     pub fn sync_arch_regs(&mut self, cpu: &crate::core::Cpu) {
         use crate::common::RegIdx;
         use crate::core::pipeline::prf::PhysReg;
         use crate::core::units::vpu::types::VRegIdx;
-        // GPRs: arch reg i → PhysReg(i), skip x0 (hardwired zero)
         for i in 1u8..32 {
             let val = cpu.regs.read(RegIdx::new(i));
             if val != 0 {
                 self.prf.write(PhysReg(i as u16), val);
             }
         }
-        // FPRs: arch reg i → PhysReg(32 + i)
         for i in 0u8..32 {
             let val = cpu.regs.read_f(RegIdx::new(i));
             if val != 0 {
                 self.prf.write(PhysReg((32 + i) as u16), val);
             }
         }
-        // VPRs: arch reg i → VecPhysReg(i)
         for i in 0u8..32 {
             let vreg = VRegIdx::new(i);
             let bytes = cpu.regs.vpr().read_bytes(vreg);
@@ -262,42 +230,23 @@ impl O3Engine {
         }
     }
 
-    /// Compute the squash stall penalty in cycles.
-    ///
-    /// Models the physical bandwidth limit of walking the ROB during recovery.
-    /// The ROB has `width` read ports, so we can process at most `width` entries
-    /// per cycle. The flush detection cycle itself counts as the first processing
-    /// cycle, so the *additional* stall cycles are `ceil(entries / width) - 1`.
-    ///
-    /// `squashed`: number of entries being removed (ROB reclaim cost).
-    /// `surviving`: number of entries remaining (rename rebuild cost, 0 if checkpoint used).
+    /// Squash stall penalty: ROB has `width` read ports for reclaim + rename rebuild.
     fn compute_squash_stall(&self, squashed: usize, surviving: usize) -> u64 {
         let w = self.width.max(1);
-        // ROB squash walk: reclaiming squashed entries
         let squash_cycles = squashed.div_ceil(w).saturating_sub(1);
-        // Rename map rebuild: forward-walking surviving entries (only without checkpoint)
         let rebuild_cycles = surviving.div_ceil(w);
         (squash_cycles + rebuild_cycles) as u64
     }
 
-    /// Rebuild the speculative rename map after a partial flush (misprediction).
-    ///
-    /// Starts from the committed map and re-applies surviving ROB entries in order.
+    /// Rebuild the speculative rename map after a partial flush by replaying surviving ROB entries.
     fn rebuild_rename_map(&mut self) {
         self.rename_map = self.committed_rename_map.clone();
-        // Walk surviving ROB entries in program order (head → tail) and re-apply
-        // each entry's phys_dst mapping, restoring the speculative state.
         for entry in self.rob.iter_in_order() {
             if entry.ctrl.reg_write && !entry.rd.is_zero() {
                 self.rename_map.set(entry.rd, false, entry.phys_dst);
             } else if entry.ctrl.fp_reg_write {
                 self.rename_map.set(entry.rd, true, entry.phys_dst);
             }
-            // Re-apply vector destination mappings (same principle as scalar).
-            // Without this, a serializing vector instruction's flush reverts
-            // the rename map to committed state, losing the vector phys reg
-            // mappings and causing subsequent instructions to reference stale
-            // physical registers — leading to not-ready operands and deadlock.
             if entry.vec_dst_count > 0 {
                 let vd_base = entry.ctrl.vd.as_u8();
                 for i in 0..entry.vec_dst_count as usize {
@@ -308,20 +257,13 @@ impl O3Engine {
         }
     }
 
-    /// Wave-based vec mem op issue: pump pending element micro-ops from each
-    /// in-flight vec mem op into `vec_mem_pending`. Loads allocate per-element
-    /// LQ slots so the wave is bounded by LQ capacity; stores write into the
-    /// dedicated `vec_store_buffer` and don't touch the scalar SB.
+    /// Pump pending vec mem element micro-ops into `vec_mem_pending`, bounded by LQ capacity.
     fn issue_vec_mem_waves(&mut self) {
         for inflight in &mut self.vec_mem_inflight {
             while let Some(front) = inflight.pending_micro_ops.front() {
                 if !front.is_store {
                     let w = mem_width_from_eew_bytes(front.eew.bytes());
-                    if !self.load_queue.allocate(
-                        front.entry.rob_tag,
-                        w,
-                        Some(front.elem_idx),
-                    ) {
+                    if !self.load_queue.allocate(front.entry.rob_tag, w, Some(front.elem_idx)) {
                         break;
                     }
                 }
@@ -332,8 +274,7 @@ impl O3Engine {
     }
 }
 
-/// Convert an EEW byte count to the corresponding `MemWidth` for a vec
-/// element memory access. EEW is always 1/2/4/8 bytes for valid vec mem ops.
+/// Convert an EEW byte count (1/2/4/8) to the corresponding `MemWidth`.
 const fn mem_width_from_eew_bytes(bytes: usize) -> crate::core::pipeline::signals::MemWidth {
     use crate::core::pipeline::signals::MemWidth as MW;
     match bytes {
@@ -346,15 +287,11 @@ const fn mem_width_from_eew_bytes(bytes: usize) -> crate::core::pipeline::signal
 
 impl ExecutionEngine for O3Engine {
     fn tick(&mut self, cpu: &mut Cpu, rename_output: &mut Vec<RenameIssueEntry>) {
-        // Backend stages run in reverse order (drain from commit to issue)
         self.cycle += 1;
         self.mdp.tick();
         let now = self.cycle;
 
-        // Drain squash recovery stall: the ROB read ports are busy processing
-        // the squash walk (reclaiming entries / rebuilding rename map).
-        // Dispatch is blocked via can_accept() returning 0; all other stages
-        // (commit, writeback, memory) continue draining normally.
+        // Squash recovery: ROB read ports are busy with reclaim / rename rebuild.
         if self.squash_stall_remaining > 0 {
             self.squash_stall_remaining -= 1;
             cpu.stats.stalls_squash += 1;
@@ -362,7 +299,6 @@ impl ExecutionEngine for O3Engine {
 
         let pc_before_commit = cpu.pc;
 
-        // ── 1. Commit ──────────────────────────────────────────────────
         let trap_event = commit::commit_stage(
             cpu,
             &mut self.rob,
@@ -379,11 +315,8 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.vec_store_buffer),
         );
 
-        // Handle trap: flush everything
         if let Some((trap, pc)) = trap_event {
-            // Capture ROB occupancy before flush for squash stall calculation.
-            // Full flush: all entries squashed, 0 surviving, no rename rebuild needed
-            // (committed_rename_map is used directly).
+            // Full flush: committed_rename_map is used directly, no rebuild.
             let squashed = self.rob.len();
             self.flush(cpu);
             self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
@@ -393,7 +326,6 @@ impl ExecutionEngine for O3Engine {
             return;
         }
 
-        // Handle MRET/SRET redirect
         if cpu.pc != pc_before_commit {
             let squashed = self.rob.len();
             self.flush(cpu);
@@ -402,59 +334,28 @@ impl ExecutionEngine for O3Engine {
             return;
         }
 
-        // ── 2. Writeback + Wakeup ──────────────────────────���───────────
-        // Handle vector memory element micro-ops: intercept them before
-        // the normal writeback stage. For loads, write element data into
-        // vec_prf. For both loads and stores, decrement the parent's
-        // remaining counter. When all elements complete, mark ROB done
-        // and fire chaining wakeup.
+        // Intercept vec mem micro-ops before the normal writeback stage.
         {
             let mut scalar_wb = Vec::with_capacity(self.mem2_wb.len());
             let vec_entries = std::mem::take(&mut self.mem2_wb);
             for wb in vec_entries {
                 if let Some(ref vme) = wb.vec_mem {
-                    // Vector memory element writeback
                     if wb.trap.is_none() && !vme.is_store {
-                        // Load element: write data into correct vec_prf register.
-                        // Compute local element index within the physical register.
                         let vlen_bits = self.vec_prf.vlen().bits();
                         let eew_bits = vme.eew.bytes() * 8;
                         let elems_per_reg = if eew_bits > 0 { vlen_bits / eew_bits } else { 1 };
                         let local = ElemIdx::new(vme.elem_idx.as_usize() % elems_per_reg);
-                        self.vec_prf.write_element(
-                            vme.vd_phys,
-                            local,
-                            vme.eew,
-                            wb.load_data,
-                        );
+                        self.vec_prf.write_element(vme.vd_phys, local, vme.eew, wb.load_data);
                     }
-                    // Wave-based reclaim: free this load element's LQ slot.
-                    // Vec stores no longer take SB slots — their data lives
-                    // in the VSB (written by memory2).
                     if !vme.is_store {
                         self.load_queue.deallocate_elem(wb.rob_tag, vme.elem_idx);
                     }
-                    // Look up the parent inflight entry by rob_tag and
-                    // decrement its outstanding count. Linear scan over a few
-                    // in-flight vec mem ops — same cost as the previous
-                    // index-based lookup, with no extra indirection through a
-                    // separate parent_idx field.
-                    if let Some(parent) = self
-                        .vec_mem_inflight
-                        .iter_mut()
-                        .find(|m| m.rob_tag == wb.rob_tag)
+                    if let Some(parent) =
+                        self.vec_mem_inflight.iter_mut().find(|m| m.rob_tag == wb.rob_tag)
                     {
                         parent.remaining = parent.remaining.saturating_sub(1);
 
-                        // All elements done: mark vd ready, fire chaining
-                        // wakeup, and mark ROB complete. We wake only on full
-                        // completion (not on first element) because dependents
-                        // that read this vd as a source — including the
-                        // producer's own tail/mask-undisturbed merge — do a
-                        // bulk read across all elements at execute time. A
-                        // chaining wakeup at first element would let dependents
-                        // issue before later elements are written, reading
-                        // partial data. VSB owns drain bookkeeping for stores.
+                        // Fire chaining wakeup only on full completion: dependents bulk-read all elements.
                         if parent.remaining == 0 {
                             if !parent.wakeup_fired {
                                 for j in 0..parent.vd_count as usize {
@@ -469,7 +370,6 @@ impl ExecutionEngine for O3Engine {
                             self.rob.complete(parent.rob_tag, 0);
                         }
                     }
-                    // Do NOT pass to normal writeback — we handled it
                 } else {
                     scalar_wb.push(wb);
                 }
@@ -477,8 +377,7 @@ impl ExecutionEngine for O3Engine {
             self.mem2_wb = scalar_wb;
         }
 
-        // Peek at mem2_wb to know which entries will complete, so we can
-        // wakeup dependents in the issue queue via PRF.
+        // Snapshot completing wakeups before writeback so dependents can wake via PRF.
         let wb_wakeups: Vec<_> = self
             .mem2_wb
             .iter()
@@ -497,26 +396,22 @@ impl ExecutionEngine for O3Engine {
 
         writeback::writeback_stage(cpu, &mut self.mem2_wb, &mut self.rob);
 
-        // Broadcast wakeups to PRF + issue queue
         for (_tag, rd_phys, val) in &wb_wakeups {
             self.prf.write(*rd_phys, *val);
             self.issue_queue.wakeup_phys(*rd_phys, *val);
         }
 
-        // ── 2b. MSHR completions ─────────────────────────────────────
-        // Drain completed MSHRs: install cache lines in L1D and resume
-        // parked loads/atomics into the mem1→mem2 latch.
+        // Drain completed MSHRs: install lines in L1D and resume parked loads.
         if cpu.l1d_mshrs.capacity() > 0 {
             let completed = cpu.l1d_mshrs.drain_completions(now);
             for mshr_entry in completed {
-                // Install the fetched line into L1D (with eviction tracking)
+                // miss latency already covers the write-back penalty.
                 let (_penalty, evicted) = cpu.l1_d_cache.install_line_public_tracked(
                     mshr_entry.line_addr,
                     mshr_entry.is_write,
-                    0, // write-back penalty already accounted for in miss latency
+                    0,
                 );
 
-                // Exclusive policy: L1D eviction → install evicted line into L2
                 if cpu.inclusion_policy == crate::config::InclusionPolicy::Exclusive
                     && cpu.l2_cache.enabled
                     && let Some(ev) = evicted
@@ -525,10 +420,8 @@ impl ExecutionEngine for O3Engine {
                     cpu.stats.exclusive_l1_to_l2_swaps += 1;
                 }
 
-                // Resume parked loads/atomics
                 for waiter in mshr_entry.waiters {
                     if let Some(mut parked) = waiter.parked_entry {
-                        // Set the completion cycle to now (data just arrived)
                         parked.complete_cycle = now;
                         self.mem1_mem2.push(parked);
                     }
@@ -536,7 +429,6 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 3. Memory2 ────────────────────────────────────────────────
         let wb_before = self.mem2_wb.len();
         let mem_violation = memory2::memory2_stage(
             cpu,
@@ -547,7 +439,6 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.vec_store_buffer),
         );
 
-        // Notify MDP when stores resolve — wake instructions waiting on them.
         for entry in &self.mem2_wb[wb_before..] {
             if entry.ctrl.mem_write
                 && let Some(store_tag) = self.mdp.store_resolved(entry.rob_tag)
@@ -556,24 +447,12 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // Handle memory ordering violation: a store resolved its address and
-        // overlapped with a younger load that already executed with stale data.
-        // Flush from the violating load onward and redirect to re-fetch it.
         if let Some((violating_tag, store_pc)) = mem_violation {
-            // Find the violating load's PC from the ROB
             let violation_pc = self.rob.find_entry(violating_tag).map_or(cpu.pc, |e| e.pc);
 
-            // Train the memory dependence predictor: this load and store are dependent.
             self.mdp.violation(violation_pc, store_pc);
 
-            // keep_tag = tag before the violating load (everything older is kept).
-            // We need a tag that is actually present in the ROB so that
-            // flush_after() can locate it. The previous approach of
-            // `violating_tag - 1` created a synthetic tag that may have
-            // already been committed and removed from the ROB, causing
-            // flush_after() to silently no-op while free_list.reclaim()
-            // had already freed the physical registers — a use-after-free
-            // that led to register aliasing corruption.
+            // keep_tag must be a tag actually in the ROB; synthetic `tag-1` could be a use-after-free.
             let keep_tag = self.rob.prev_tag_of(violating_tag);
 
             cpu.stats.mem_ordering_violations += 1;
@@ -581,7 +460,6 @@ impl ExecutionEngine for O3Engine {
             cpu.stats.stalls_control += 1;
 
             if let Some(keep_tag) = keep_tag {
-                // Reclaim physical registers for squashed entries
                 for entry in self.rob.iter_after(keep_tag) {
                     self.free_list.reclaim(entry.phys_dst);
                     for i in 0..entry.vec_dst_count as usize {
@@ -607,14 +485,12 @@ impl ExecutionEngine for O3Engine {
                 self.vec_store_buffer.flush_after(keep_tag);
                 self.execute_mem1.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
 
-                // Memory violations never have checkpoints (the violating load
-                // is not a branch), so rename rebuild is always needed.
+                // The violating load is not a branch, so checkpoint rebuild always applies.
                 let surviving = self.rob.len();
                 self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
                 cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
             } else {
-                // The violating load is at the ROB head (no preceding entry),
-                // or the preceding entry was already committed. Full flush.
+                // Violating load is at ROB head (or older entry committed): full flush.
                 for entry in self.rob.iter_all() {
                     self.free_list.reclaim(entry.phys_dst);
                     for i in 0..entry.vec_dst_count as usize {
@@ -640,14 +516,11 @@ impl ExecutionEngine for O3Engine {
                 self.vec_store_buffer.flush_all();
                 self.execute_mem1.clear();
 
-                // Full flush: 0 surviving, no rename rebuild needed.
                 self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
             }
 
             self.rebuild_rename_map();
             self.scoreboard.rebuild_from_rob(&self.rob);
-            // Flush stale checkpoints (memory violations use rebuild_rename_map
-            // since the violating load is not a branch and has no checkpoint).
             if let Some(keep_tag) = keep_tag {
                 self.checkpoints.flush_after(keep_tag);
             } else {
@@ -660,10 +533,7 @@ impl ExecutionEngine for O3Engine {
             return;
         }
 
-        // ── 4. Memory1 ────────────────────────────────────────────────
-        // With MSHRs: misses are parked in MSHRs so memory1 can always
-        // accept new entries. Without MSHRs: gate on the oldest incomplete
-        // memory entry (blocking behavior).
+        // With MSHRs: misses park there, so memory1 always accepts. Without: gate on oldest incomplete.
         let has_mshrs = cpu.l1d_mshrs.capacity() > 0;
         let mem1_busy = !has_mshrs
             && self.mem1_mem2.iter().any(|e| {
@@ -681,28 +551,18 @@ impl ExecutionEngine for O3Engine {
                 now,
                 Some(&mut self.load_queue),
             );
-            // Cancel speculative wakeups for loads that missed L1D
             for phys in cancelled {
                 self.issue_queue.cancel_wakeup_phys(phys, &self.prf);
             }
         }
 
-        // ── 5. Backpressure check ──────────────────────────────────────
-        // Backpressured if execute_mem1 is not empty (memory pipeline in use)
-        // OR if there are pending memory results completing this cycle that will
-        // be pushed into execute_mem1 in step 6a.
-        // Memory pipeline backpressure: only when execute_mem1 has undrained
-        // entries (e.g. MSHR full pushback, trap). Pending results in
-        // pending_results are drained to execute_mem1 at step 6a AFTER issue
-        // at step 6, so there's no conflict — the Mem FU is pipelined and
-        // accepts a new op every cycle.
+        // Backpressure only on undrained execute_mem1; pending_results drains after issue.
         let mem_backpressured = !self.execute_mem1.is_empty();
 
         if mem_backpressured {
             cpu.stats.stalls_backpressure += 1;
         }
 
-        // ── 6a. Drain completed pending results ────────────────────────
         {
             let mut i = 0;
             while i < self.pending_results.len() {
@@ -711,42 +571,32 @@ impl ExecutionEngine for O3Engine {
                     let entry = pr.entry;
                     let fu_type = pr.fu_type;
 
-                    // Update FU utilization stat
                     cpu.stats.fu_utilization[fu_type as usize] += 1;
 
                     if entry.ctrl.mem_read
                         || entry.ctrl.mem_write
                         || entry.ctrl.atomic_op != crate::core::pipeline::signals::AtomicOp::None
                     {
-                        // Memory ops: push to memory pipeline
                         self.execute_mem1.push(entry);
                     } else if !pr.speculative_written {
-                        // Non-memory, non-pipelined (e.g. IntDiv, FpDivSqrt, system): write PRF + wakeup now
+                        // Non-pipelined non-mem (IntDiv, FpDivSqrt, system): write PRF + wakeup now.
                         let val = if entry.ctrl.control_flow == ControlFlow::Jump {
                             entry.pc.wrapping_add(entry.inst_size.as_u64())
                         } else {
                             entry.alu
                         };
-                        // Store fp_flags in the ROB now (same rationale as the
-                        // pipelined path — younger CSR reads need to see them).
                         if entry.fp_flags != 0 {
                             self.rob.set_fp_flags(entry.rob_tag, entry.fp_flags);
                         }
                         if let Some(info) = entry.sfence_vma {
                             self.rob.set_sfence_vma(entry.rob_tag, info);
                         }
-                        // CSR writes are deferred to commit (shared/commit.rs)
-                        // to prevent speculative CSR state from persisting if
-                        // an older instruction traps.
+                        // CSR writes deferred to commit so speculative state isn't observed on trap.
                         self.rob.complete(entry.rob_tag, val);
                         self.prf.write(entry.rd_phys, val);
                         self.issue_queue.wakeup_phys(entry.rd_phys, val);
-                        // ROB Completed, PRF written, wakeup done — skip memory pipeline.
                     } else {
-                        // Pipelined non-memory: ROB already Completed, PRF written,
-                        // wakeup broadcast at issue time — no need to traverse the
-                        // memory pipeline (memory1 → memory2 → writeback). Commit
-                        // will retire directly from the ROB.
+                        // Pipelined non-mem already retired at issue; commit retires from ROB.
                     }
                 } else {
                     i += 1;
@@ -754,11 +604,7 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 6a'. Wave-based vec mem op issue → drain to memory pipeline ──
-        // First, refill vec_mem_pending from each in-flight vec mem op's
-        // pending_micro_ops queue, allocating LQ/SB slots as capacity allows.
-        // Then push from vec_mem_pending into execute_mem1, bounded by
-        // load_ports / store_ports per cycle.
+        // Refill vec_mem_pending from in-flight vec mem ops, then drain to execute_mem1.
         self.issue_vec_mem_waves();
         {
             let mut loads_issued = 0usize;
@@ -780,12 +626,10 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 6b. Process vector pending results (chaining model) ──────
         {
             let mut i = 0;
             while i < self.vec_pending.len() {
                 let vp = &mut self.vec_pending[i];
-                // At first_group_ready: mark vec PRF ready, broadcast wakeup (chaining)
                 if !vp.wakeup_fired && now >= vp.first_group_ready {
                     for j in 0..vp.vd_count as usize {
                         self.vec_prf.mark_ready(vp.vd_phys[j]);
@@ -795,13 +639,7 @@ impl ExecutionEngine for O3Engine {
                     }
                     vp.wakeup_fired = true;
                 }
-                // At full_complete: mark ROB entry complete, remove from pending.
-                // Some configurations (e.g. vl=0 ops with startup_latency >
-                // body latency) reach full_complete before first_group_ready;
-                // in that case, fire the chaining wakeup *now* — otherwise
-                // the entry would be removed without ever marking the
-                // destination phys regs ready, leaving any dependent in the
-                // IQ stuck forever.
+                // Some vl=0 ops reach full_complete before first_group_ready; wake here too.
                 if now >= vp.full_complete {
                     if !vp.wakeup_fired {
                         for j in 0..vp.vd_count as usize {
@@ -820,10 +658,7 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 6. Issue + Execute ─────────────────────────────────────────
-        // `flush_keep_tag`: the rob_tag of the instruction that triggered a
-        // flush (branch misprediction, CSR, FENCE.I, etc.).  Set when any
-        // issued instruction returns needs_flush=true.
+        // Set when any issued instruction returns needs_flush=true.
         let mut flush_keep_tag: Option<crate::core::pipeline::rob::RobTag> = None;
 
         {
@@ -846,9 +681,7 @@ impl ExecutionEngine for O3Engine {
                 let rob_tag = entry.rob_tag;
                 let is_mem_instr = entry.ctrl.mem_read || entry.ctrl.mem_write;
 
-                // Memory pipeline backpressure: block memory ops from issuing
-                // when the memory pipeline is busy, but allow non-memory ops
-                // (ALU, branch) to continue issuing freely.
+                // Backpressure blocks memory ops only; ALU/branch continue freely.
                 if mem_backpressured && fu_type == FuType::Mem {
                     let ok = self.issue_queue.dispatch(
                         entry,
@@ -862,11 +695,7 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
-                // Vector stores need a free Vec Store Buffer entry. Stall the
-                // op back into the IQ if the VSB is full; same shape as the
-                // memory-backpressure stall above. This is a structural
-                // hazard from the dedicated vec-store queue, parallel to the
-                // scalar SB pre-check at rename.
+                // Structural hazard: stall vec stores back to IQ if the VSB is full.
                 if fu_type == FuType::VecMem
                     && is_vec_store(entry.ctrl.vec_op)
                     && self.vec_store_buffer.free_slots() == 0
@@ -884,12 +713,9 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
-                // Check for structural hazard (no free FU of required type)
                 if !self.fu_pool.has_free(fu_type, now) {
                     cpu.stats.stalls_fu_structural += 1;
                     stalled_fu = true;
-                    // Leave entry in IQ (select already removed it — re-dispatch needed)
-                    // For simplicity: re-dispatch back into IQ
                     let ok = self.issue_queue.dispatch(
                         entry,
                         &self.rob,
@@ -902,14 +728,11 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
-                // Instruction is truly issuing — notify MDP to clean up dep record.
                 if is_mem_instr {
                     self.mdp.issued(rob_tag);
                 }
 
-                // ── Determine if this is a vector non-memory op ────────────
-                // vsetvl* are handled synchronously in execute_one (serializing
-                // CSR-updating ops); exclude them from the deferred VecPrfView path.
+                // vsetvl* run synchronously in execute_one; exclude from deferred VecPrfView.
                 let is_vec_non_mem = fu_type.is_vector()
                     && fu_type != FuType::VecMem
                     && !matches!(
@@ -918,11 +741,7 @@ impl ExecutionEngine for O3Engine {
                     );
                 let is_vec_mem_op = fu_type == FuType::VecMem;
 
-                // Save vector destination info before execute_one consumes the entry.
-                // For vec mem ops the dest group spans `nf × EMUL_data`
-                // registers, not just LMUL — match what rename allocated by
-                // overriding from vec_mem_dst_count (operand_groups can't
-                // compute it without the architectural vtype).
+                // For vec mem ops, override vd group from vec_mem_dst_count (nf × EMUL_data).
                 let mut vec_grp = entry.ctrl.vec_op.operand_groups(
                     entry.ctrl.vec_lmul_regs,
                     entry.ctrl.vec_lmul_is_fractional,
@@ -931,8 +750,7 @@ impl ExecutionEngine for O3Engine {
                     entry.ctrl.vec_broadcast_vs2,
                 );
                 if is_vec_mem_op {
-                    let vtype =
-                        crate::core::units::vpu::types::parse_vtype(entry.vec_vtype);
+                    let vtype = crate::core::units::vpu::types::parse_vtype(entry.vec_vtype);
                     if !vtype.vill {
                         vec_grp.vd = crate::core::units::vpu::mem::vec_mem_dst_count(
                             entry.ctrl.vec_op,
@@ -949,20 +767,13 @@ impl ExecutionEngine for O3Engine {
                     None
                 };
 
-                // For non-vsetvl vector ops: save entry for deferred execution
-                // via VecPrfView (execute_one won't execute them).
-                let saved_entry = if is_vec_non_mem || is_vec_mem_op {
-                    Some(entry.clone())
-                } else {
-                    None
-                };
+                let saved_entry =
+                    if is_vec_non_mem || is_vec_mem_op { Some(entry.clone()) } else { None };
 
-                // For vector non-memory ops, compute realistic lane-model latency
-                // instead of using the fixed FU latency.
                 let (complete_cycle, is_pipelined) = if is_vec_non_mem {
+                    use crate::core::pipeline::signals::VectorOp;
                     use crate::core::units::vpu::lane_model;
                     use crate::core::units::vpu::reduction;
-                    use crate::core::pipeline::signals::VectorOp;
 
                     let vl = entry.vec_vl as usize;
                     let startup = self.fu_pool.startup_latency(fu_type);
@@ -972,65 +783,38 @@ impl ExecutionEngine for O3Engine {
                     let lanes = self.num_vec_lanes.as_usize();
 
                     let latency = if reduction::is_reduction(vec_op) {
-                        // Ordered FP reductions (VFRedOSum, VFWRedOSum) are
-                        // fully sequential; all others use the tree model.
-                        let is_ordered = matches!(
-                            vec_op,
-                            VectorOp::VFRedOSum | VectorOp::VFWRedOSum
-                        );
-                        lane_model::compute_reduction_latency(
-                            vl,
-                            lanes,
-                            startup,
-                            is_ordered,
-                        )
+                        // Ordered FP reductions are sequential; others use the tree model.
+                        let is_ordered =
+                            matches!(vec_op, VectorOp::VFRedOSum | VectorOp::VFWRedOSum);
+                        lane_model::compute_reduction_latency(vl, lanes, startup, is_ordered)
                     } else if fu_type == FuType::VecPermute {
-                        // Permutation-specific latency multipliers
                         let groups = (vl.div_ceil(lanes)) as u64;
                         let base_latency = match vec_op {
-                            // vrgather.vv: crossbar, 2× cost per group
                             VectorOp::VRgather | VectorOp::VRgatherEi16
                                 if entry.ctrl.vec_src_encoding
                                     == crate::core::pipeline::signals::VecSrcEncoding::VV =>
                             {
                                 startup + groups.saturating_mul(2).saturating_sub(1)
                             }
-                            // vrgather.vx/vi: broadcast, 1× cost per group
                             VectorOp::VRgather | VectorOp::VRgatherEi16 => {
                                 startup + groups.saturating_sub(1)
                             }
-                            // vcompress: scan + compact, 2× cost per group
                             VectorOp::VCompress => {
                                 startup + groups.saturating_mul(2).saturating_sub(1)
                             }
-                            // vslide*: shift, 1× cost per group
-                            _ => {
-                                lane_model::compute_vec_latency(
-                                    vl,
-                                    lanes,
-                                    startup,
-                                    pipelined,
-                                )
-                            }
+                            _ => lane_model::compute_vec_latency(vl, lanes, startup, pipelined),
                         };
                         base_latency.max(1)
                     } else {
-                        lane_model::compute_vec_latency(
-                            vl,
-                            lanes,
-                            startup,
-                            pipelined,
-                        )
+                        lane_model::compute_vec_latency(vl, lanes, startup, pipelined)
                     };
                     let cc = self.fu_pool.acquire_with_latency(fu_type, now, latency);
                     (cc, pipelined)
                 } else if is_vec_mem_op {
-                    // Vector memory: acquire the VecMem FU for 1 cycle (address gen).
-                    // Actual latency comes from micro-ops flowing through Memory1/2.
+                    // VecMem FU is 1 cycle (address gen); micro-op latency comes from Memory1/2.
                     let cc = self.fu_pool.acquire(fu_type, now);
                     (cc, true)
                 } else {
-                    // Scalar path: unchanged
                     let cc = self.fu_pool.acquire(fu_type, now);
                     let p = self.fu_pool.is_pipelined(fu_type);
                     (cc, p)
@@ -1039,7 +823,6 @@ impl ExecutionEngine for O3Engine {
                 let (ex_result, flush) = execute::execute_one(cpu, entry, &mut self.rob);
                 issued_count += 1;
 
-                // ── Vector non-memory path: execute via VecPrfView ───────
                 if is_vec_non_mem
                     && ex_result.trap.is_none()
                     && let Some(saved) = saved_entry.as_ref()
@@ -1047,26 +830,12 @@ impl ExecutionEngine for O3Engine {
                     use crate::core::units::vpu::execute::execute_vec_op_on;
                     use crate::core::units::vpu::lane_model;
 
-                    // Build arch→phys mapping using RENAME-TIME physical registers.
-                    //
-                    // Using the current speculative rename map would be wrong when a
-                    // later instruction has already renamed the same architectural vector
-                    // register: this instruction's write would land in the wrong physical
-                    // register, corrupting the register-renaming chain.
-                    //
-                    // Strategy:
-                    //  1. Start from the current rename map (baseline for untouched regs).
-                    //  2. Override the specific registers this instruction touches with the
-                    //     physical registers captured at rename time.
-                    //  3. For the destination group (vd): pre-copy old-vd data into the new
-                    //     physical registers so that tail/mask-undisturbed reads see the
-                    //     correct old content; then point the mapping to the new physregs.
+                    // Build arch→phys mapping from rename-time physregs so later renames don't alias.
                     let mut mapping = [VecPhysReg::ZERO; 32];
                     for i in 0..32u8 {
                         mapping[i as usize] = self.rename_map.get_vec(VRegIdx::new(i));
                     }
 
-                    // Override vs2 group with rename-time physregs
                     {
                         let base = saved.ctrl.vs2.as_u8() as usize;
                         for i in 0..saved.vec_src2_count as usize {
@@ -1075,7 +844,6 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
-                    // Override vs1 group with rename-time physregs (VV-encoded only)
                     {
                         let base = saved.ctrl.vs1.as_u8() as usize;
                         for i in 0..saved.vec_src1_count as usize {
@@ -1084,15 +852,11 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
-                    // Override vd group: pre-copy old vd data for undisturbed policy,
-                    // then point the mapping to the newly-allocated physregs.
                     if let Some((vd_phys_arr, vd_cnt, vd_reg)) = vec_dst_info {
                         let base = vd_reg.as_u8() as usize;
                         for i in 0..vd_cnt as usize {
                             if base + i < 32 {
-                                // Pre-copy old vd content → new physreg so that
-                                // tail/mask-undisturbed reads (and any LMUL scatter) get
-                                // the correct baseline before active elements are written.
+                                // Pre-copy old vd so tail/mask-undisturbed reads see correct baseline.
                                 if i < saved.vec_src3_count as usize {
                                     self.vec_prf.copy_reg(vd_phys_arr[i], saved.vs3_phys[i]);
                                 }
@@ -1100,14 +864,11 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
-                    // Override v0 mask register with rename-time physreg
                     if !saved.mask_phys.is_zero() {
                         mapping[0] = saved.mask_phys;
                     }
 
-                    // Execute via VecPrfView — reads/writes go to vec_prf, NOT arch VPR.
-                    // Use dispatch-time CSR snapshot so that in-flight vsetvl instructions
-                    // don't corrupt the vtype/vl seen by this vector op.
+                    // Use dispatch-time CSR snapshot so in-flight vsetvl can't corrupt vtype/vl.
                     let vec_result_or_trap = {
                         let mut view = VecPrfView::new(&mut self.vec_prf, mapping);
                         execute_vec_op_on(
@@ -1126,8 +887,6 @@ impl ExecutionEngine for O3Engine {
                     let vec_result = match vec_result_or_trap {
                         Ok(r) => r,
                         Err(trap) => {
-                            // vill=1 → illegal instruction. Mark ROB faulted and skip
-                            // the rest of vector result handling.
                             self.rob.fault(
                                 ex_result.rob_tag,
                                 trap,
@@ -1137,7 +896,6 @@ impl ExecutionEngine for O3Engine {
                         }
                     };
 
-                    // Store deferred side effects in ROB for commit-time application
                     if vec_result.fp_flags != 0 {
                         self.rob.set_fp_flags(ex_result.rob_tag, vec_result.fp_flags);
                     }
@@ -1148,13 +906,8 @@ impl ExecutionEngine for O3Engine {
                     let startup = self.fu_pool.startup_latency(fu_type);
                     let first_ready = lane_model::first_group_ready(now, startup);
 
-                    // For vector ops that produce scalar results (vmv.x.s, vcpop.m,
-                    // vfirst.m) — they don't write vector regs, so use scalar path
-                    // with vector latency for the FU occupancy.
+                    // Scalar-result vec ops (vmv.x.s, vcpop.m, vfirst.m) take the scalar path.
                     if ex_result.ctrl.vec_reg_write {
-                        // Vector-register-writing op: push to vec_pending for
-                        // chaining wakeup at first_group_ready, ROB complete at
-                        // full_complete.
                         let vd_count = vec_dst_info.map_or(0u8, |(_, c, _)| c);
                         let vd_phys_arr = vec_dst_info.map_or([VecPhysReg::ZERO; 8], |(p, _, _)| p);
                         self.vec_pending.push(VecPendingResult {
@@ -1184,7 +937,6 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
-                // ── Vector memory path: generate micro-ops via VecPrfView ──
                 if is_vec_mem_op
                     && ex_result.trap.is_none()
                     && let Some(saved) = saved_entry.as_ref()
@@ -1194,10 +946,7 @@ impl ExecutionEngine for O3Engine {
                     let vd_count = vec_dst_info.map_or(0u8, |(_, c, _)| c);
                     let vd_phys_arr = vec_dst_info.map_or([VecPhysReg::ZERO; 8], |(p, _, _)| p);
 
-                    // Reject illegal EMUL (>8) before generating micro-ops;
-                    // generate_element_addrs_vrf would otherwise compute a
-                    // VRegIdx beyond 31 and panic. Both InOrder and O3 share
-                    // this check via mem::check_vec_mem_emul.
+                    // Reject illegal EMUL (>8) before generate_element_addrs_vrf would panic.
                     let vtype = crate::core::units::vpu::types::parse_vtype(saved.vec_vtype);
                     if let Err(trap) = crate::core::units::vpu::mem::check_vec_mem_emul(
                         ex_result.inst,
@@ -1213,16 +962,10 @@ impl ExecutionEngine for O3Engine {
                         continue;
                     }
 
-                    // Build VecPrfView with rename-time physregs for the
-                    // operands this vec mem op reads. Without these overrides,
-                    // a younger instruction that has re-renamed e.g. v1 would
-                    // cause our store to read the newer mapping's data — wrong.
-                    // Mirrors the vec_arith path's mapping construction.
                     let mut mapping = [VecPhysReg::ZERO; 32];
                     for i in 0..32u8 {
                         mapping[i as usize] = self.rename_map.get_vec(VRegIdx::new(i));
                     }
-                    // Override vs2 (index source for indexed loads/stores).
                     {
                         let base = saved.ctrl.vs2.as_u8() as usize;
                         for i in 0..saved.vec_src2_count as usize {
@@ -1231,9 +974,6 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
-                    // Override vd: for stores it's the data source (vs3 in
-                    // rename-time terms); for loads it's the old vd content
-                    // we need for tail/mask-undisturbed merging.
                     {
                         let base = saved.ctrl.vd.as_u8() as usize;
                         for i in 0..saved.vec_src3_count as usize {
@@ -1242,11 +982,6 @@ impl ExecutionEngine for O3Engine {
                             }
                         }
                     }
-                    // Override v0 mask with the rename-time physreg. Without
-                    // this, a younger instruction that re-renamed v0 (e.g. the
-                    // next subtest's `vle32.v v0`) makes our masked vec mem op
-                    // read the newer mapping, producing the wrong active-element
-                    // set. Mirrors the vec_arith path's mask override.
                     if !saved.mask_phys.is_zero() {
                         mapping[0] = saved.mask_phys;
                     }
@@ -1254,8 +989,8 @@ impl ExecutionEngine for O3Engine {
                         let view = VecPrfView::new(&mut self.vec_prf, mapping);
                         generate_element_addrs_vrf(
                             &view,
-                            ex_result.alu,                // base address (rs1)
-                            ex_result.store_data as i64,  // stride (rs2)
+                            ex_result.alu,
+                            ex_result.store_data as i64,
                             &saved.ctrl,
                             saved.vec_vtype,
                             saved.vec_vl as usize,
@@ -1266,38 +1001,19 @@ impl ExecutionEngine for O3Engine {
                         )
                     };
 
-                    // Pre-copy old vd into the freshly-renamed physregs so
-                    // tail and mask-undisturbed elements observe the
-                    // architectural prior value once writeback writes the
-                    // active elements. Without this, the new physreg would
-                    // carry whatever stale bytes the free list happened to
-                    // hand back, and dependent reads through the new mapping
-                    // would see garbage past `vl`. Stores have no
-                    // destination so vec_src3_count == 0 and the loop is a
-                    // no-op for them.
-                    if !is_store
-                        && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info
-                    {
-                        let copy_count = (vd_cnt_pre as usize)
-                            .min(saved.vec_src3_count as usize);
+                    // Pre-copy old vd so tail / mask-undisturbed elements observe prior values.
+                    if !is_store && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info {
+                        let copy_count = (vd_cnt_pre as usize).min(saved.vec_src3_count as usize);
                         for (i, &dst) in vd_phys_arr_pre.iter().enumerate().take(copy_count) {
                             self.vec_prf.copy_reg(dst, saved.vs3_phys[i]);
                         }
                     }
 
                     if micro_ops.is_empty() {
-                        // VL=0 or vill=1: no element micro-ops to issue, but
-                        // the freshly-renamed destination physregs are still
-                        // live and must surface as ready by the time the FU
-                        // would have signalled writeback. Route through
-                        // vec_pending — it owns chaining wakeup and ROB
-                        // complete at the correct cycles and matches the
-                        // deferred-FU model used by vec arith.
+                        // VL=0 / vill=1: route through vec_pending so destination physregs surface ready.
                         let startup = self.fu_pool.startup_latency(fu_type);
                         let first_ready =
-                            crate::core::units::vpu::lane_model::first_group_ready(
-                                now, startup,
-                            );
+                            crate::core::units::vpu::lane_model::first_group_ready(now, startup);
                         self.vec_pending.push(VecPendingResult {
                             rob_tag: ex_result.rob_tag,
                             vd_phys: vd_phys_arr,
@@ -1307,13 +1023,7 @@ impl ExecutionEngine for O3Engine {
                             wakeup_fired: false,
                         });
                     } else {
-                        // Build all element micro-ops up front. They will be
-                        // released into the memory pipeline in waves by
-                        // issue_vec_mem_waves; loads bound on LQ capacity,
-                        // stores stream straight through (data lives in VSB).
-                        // Each micro-op carries the parent's vec_op intact;
-                        // memory1/memory2 distinguish vec elements from scalar
-                        // via `vec_mem.is_some()`, not by mutating ctrl.
+                        // Build all micro-ops up front; issue_vec_mem_waves releases them in waves.
                         let total = micro_ops.len();
                         let mut all_micro_ops: std::collections::VecDeque<VecMemMicroOp> =
                             std::collections::VecDeque::with_capacity(total);
@@ -1355,8 +1065,6 @@ impl ExecutionEngine for O3Engine {
                         }
 
                         if is_store {
-                            // Reserve a VSB slot for this vec store. The VSB-full
-                            // pre-check above already gated issue, so this must succeed.
                             let ok = self.vec_store_buffer.allocate(ex_result.rob_tag, total);
                             debug_assert!(ok, "VSB allocate failed despite pre-check");
                         }
@@ -1379,13 +1087,11 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
-                // ── Scalar path (unchanged) ────────────────────────────────
                 let is_mem = ex_result.ctrl.mem_read
                     || ex_result.ctrl.mem_write
                     || ex_result.ctrl.atomic_op != crate::core::pipeline::signals::AtomicOp::None;
 
-                // For pipelined non-memory instructions: speculative wakeup immediately
-                // so dependent instructions can be selected on the very next cycle.
+                // Pipelined non-mem: wake dependents immediately so they can issue next cycle.
                 let speculative_written = if !is_mem && is_pipelined && ex_result.trap.is_none() {
                     let val = if ex_result.ctrl.control_flow == ControlFlow::Jump {
                         ex_result.pc.wrapping_add(ex_result.inst_size.as_u64())
@@ -1406,8 +1112,7 @@ impl ExecutionEngine for O3Engine {
                     false
                 };
 
-                // Speculative load wakeup: when a load issues and MSHRs are
-                // available, optimistically wake dependents assuming L1D hit.
+                // Speculative load wakeup assuming L1D hit (only if MSHRs are configured).
                 let is_load = ex_result.ctrl.mem_read && !ex_result.ctrl.mem_write;
                 if is_load && ex_result.trap.is_none() && cpu.l1d_mshrs.capacity() > 0 {
                     self.issue_queue.speculative_wakeup_phys(ex_result.rd_phys);
@@ -1432,12 +1137,10 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 7. Handle flush on misprediction/serializing ───────────────
         if let Some(keep_tag) = flush_keep_tag {
             cpu.stats.stalls_control += 1;
             cpu.stats.pipeline_flushes += 1;
 
-            // Classify flush source: branch/jump misprediction vs serializing system op
             if let Some(entry) = self.rob.find_entry(keep_tag) {
                 if matches!(entry.ctrl.control_flow, ControlFlow::Branch | ControlFlow::Jump) {
                     cpu.stats.flushes_branch += 1;
@@ -1445,35 +1148,25 @@ impl ExecutionEngine for O3Engine {
                     cpu.stats.flushes_system += 1;
                 }
             } else {
-                // Entry already committed — was a serializing instruction
                 cpu.stats.flushes_system += 1;
             }
 
             rename_output.clear();
 
-            // Check whether keep_tag is still in the ROB. It may have been
-            // committed in step 1 of this same tick (e.g. a CSR that both
-            // commits and triggers a redirect in the same cycle). If it was
-            // already committed, flush ALL in-flight entries (they are all
-            // younger than the committed instruction).
+            // keep_tag may have been committed in step 1; if so, flush everything younger.
             let keep_in_rob = self.rob.find_entry(keep_tag).is_some();
 
             let squashed: usize;
             if keep_in_rob {
-                // Count squashed entries for misprediction penalty stat
                 squashed = self.rob.iter_after(keep_tag).count();
                 cpu.stats.misprediction_penalty += squashed as u64;
-                // Reclaim physical registers for squashed ROB entries before flushing
                 for entry in self.rob.iter_after(keep_tag) {
                     self.free_list.reclaim(entry.phys_dst);
                     for i in 0..entry.vec_dst_count as usize {
                         self.vec_free_list.reclaim(entry.vec_phys_dst[i]);
                     }
                 }
-                // Use flush_after (NOT flush) — older IQ entries that haven't
-                // been issued yet (waiting on operands) must survive; flushing
-                // them would leave their ROB slots stuck in Issued forever,
-                // deadlocking the pipeline.
+                // flush_after, not flush: older un-issued IQ entries must survive or deadlock the pipeline.
                 self.issue_queue.flush_after(keep_tag);
                 self.rob.flush_after(keep_tag);
                 self.store_buffer.flush_after(keep_tag);
@@ -1481,8 +1174,7 @@ impl ExecutionEngine for O3Engine {
                 self.mdp.flush_after(keep_tag, &self.rob);
                 cpu.l1d_mshrs.flush_after(keep_tag);
             } else {
-                // keep_tag was already committed — flush ALL in-flight entries.
-                // Reclaim physical registers for all remaining ROB entries.
+                // keep_tag already committed: flush everything in-flight.
                 for entry in self.rob.iter_all() {
                     self.free_list.reclaim(entry.phys_dst);
                     for i in 0..entry.vec_dst_count as usize {
@@ -1498,7 +1190,6 @@ impl ExecutionEngine for O3Engine {
                 self.mdp.flush();
                 cpu.l1d_mshrs.flush();
             }
-            // Filter stale (wrong-path) entries from inter-stage latches and pending.
             self.mem1_mem2.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
             self.mem2_wb.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
             self.pending_results.retain(|p| p.entry.rob_tag.is_older_or_eq(keep_tag));
@@ -1507,12 +1198,7 @@ impl ExecutionEngine for O3Engine {
             self.vec_mem_inflight.retain(|m| m.rob_tag.is_older_or_eq(keep_tag));
             self.vec_store_buffer.flush_after(keep_tag);
             self.execute_mem1.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
-            // Restore speculative rename map: try checkpoint (O(1)), fallback to rebuild (O(n)).
-            // With a checkpoint, the rename map is restored in O(1) from the snapshot
-            // RAM — no ROB walk needed, so surviving=0 for the stall calculation.
-            // Without a checkpoint (CSR/FENCE/no-checkpoint-config), the rename map
-            // must be rebuilt by forward-walking surviving ROB entries, adding
-            // ceil(surviving / width) stall cycles on top of the squash walk.
+            // Restore speculative rename map: checkpoint (O(1)) or forward ROB walk rebuild.
             let surviving = self.rob.len();
             if self.checkpoints.capacity() > 0 {
                 if let Some(ckpt) = self.checkpoints.find_by_tag(keep_tag) {
@@ -1522,26 +1208,21 @@ impl ExecutionEngine for O3Engine {
                     cpu.csrs.frm = ckpt.frm;
                     cpu.csrs.vxrm = ckpt.vxrm;
                     cpu.csrs.vstart = ckpt.vstart;
-                    // Checkpoint found: O(1) rename restore, no rebuild penalty.
                     self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
                 } else {
-                    self.rebuild_rename_map(); // non-branch flush (CSR/FENCE)
-                    // No checkpoint: must pay rebuild cost for surviving entries.
+                    self.rebuild_rename_map();
                     self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
                     cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
                 }
                 self.checkpoints.flush_after(keep_tag);
             } else {
                 self.rebuild_rename_map();
-                // No checkpoint support: always pay rebuild cost.
                 self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
                 cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
             }
-            // Scoreboard is still used by in-order; rebuild from remaining ROB entries
             self.scoreboard.rebuild_from_rob(&self.rob);
         }
 
-        // ── 8. Dispatch from rename into issue queue ───────────────────
         if flush_keep_tag.is_none() {
             let entries = std::mem::take(rename_output);
             for entry in entries {
@@ -1560,7 +1241,6 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 9. Snapshot MDP stats ────────────────────────────────────────
         let mdp_stats = self.mdp.stats();
         cpu.stats.mdp_predictions_bypass = mdp_stats.predictions_bypass;
         cpu.stats.mdp_predictions_wait_all = mdp_stats.predictions_wait_all;
@@ -1569,9 +1249,7 @@ impl ExecutionEngine for O3Engine {
     }
 
     fn can_accept(&self) -> usize {
-        // Block dispatch while the squash recovery walk is in progress.
-        // The ROB read ports are busy reclaiming squashed entries / rebuilding
-        // the rename map, so the rename stage cannot dispatch new instructions.
+        // Squash recovery monopolises ROB read ports; rename can't dispatch during it.
         if self.squash_stall_remaining > 0 {
             return 0;
         }
@@ -1591,20 +1269,15 @@ impl ExecutionEngine for O3Engine {
     }
 
     fn flush(&mut self, cpu: &mut Cpu) {
-        // Drain committed VSB writes to memory before tearing down speculative
-        // structures. Trap-driven flushes still owe architectural writes for
-        // any vec store that retired before the trap fired.
+        // Drain committed VSB writes; trap-driven flushes still owe pre-trap retired stores.
         self.vec_store_buffer.drain_all_committed(cpu);
 
-        // Reclaim all phys_dst regs for every in-flight ROB entry
         for entry in self.rob.iter_all() {
             self.free_list.reclaim(entry.phys_dst);
-            // Reclaim vector physical destinations
             for i in 0..entry.vec_dst_count as usize {
                 self.vec_free_list.reclaim(entry.vec_phys_dst[i]);
             }
         }
-        // Restore speculative rename map to committed state
         self.rename_map = self.committed_rename_map.clone();
 
         self.rob.flush_all();
@@ -1614,9 +1287,7 @@ impl ExecutionEngine for O3Engine {
         self.issue_queue.flush();
         self.mdp.flush();
         self.checkpoints.flush_all();
-        // Note: squash_stall_remaining is NOT cleared here — the caller
-        // (trap/MRET paths) sets it after this call. External callers that
-        // need a hard reset should clear it explicitly.
+        // Caller sets squash_stall_remaining after this; not cleared here.
         self.pending_results.clear();
         self.vec_pending.clear();
         self.vec_mem_pending.clear();
@@ -1625,25 +1296,19 @@ impl ExecutionEngine for O3Engine {
         self.execute_mem1.clear();
         self.mem1_mem2.clear();
         self.mem2_wb.clear();
-        // Flush all MSHRs — their parked entries are now invalid
         cpu.l1d_mshrs.flush();
-        // Reset speculative GHR to committed state — wrong-path branch
-        // outcomes may have been pushed into the speculative history.
         cpu.branch_predictor.repair_to_committed();
 
-        // Invariant check: after a full flush the total number of physical
-        // registers must be conserved.  Every phys reg is either free OR
-        // referenced by the committed rename map (one unique phys reg per
-        // architectural register).
+        // Conservation invariant: every phys reg is either free or held by the committed map.
         debug_assert_eq!(
-            self.free_list.available() + 64, // 32 GPR + 32 FPR mapped
+            self.free_list.available() + 64,
             self.prf.capacity(),
             "PRF register leak detected: free={} + 64 mapped != {} total",
             self.free_list.available(),
             self.prf.capacity(),
         );
         debug_assert_eq!(
-            self.vec_free_list.available() + 32, // 32 VPR mapped
+            self.vec_free_list.available() + 32,
             self.vec_prf.capacity(),
             "Vec PRF register leak detected: free={} + 32 mapped != {} total",
             self.vec_free_list.available(),

@@ -14,10 +14,6 @@ use crate::core::units::vpu::alu::{VecExecCtx, VecExecResult, VecOperand};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::vpu::types::{ElemIdx, Sew, VRegIdx, Vlmax};
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Returns `true` if `op` is a permutation operation handled by this module.
 pub const fn is_permute(op: VectorOp) -> bool {
     matches!(
@@ -69,10 +65,6 @@ pub fn vec_permute_execute(
     }
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
 /// Read v0 mask bit for element `i`.
 #[inline]
 fn mask_active(vpr: &impl VectorRegFile, i: usize) -> bool {
@@ -110,10 +102,6 @@ const fn no_flags_result(scalar: Option<u64>) -> VecExecResult {
     VecExecResult { vxsat: false, scalar_result: scalar, fp_flags: FpFlags::NONE }
 }
 
-// ============================================================================
-// Scalar moves
-// ============================================================================
-
 /// `vmv.x.s` — move vs2[0] to a scalar GPR result.
 ///
 /// Reads element 0 of `vs2` at the current SEW and returns it as the scalar
@@ -137,12 +125,10 @@ fn exec_vmv_sx(
 ) -> VecExecResult {
     let scalar = scalar_from_operand(operand1, ctx.sew);
 
-    // Write element 0 if vl > 0.
     if ctx.vl > 0 {
         vpr.write_element(vd, ElemIdx::new(0), ctx.sew, scalar);
     }
 
-    // Tail policy for elements 1..vlmax.
     if ctx.vta.is_agnostic() {
         let vlmax = Vlmax::compute(vpr.vlen(), ctx.sew, ctx.vlmul).as_usize();
         for i in 1..vlmax {
@@ -152,10 +138,6 @@ fn exec_vmv_sx(
 
     no_flags_result(None)
 }
-
-// ============================================================================
-// Slides
-// ============================================================================
 
 /// `vslideup` — slide elements up by a given offset.
 ///
@@ -179,15 +161,12 @@ fn exec_slideup(
             continue;
         }
         if i >= ctx.vl {
-            // Tail element.
             if ctx.vta.is_agnostic() {
                 vpr.write_element(vd, ElemIdx::new(i), ctx.sew, ctx.sew.ones());
             }
             continue;
         }
-        // Active body element.
         if !ctx.vm && !mask_active(vpr, i) {
-            // Masked-off.
             if ctx.vma.is_agnostic() {
                 vpr.write_element(vd, ElemIdx::new(i), ctx.sew, ctx.sew.ones());
             }
@@ -198,7 +177,6 @@ fn exec_slideup(
             let val = vpr.read_element(vs2, ElemIdx::new(src_idx), ctx.sew);
             vpr.write_element(vd, ElemIdx::new(i), ctx.sew, val);
         }
-        // i < offset: leave unchanged.
     }
 
     no_flags_result(None)
@@ -334,10 +312,6 @@ fn exec_slide1down(
     no_flags_result(None)
 }
 
-// ============================================================================
-// Gather
-// ============================================================================
-
 /// `vrgather` — register gather (permute by index).
 ///
 /// For each active element i in [vstart, vl):
@@ -434,10 +408,6 @@ fn exec_rgather_ei16(
     no_flags_result(None)
 }
 
-// ============================================================================
-// Compress
-// ============================================================================
-
 /// `vcompress` — compress active elements from vs2 into vd.
 ///
 /// Scans vs2 using the vs1 mask: elements where the corresponding vs1 bit is
@@ -480,10 +450,6 @@ fn exec_compress(
 
     no_flags_result(None)
 }
-
-// ============================================================================
-// Whole-register moves
-// ============================================================================
 
 /// `vmv<n>r` — whole-register move of `n` consecutive registers.
 ///

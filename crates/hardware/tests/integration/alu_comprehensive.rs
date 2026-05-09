@@ -7,7 +7,6 @@ use crate::common::builder::instruction::InstructionBuilder;
 fn test_alu_add_operations() {
     let mut h = TestHarness::boot_default();
 
-    // ADD x1, x0, x0 (0 + 0 = 0)
     h.cpu.regs.write(10, 5);
     h.cpu.regs.write(11, 3);
     h.execute_inst(InstructionBuilder::add(12, 10, 11));

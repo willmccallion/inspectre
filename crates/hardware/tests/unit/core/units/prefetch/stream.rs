@@ -11,10 +11,6 @@ use rvsim_core::core::units::prefetch::StreamPrefetcher;
 
 const LINE: u64 = 64;
 
-// ══════════════════════════════════════════════════════════
-// 1. Cold start
-// ══════════════════════════════════════════════════════════
-
 /// First access never prefetches.
 #[test]
 fn no_prefetch_on_first_access() {
@@ -32,10 +28,6 @@ fn no_prefetch_at_confidence_1() {
     // Direction detected (ascending), confidence = 1. Need >= 2.
     assert!(addrs.is_empty(), "Confidence 1 is not enough");
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. Ascending stream
-// ══════════════════════════════════════════════════════════
 
 /// Three consecutive ascending accesses → confidence reaches 2 → prefetch.
 #[test]
@@ -62,10 +54,6 @@ fn ascending_degree_2() {
     assert_eq!(addrs[1], 0x2000 + 4 * LINE);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Descending stream
-// ══════════════════════════════════════════════════════════
-
 /// Descending sequential accesses trigger backward prefetching.
 #[test]
 fn descending_stream_triggers_prefetch() {
@@ -79,10 +67,6 @@ fn descending_stream_triggers_prefetch() {
     let expected = current.wrapping_sub(LINE);
     assert_eq!(addrs[0], expected);
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. Non-sequential access resets
-// ══════════════════════════════════════════════════════════
 
 /// A non-sequential access after an ascending stream decays confidence.
 #[test]

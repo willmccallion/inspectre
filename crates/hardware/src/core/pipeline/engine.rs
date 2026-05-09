@@ -142,21 +142,9 @@ impl<E: ExecutionEngine> Pipeline<E> {
     pub fn tick(&mut self, cpu: &mut crate::core::Cpu) {
         let pc_before = cpu.pc;
 
-        // Backend always runs (commit/writeback/memory must drain even during stalls)
         self.engine.tick(cpu, &mut self.rename_output);
 
-        // If the backend redirected the PC (branch misprediction, trap, etc.),
-        // flush the frontend and any pending rename output so stale instructions
-        // from the old PC stream don't leak into the backend next cycle.
-        // (The backend's own flush path clears rename_output for execute-detected
-        // redirects, but the trap path in commit returns early before reaching
-        // that code.)
-        // Check for PC redirect (branch misprediction, trap, FENCE.I, etc.).
-        // Use both the explicit redirect flag AND the PC comparison:
-        // - redirect_pending catches cases where the target PC coincidentally
-        //   equals the current fetch PC (e.g., sequential wrap-around).
-        // - pc != pc_before catches commit-stage redirects (MRET/SRET) that
-        //   don't go through the execute stage's flush path.
+        // PC compare catches commit-stage redirects (MRET/SRET) that bypass execute's flush path.
         let needs_frontend_flush = cpu.redirect_pending || cpu.pc != pc_before;
         if cpu.redirect_pending {
             cpu.redirect_pending = false;
@@ -166,7 +154,6 @@ impl<E: ExecutionEngine> Pipeline<E> {
             self.rename_output.clear();
         }
 
-        // Frontend runs every cycle (per-stage stalls are handled internally)
         if cpu.exit_code.is_none() && !cpu.wfi_waiting {
             self.frontend.tick(cpu, &mut self.engine, &mut self.rename_output);
         }

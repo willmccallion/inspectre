@@ -228,14 +228,12 @@ impl StoreBuffer {
         let load_start = paddr.val();
         let load_end = load_start + load_size as u64;
 
-        // Search from newest to oldest for the most recent matching store
         let mut idx = if self.tail == 0 { self.entries.len() - 1 } else { self.tail - 1 };
 
         for _ in 0..self.count {
             let entry = &self.entries[idx];
             if entry.valid {
-                // Skip stores that are newer than or same age as the load —
-                // they are after the load in program order and must not forward.
+                // Skip stores not strictly older than the load: they come after in program order.
                 if !entry.rob_tag.is_older_than(load_rob_tag) {
                     if idx == 0 {
                         idx = self.entries.len() - 1;
@@ -245,7 +243,6 @@ impl StoreBuffer {
                     continue;
                 }
 
-                // Older store — check for overlap based on resolution state.
                 match entry.resolution {
                     StoreResolution::Ready { paddr: store_paddr, data: store_data }
                     | StoreResolution::Committed { paddr: store_paddr, data: store_data } => {
@@ -253,9 +250,7 @@ impl StoreBuffer {
                         let store_start = store_paddr.val();
                         let store_end = store_start + store_size as u64;
 
-                        // Check for any overlap
                         if load_start < store_end && load_end > store_start {
-                            // Full overlap: store completely covers the load
                             if store_start <= load_start && store_end >= load_end {
                                 let offset = (load_start - store_start) as u32;
                                 let shifted = store_data >> (offset * 8);
@@ -266,13 +261,10 @@ impl StoreBuffer {
                                 };
                                 return ForwardResult::Hit(shifted & mask);
                             }
-                            // Partial overlap: must stall
                             return ForwardResult::Stall;
                         }
                     }
-                    // Pending or Cancelled: no resolved address to check.
-                    // (Loads are not issued until all older stores have their
-                    // addresses resolved, so Pending is handled at issue time.)
+                    // Pending entries are handled at issue time; Cancelled has no write.
                     _ => {}
                 }
             }
@@ -343,9 +335,8 @@ impl StoreBuffer {
             let entry = &self.entries[idx];
             if entry.valid && entry.rob_tag.is_older_than(rob_tag) {
                 match entry.resolution {
-                    // Unresolved store to unknown address — must assume overlap
+                    // Unresolved store to unknown address — assume overlap.
                     StoreResolution::Pending => return true,
-                    // Resolved store — check for address overlap
                     StoreResolution::Ready { paddr: store_paddr, .. }
                     | StoreResolution::Committed { paddr: store_paddr, .. } => {
                         let store_size = width_to_bytes(entry.width) as u64;
@@ -355,7 +346,6 @@ impl StoreBuffer {
                             return true;
                         }
                     }
-                    // Cancelled: no-op, cannot overlap
                     StoreResolution::Cancelled => {}
                 }
             }
@@ -389,7 +379,6 @@ impl StoreBuffer {
             return;
         }
 
-        // Walk from head to tail, keep only Committed/Cancelled entries at the front
         let cap = self.entries.len();
         let mut new_tail = self.head;
         let mut new_count = 0;
@@ -433,9 +422,6 @@ impl StoreBuffer {
 
         for _ in 0..self.count {
             let entry = &self.entries[idx];
-            // Keep entries that are at or before the keep_tag in program order.
-            // ROB tags are assigned sequentially, so tag <= keep_tag means
-            // the instruction was issued at or before the branch.
             if entry.valid && entry.rob_tag.is_older_or_eq(keep_tag) {
                 if idx != new_tail {
                     self.entries[new_tail] = self.entries[idx].clone();
@@ -470,15 +456,13 @@ impl StoreBuffer {
         let mut idx = self.head;
         for _ in 0..self.count {
             if self.entries[idx].valid && self.entries[idx].rob_tag == rob_tag {
-                // If this is the tail entry, we can simply retract it
                 let prev_tail = if self.tail == 0 { cap - 1 } else { self.tail - 1 };
                 if idx == prev_tail {
                     self.entries[idx].valid = false;
                     self.tail = prev_tail;
                     self.count -= 1;
                 } else {
-                    // Not at tail — mark as cancelled no-op that drain_one will
-                    // pass through without writing to memory.
+                    // Not at tail; mark Cancelled so drain_one passes it through unwritten.
                     self.entries[idx].resolution = StoreResolution::Cancelled;
                 }
                 return;

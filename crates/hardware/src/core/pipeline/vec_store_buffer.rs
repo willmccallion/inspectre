@@ -44,9 +44,7 @@ use crate::core::pipeline::store_buffer::{ForwardResult, width_to_bytes};
 pub const VSB_LINE_BYTES: usize = 64;
 
 /// Forwarding policy. Selects how `forward_load` reacts to in-flight vec stores.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VecStoreForwarding {
     /// Per-line byte-mask forwarding (BOOM/Apple/Intel/AMD/ARM pattern). Default.
@@ -176,8 +174,7 @@ impl VecStoreBuffer {
             self.entries.push(new_entry);
         }
 
-        // The expected_elements==0 case (e.g. masked-off vec store with active
-        // count 0) is fully resolved on allocate; commit will drain it as a no-op.
+        // expected_elements == 0 (fully-masked store) is drainable immediately as a no-op.
         true
     }
 
@@ -200,8 +197,7 @@ impl VecStoreBuffer {
             return;
         }
 
-        let Some(entry) = self.entries.iter_mut().find(|e| e.valid && e.rob_tag == rob_tag)
-        else {
+        let Some(entry) = self.entries.iter_mut().find(|e| e.valid && e.rob_tag == rob_tag) else {
             debug_assert!(false, "VSB resolve_element: no entry for {rob_tag:?}");
             return;
         };
@@ -215,12 +211,8 @@ impl VecStoreBuffer {
             let offset = (cur_addr - line_addr) as usize;
             let take = remaining.min(VSB_LINE_BYTES - offset);
 
-            // Find or create the line buffer for this address.
-            let line_idx = entry
-                .lines
-                .iter()
-                .position(|l| l.line_addr == line_addr)
-                .unwrap_or_else(|| {
+            let line_idx =
+                entry.lines.iter().position(|l| l.line_addr == line_addr).unwrap_or_else(|| {
                     entry.lines.push(VsbLine::new(line_addr));
                     entry.lines.len() - 1
                 });
@@ -234,9 +226,7 @@ impl VecStoreBuffer {
 
             remaining -= take;
             cur_addr += take as u64;
-            // Shifting a u64 by 64 is UB; the caller may pass an 8-byte element
-            // that fits inside one cache line (no split), in which case `take`
-            // is the full width and there is no remainder to shift in.
+            // Shifting a u64 by 64 is UB; an 8-byte element fitting in one line has no remainder.
             let shift_bits = take * 8;
             cur_data = if shift_bits >= 64 { 0 } else { cur_data >> shift_bits };
         }
@@ -279,22 +269,22 @@ impl VecStoreBuffer {
         let load_line = load_lo & !(VSB_LINE_BYTES as u64 - 1);
         let load_offset = (load_lo - load_line) as usize;
 
-        // Cross-line loads never forward. Real hardware (Intel/AMD) penalises
-        // these; we simply treat them as `Miss` and let the load read memory.
+        // Cross-line loads never forward (matches real hardware penalties).
         if load_offset + bytes > VSB_LINE_BYTES {
             return self.cross_line_fallback(paddr, width, load_rob_tag);
         }
 
-        let load_byte_mask: u64 = if bytes == VSB_LINE_BYTES {
-            !0u64
-        } else {
-            ((1u64 << bytes) - 1) << load_offset
-        };
+        let load_byte_mask: u64 =
+            if bytes == VSB_LINE_BYTES { !0u64 } else { ((1u64 << bytes) - 1) << load_offset };
 
         match self.forwarding {
-            VecStoreForwarding::ByteMask => {
-                self.forward_load_byte_mask(load_line, load_offset, bytes, load_byte_mask, load_rob_tag)
-            }
+            VecStoreForwarding::ByteMask => self.forward_load_byte_mask(
+                load_line,
+                load_offset,
+                bytes,
+                load_byte_mask,
+                load_rob_tag,
+            ),
             VecStoreForwarding::Stall => {
                 self.forward_load_stall(load_line, load_byte_mask, load_rob_tag)
             }
@@ -322,10 +312,9 @@ impl VecStoreBuffer {
                 continue;
             }
             for line in &entry.lines {
-                if (line.line_addr == line_a || line.line_addr == line_b)
-                    && line.valid_mask != 0 {
-                        return ForwardResult::Stall;
-                    }
+                if (line.line_addr == line_a || line.line_addr == line_b) && line.valid_mask != 0 {
+                    return ForwardResult::Stall;
+                }
             }
             if self.forwarding == VecStoreForwarding::Off {
                 return ForwardResult::Stall;
@@ -391,8 +380,6 @@ impl VecStoreBuffer {
             if !entry.rob_tag.is_older_than(load_rob_tag) {
                 continue;
             }
-            // Any byte-mask overlap with a resolved line, or any unresolved
-            // older entry whose touched lines include the load's line, stalls.
             let unresolved_older = entry.resolved_elements < entry.expected_elements;
             for line in &entry.lines {
                 if line.line_addr == load_line && (line.valid_mask & load_byte_mask) != 0 {
@@ -421,8 +408,6 @@ impl VecStoreBuffer {
     pub fn drain_one_committed(&mut self, cpu: &mut Cpu) -> bool {
         let Some(idx) = self.oldest_drainable_entry_index() else { return false };
 
-        // Pop the head line from the entry; write it; if no lines remain,
-        // mark the entry invalid.
         let line = {
             let entry = &mut self.entries[idx];
             entry.lines.remove(0)
@@ -543,8 +528,7 @@ fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
     }
 }
 
-/// Wraps the scalar-SB drain semantics (WCB merge + memory write) for a
-/// single (paddr, data, width) write originating from a VSB line drain.
+/// Wraps scalar-SB drain semantics (WCB merge + memory write) for a single VSB write.
 fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidth) {
     let raw = paddr.val();
     let in_htif = cpu.htif_range.is_some_and(|(lo, hi)| raw >= lo && raw < hi);
@@ -618,24 +602,16 @@ mod tests {
     fn resolve_single_line_word() {
         let mut b = vsb(2);
         b.allocate(RobTag(1), 1);
-        b.resolve_element(
-            RobTag(1),
-            PhysAddr::new(0x8000_0000),
-            0xDEAD_BEEF,
-            MemWidth::Word,
-        );
+        b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xDEAD_BEEF, MemWidth::Word);
 
         // Forward a Word-aligned read from the same address — full hit.
-        let result =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Word, RobTag(2));
+        let result = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Word, RobTag(2));
         assert_eq!(result, ForwardResult::Hit(0xDEAD_BEEF));
         // A byte read from offset 0 returns the low byte.
-        let result =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
+        let result = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
         assert_eq!(result, ForwardResult::Hit(0xEF));
         // A byte read from offset 3 returns the high byte.
-        let result =
-            b.forward_load(PhysAddr::new(0x8000_0003), MemWidth::Byte, RobTag(2));
+        let result = b.forward_load(PhysAddr::new(0x8000_0003), MemWidth::Byte, RobTag(2));
         assert_eq!(result, ForwardResult::Hit(0xDE));
     }
 
@@ -652,12 +628,10 @@ mod tests {
         );
 
         // The first half is in line 0x8000_0000.
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_003C), MemWidth::Word, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_003C), MemWidth::Word, RobTag(2));
         assert_eq!(r, ForwardResult::Hit(0x0403_0201));
         // The second half is in line 0x8000_0040.
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0040), MemWidth::Word, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0040), MemWidth::Word, RobTag(2));
         assert_eq!(r, ForwardResult::Hit(0x0807_0605));
     }
 
@@ -665,16 +639,10 @@ mod tests {
     fn forward_partial_overlap_stalls() {
         let mut b = vsb(2);
         b.allocate(RobTag(1), 1);
-        b.resolve_element(
-            RobTag(1),
-            PhysAddr::new(0x8000_0004),
-            0xAABB,
-            MemWidth::Half,
-        );
+        b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0004), 0xAABB, MemWidth::Half);
         // Load Word at offset 0x8000_0002 overlaps bytes 4..6 of the line but
         // wants 4 bytes (2..6). Bytes 2..4 are not valid → partial overlap.
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0002), MemWidth::Word, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0002), MemWidth::Word, RobTag(2));
         assert_eq!(r, ForwardResult::Stall);
     }
 
@@ -683,8 +651,7 @@ mod tests {
         let mut b = vsb(2);
         b.allocate(RobTag(1), 1);
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xFF, MemWidth::Byte);
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0008), MemWidth::Word, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0008), MemWidth::Word, RobTag(2));
         assert_eq!(r, ForwardResult::Miss);
     }
 
@@ -696,8 +663,7 @@ mod tests {
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0x1111, MemWidth::Half);
         b.resolve_element(RobTag(2), PhysAddr::new(0x8000_0000), 0x2222, MemWidth::Half);
 
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Half, RobTag(3));
+        let r = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Half, RobTag(3));
         assert_eq!(r, ForwardResult::Hit(0x2222));
     }
 
@@ -707,8 +673,7 @@ mod tests {
         b.allocate(RobTag(5), 1);
         b.resolve_element(RobTag(5), PhysAddr::new(0x8000_0000), 0xABCD, MemWidth::Half);
         // Load tag 3 is older than store tag 5 — must not forward.
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Half, RobTag(3));
+        let r = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Half, RobTag(3));
         assert_eq!(r, ForwardResult::Miss);
     }
 
@@ -723,8 +688,7 @@ mod tests {
             MemWidth::Double,
         );
         // Cross-line Word load (3 bytes in line A, 1 byte in line B): never forward.
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_003D), MemWidth::Word, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_003D), MemWidth::Word, RobTag(2));
         assert_eq!(r, ForwardResult::Stall);
     }
 
@@ -735,8 +699,7 @@ mod tests {
         // Two elements writing the same byte; the second call wins.
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xAA, MemWidth::Byte);
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xBB, MemWidth::Byte);
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
         assert_eq!(r, ForwardResult::Hit(0xBB));
     }
 
@@ -745,11 +708,9 @@ mod tests {
         let mut b = VecStoreBuffer::new(2, VecStoreForwarding::Stall);
         b.allocate(RobTag(1), 1);
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xAA, MemWidth::Byte);
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
         assert_eq!(r, ForwardResult::Stall);
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0008), MemWidth::Byte, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0008), MemWidth::Byte, RobTag(2));
         assert_eq!(r, ForwardResult::Miss);
     }
 
@@ -758,8 +719,7 @@ mod tests {
         let mut b = VecStoreBuffer::new(2, VecStoreForwarding::Off);
         b.allocate(RobTag(1), 1);
         // Even before any element resolves, an older entry causes a stall.
-        let r =
-            b.forward_load(PhysAddr::new(0x9000_0000), MemWidth::Byte, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x9000_0000), MemWidth::Byte, RobTag(2));
         assert_eq!(r, ForwardResult::Stall);
     }
 
@@ -769,8 +729,7 @@ mod tests {
         b.allocate(RobTag(1), 1);
         b.resolve_element(RobTag(1), PhysAddr::new(0x8000_0000), 0xAA, MemWidth::Byte);
         b.mark_committed(RobTag(1));
-        let r =
-            b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
+        let r = b.forward_load(PhysAddr::new(0x8000_0000), MemWidth::Byte, RobTag(2));
         assert_eq!(r, ForwardResult::Hit(0xAA));
     }
 

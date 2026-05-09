@@ -15,8 +15,6 @@
 use rvsim_core::core::pipeline::signals::{AtomicOp, MemWidth};
 use rvsim_core::core::units::lsu::atomic::atomic_alu;
 
-// ─── Constants ───────────────────────────────────────────
-
 // 64-bit boundaries
 const I64_MAX: u64 = i64::MAX as u64; // 0x7FFF_FFFF_FFFF_FFFF
 const I64_MIN: u64 = i64::MIN as u64; // 0x8000_0000_0000_0000
@@ -31,10 +29,6 @@ const I32_MIN_ZEXT: u64 = 0x8000_0000u64; // 0x0000_0000_8000_0000
 fn sext32(val: u32) -> u64 {
     val as i32 as i64 as u64
 }
-
-// ══════════════════════════════════════════════════════════
-// 1. Swap
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn swap_word_returns_reg_val_sign_extended() {
@@ -51,10 +45,6 @@ fn swap_double_returns_reg_val() {
         0x1234_5678_9ABC_DEF0
     );
 }
-
-// ══════════════════════════════════════════════════════════
-// 2. Add
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn add_word_basic() {
@@ -99,10 +89,6 @@ fn add_double_neg1() {
     assert_eq!(atomic_alu(AtomicOp::Add, 1, U64_MAX, MemWidth::Double), 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// 3. Xor
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn xor_word() {
     assert_eq!(
@@ -123,10 +109,6 @@ fn xor_double() {
 fn xor_self_is_zero() {
     assert_eq!(atomic_alu(AtomicOp::Xor, 0x1234_5678, 0x1234_5678, MemWidth::Word), sext32(0));
 }
-
-// ══════════════════════════════════════════════════════════
-// 4. And
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn and_word() {
@@ -149,10 +131,6 @@ fn and_with_zero() {
     assert_eq!(atomic_alu(AtomicOp::And, U64_MAX, 0, MemWidth::Double), 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// 5. Or
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn or_word() {
     assert_eq!(
@@ -173,10 +151,6 @@ fn or_double() {
 fn or_with_zero() {
     assert_eq!(atomic_alu(AtomicOp::Or, 42, 0, MemWidth::Double), 42);
 }
-
-// ══════════════════════════════════════════════════════════
-// 6. Min (signed)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn min_word_positive() {
@@ -218,10 +192,6 @@ fn min_double_edge_i64_min_max() {
     assert_eq!(atomic_alu(AtomicOp::Min, I64_MAX, I64_MIN, MemWidth::Double), I64_MIN);
 }
 
-// ══════════════════════════════════════════════════════════
-// 7. Max (signed)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn max_word_positive() {
     assert_eq!(atomic_alu(AtomicOp::Max, 10, 20, MemWidth::Word), sext32(20));
@@ -251,10 +221,6 @@ fn max_double_negative() {
 fn max_double_edge_i64_min_max() {
     assert_eq!(atomic_alu(AtomicOp::Max, I64_MAX, I64_MIN, MemWidth::Double), I64_MAX);
 }
-
-// ══════════════════════════════════════════════════════════
-// 8. Minu (unsigned)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn minu_word_basic() {
@@ -292,10 +258,6 @@ fn minu_double_zero_is_minimum() {
     assert_eq!(atomic_alu(AtomicOp::Minu, 0, U64_MAX, MemWidth::Double), 0);
 }
 
-// ══════════════════════════════════════════════════════════
-// 9. Maxu (unsigned)
-// ══════════════════════════════════════════════════════════
-
 #[test]
 fn maxu_word_basic() {
     assert_eq!(atomic_alu(AtomicOp::Maxu, 10, 20, MemWidth::Word), sext32(20));
@@ -325,10 +287,6 @@ fn maxu_double_large_unsigned() {
 fn maxu_double_zero_and_max() {
     assert_eq!(atomic_alu(AtomicOp::Maxu, 0, U64_MAX, MemWidth::Double), U64_MAX);
 }
-
-// ══════════════════════════════════════════════════════════
-// 10. Word Sign-Extension Verification
-// ══════════════════════════════════════════════════════════
 
 /// All Word-width operations must produce results sign-extended from bit 31.
 /// This test spot-checks multiple ops.
@@ -361,10 +319,6 @@ fn word_sign_extension_from_or() {
     let result = atomic_alu(AtomicOp::Or, 0x8000_0000, 0, MemWidth::Word);
     assert_eq!(result, sext32(0x8000_0000u32));
 }
-
-// ══════════════════════════════════════════════════════════
-// 11. Edge Values (0, MAX, MIN)
-// ══════════════════════════════════════════════════════════
 
 #[test]
 fn add_word_zero_plus_zero() {
