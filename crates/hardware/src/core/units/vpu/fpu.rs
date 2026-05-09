@@ -322,45 +322,65 @@ const fn classify_f64(val: u64) -> u64 {
 // vfrsqrt7 / vfrec7 lookup tables (RVV 1.0 §13.9–13.10)
 // ============================================================================
 
-/// vfrsqrt7 lookup table. Indexed by `{exp[0], sig[MSB-1:MSB-6]}` (7 bits).
-/// `RSQRT7_TABLE[0..64]`  → exp[0]=0,  `RSQRT7_TABLE[64..128]` → exp[0]=1.
+/// vfrsqrt7 lookup table per RVV 1.0 §13.9. Indexed by
+/// `{exp[0], sig[MSB-1:MSB-6]}` (7 bits). `RSQRT7_TABLE[0..64]` →
+/// exp[0]=0, `RSQRT7_TABLE[64..128]` → exp[0]=1. Values copied from
+/// SoftFloat's fall_reciprocal.c so they match spike's reference exactly.
 #[rustfmt::skip]
 static RSQRT7_TABLE: [u8; 128] = [
     // exp[0] = 0
-    52, 51, 50, 48, 47, 46, 44, 43, 42, 41, 40, 39, 38, 36, 35, 34,
-    33, 32, 31, 30, 30, 29, 28, 27, 26, 25, 24, 24, 23, 22, 21, 21,
-    20, 19, 19, 18, 18, 17, 16, 16, 15, 15, 14, 14, 13, 13, 12, 12,
-    11, 11, 10, 10,  9,  9,  9,  8,  8,  7,  7,  7,  6,  6,  6,  5,
+     52,  51,  50,  48,  47,  46,  44,  43,
+     42,  41,  40,  39,  38,  36,  35,  34,
+     33,  32,  31,  30,  30,  29,  28,  27,
+     26,  25,  24,  23,  23,  22,  21,  20,
+     19,  19,  18,  17,  16,  16,  15,  14,
+     14,  13,  12,  12,  11,  10,  10,   9,
+      9,   8,   7,   7,   6,   6,   5,   4,
+      4,   3,   3,   2,   2,   1,   1,   0,
     // exp[0] = 1
-    127, 125, 123, 121, 119, 118, 116, 114, 113, 111, 109, 108, 106, 105, 103, 102,
-    100,  99,  97,  96,  95,  93,  92,  91,  90,  88,  87,  86,  85,  84,  83,  82,
-     80,  79,  78,  77,  76,  75,  74,  73,  72,  71,  70,  70,  69,  68,  67,  66,
-     65,  65,  64,  63,  62,  61,  61,  60,  59,  59,  58,  57,  57,  56,  56,  55,
+    127, 125, 123, 121, 119, 118, 116, 114,
+    113, 111, 109, 108, 106, 105, 103, 102,
+    100,  99,  97,  96,  95,  93,  92,  91,
+     90,  88,  87,  86,  85,  84,  83,  82,
+     80,  79,  78,  77,  76,  75,  74,  73,
+     72,  71,  70,  70,  69,  68,  67,  66,
+     65,  64,  63,  63,  62,  61,  60,  59,
+     59,  58,  57,  56,  56,  55,  54,  53,
 ];
 
-/// vfrec7 lookup table. Indexed by `sig[MSB-1:MSB-7]` (7 bits → 128 entries).
+/// vfrec7 lookup table per RVV 1.0 §13.10. Indexed by `sig[MSB-1:MSB-7]`
+/// (7 bits → 128 entries). Values copied from SoftFloat's
+/// fall_reciprocal.c so they match spike's reference exactly.
 #[rustfmt::skip]
 static REC7_TABLE: [u8; 128] = [
-    127, 125, 123, 121, 119, 117, 116, 114, 112, 110, 109, 107, 105, 104, 102, 100,
-     99,  97,  96,  94,  93,  91,  90,  88,  87,  85,  84,  83,  81,  80,  79,  77,
-     76,  75,  74,  72,  71,  70,  69,  68,  66,  65,  64,  63,  62,  61,  60,  59,
-     58,  57,  56,  55,  54,  53,  52,  51,  50,  49,  48,  47,  46,  45,  44,  43,
-     42,  41,  40,  40,  39,  38,  37,  36,  36,  35,  34,  33,  33,  32,  31,  31,
-     30,  29,  29,  28,  27,  27,  26,  26,  25,  24,  24,  23,  23,  22,  22,  21,
-     21,  20,  20,  19,  19,  18,  18,  17,  17,  16,  16,  15,  15,  14,  14,  14,
-     13,  13,  12,  12,  12,  11,  11,  10,  10,  10,   9,   9,   9,   8,   8,   8,
+    127, 125, 123, 121, 119, 117, 116, 114,
+    112, 110, 109, 107, 105, 104, 102, 100,
+     99,  97,  96,  94,  93,  91,  90,  88,
+     87,  85,  84,  83,  81,  80,  79,  77,
+     76,  75,  74,  72,  71,  70,  69,  68,
+     66,  65,  64,  63,  62,  61,  60,  59,
+     58,  57,  56,  55,  54,  53,  52,  51,
+     50,  49,  48,  47,  46,  45,  44,  43,
+     42,  41,  40,  40,  39,  38,  37,  36,
+     35,  35,  34,  33,  32,  31,  31,  30,
+     29,  28,  28,  27,  26,  25,  25,  24,
+     23,  23,  22,  21,  21,  20,  19,  19,
+     18,  17,  17,  16,  15,  15,  14,  14,
+     13,  12,  12,  11,  11,  10,   9,   9,
+      8,   8,   7,   7,   6,   5,   5,   4,
+      4,   3,   3,   2,   2,   1,   1,   0,
 ];
 
 /// Compute vfrsqrt7 for an f32 value. Returns `(result_bits, flags)`.
 ///
-/// Implements the RVV 1.0 §13.9 lookup-table algorithm for a 7-bit accurate
-/// approximation of `1/sqrt(x)`.
+/// Mirrors spike's `rsqrte7(_, e=8, s=23)` (no rounding-mode argument
+/// because vfrsqrt7 cannot overflow). Subnormal inputs are normalized
+/// with an extra left-shift, so downstream bit extraction matches.
 fn vfrsqrt7_32(bits: u32) -> (u64, FpFlags) {
-    let sign = bits >> 31;
-    let mut exp = (bits >> 23) as i32 & 0xFF;
-    let mut sig = bits & 0x007F_FFFF;
+    let sign = bits as u64 >> 31;
+    let mut exp = ((bits >> 23) & 0xFF) as u64;
+    let mut sig = (bits & 0x007F_FFFF) as u64;
 
-    // Special cases
     if exp == 0xFF && sig != 0 {
         let f = if sig & 0x0040_0000 == 0 { FpFlags::NV } else { FpFlags::NONE };
         return (box_f32_canon(f32::NAN) & 0xFFFF_FFFF, f);
@@ -369,40 +389,39 @@ fn vfrsqrt7_32(bits: u32) -> (u64, FpFlags) {
         if sign != 0 {
             return (box_f32_canon(f32::NAN) & 0xFFFF_FFFF, FpFlags::NV);
         }
-        return (0xFFFF_FFFF_0000_0000, FpFlags::NONE); // +0.0 NaN-boxed
+        return (0xFFFF_FFFF_0000_0000, FpFlags::NONE);
     }
     if exp == 0 && sig == 0 {
-        let r = if sign != 0 { 0xFF80_0000u32 } else { 0x7F80_0000u32 };
-        return ((r as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::DZ);
+        let r = if sign != 0 { 0xFF80_0000u64 } else { 0x7F80_0000u64 };
+        return (r | 0xFFFF_FFFF_0000_0000, FpFlags::DZ);
     }
     if sign != 0 {
         return (box_f32_canon(f32::NAN) & 0xFFFF_FFFF, FpFlags::NV);
     }
 
-    // Normalize subnormals: shift sig left until bit 22 is set, adjust exp.
-    if exp == 0 {
-        while sig & 0x0040_0000 == 0 {
+    let sub = exp == 0;
+    if sub {
+        while (sig & (1u64 << 22)) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0040_0000; // clear the implicit leading 1
+        sig = (sig << 1) & 0x007F_FFFF;
     }
 
-    // Lookup: index = {exp[0], sig[21:16]} (7 bits)
-    let idx = (((exp & 1) << 6) | ((sig >> 16) as i32 & 0x3F)) as usize;
-    let out_sig = RSQRT7_TABLE[idx] as u32;
+    let idx = (((exp & 1) << 6) | ((sig >> 17) & 0x3F)) as usize;
+    let out_sig = (RSQRT7_TABLE[idx] as u64) << 16;
+    let out_exp = (3 * 127 + (!exp & 0xFFFF_FFFF_FFFF_FFFF)) / 2;
 
-    // Result exponent: (3 * 127 - 1 - exp) / 2
-    let out_exp = ((3 * 127 - 1 - exp) >> 1) as u32;
-
-    let result = (out_exp << 23) | (out_sig << 16);
-    ((result as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE)
+    let result = (sign << 31) | ((out_exp & 0xFF) << 23) | (out_sig & 0x007F_FFFF);
+    (result | 0xFFFF_FFFF_0000_0000, FpFlags::NONE)
 }
 
 /// Compute vfrsqrt7 for an f64 value. Returns `(result_bits, flags)`.
+///
+/// Same shape as `vfrsqrt7_32` but with `e=11`, `s=52`.
 fn vfrsqrt7_64(bits: u64) -> (u64, FpFlags) {
     let sign = bits >> 63;
-    let mut exp = ((bits >> 52) & 0x7FF) as i32;
+    let mut exp = (bits >> 52) & 0x7FF;
     let mut sig = bits & 0x000F_FFFF_FFFF_FFFF;
 
     if exp == 0x7FF && sig != 0 {
@@ -413,7 +432,7 @@ fn vfrsqrt7_64(bits: u64) -> (u64, FpFlags) {
         if sign != 0 {
             return (canonicalize_f64_bits(f64::NAN), FpFlags::NV);
         }
-        return (0, FpFlags::NONE); // +0.0
+        return (0, FpFlags::NONE);
     }
     if exp == 0 && sig == 0 {
         let r: u64 = if sign != 0 { 0xFFF0_0000_0000_0000 } else { 0x7FF0_0000_0000_0000 };
@@ -423,182 +442,210 @@ fn vfrsqrt7_64(bits: u64) -> (u64, FpFlags) {
         return (canonicalize_f64_bits(f64::NAN), FpFlags::NV);
     }
 
-    // Normalize subnormals: shift sig left until bit 51 is set.
-    if exp == 0 {
-        while sig & 0x0008_0000_0000_0000 == 0 {
+    let sub = exp == 0;
+    if sub {
+        while (sig & (1u64 << 51)) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0008_0000_0000_0000;
+        sig = (sig << 1) & 0x000F_FFFF_FFFF_FFFF;
     }
 
-    let idx = (((exp & 1) << 6) | ((sig >> 45) as i32 & 0x3F)) as usize;
-    let out_sig = RSQRT7_TABLE[idx] as u64;
+    let idx = (((exp & 1) << 6) | ((sig >> 46) & 0x3F)) as usize;
+    let out_sig = (RSQRT7_TABLE[idx] as u64) << 45;
+    let out_exp = (3 * 1023 + (!exp & 0xFFFF_FFFF_FFFF_FFFF)) / 2;
 
-    let out_exp = ((3 * 1023 - 1 - exp) >> 1) as u64;
-
-    let result = (out_exp << 52) | (out_sig << 45);
+    let result = (sign << 63) | ((out_exp & 0x7FF) << 52) | (out_sig & 0x000F_FFFF_FFFF_FFFF);
     (result, FpFlags::NONE)
 }
 
 /// Compute vfrsqrt7 for an f16 value. Returns `(f16_result_bits, flags)`.
 fn vfrsqrt7_16(bits: u16) -> (u16, FpFlags) {
     let sign = bits >> 15;
-    let mut exp = ((bits >> 10) & 0x1F) as i32;
+    let mut exp = ((bits >> 10) & 0x1F) as u32;
     let mut sig = (bits & 0x03FF) as u32;
 
-    // NaN: exp=31, sig != 0 (bit 9 of sig = quiet/signaling indicator).
     if exp == 0x1F && sig != 0 {
         let f = if sig & 0x0200 == 0 { FpFlags::NV } else { FpFlags::NONE };
         return (CANONICAL_NAN_F16, f);
     }
-    // +inf → +0; -inf → NaN (sqrt of negative).
     if exp == 0x1F && sig == 0 {
         if sign != 0 {
             return (CANONICAL_NAN_F16, FpFlags::NV);
         }
         return (0, FpFlags::NONE);
     }
-    // ±0 → ±inf, divide-by-zero.
     if exp == 0 && sig == 0 {
         let r: u16 = if sign != 0 { 0xFC00 } else { 0x7C00 };
         return (r, FpFlags::DZ);
     }
-    // sqrt of negative non-zero → NaN.
     if sign != 0 {
         return (CANONICAL_NAN_F16, FpFlags::NV);
     }
 
-    // Subnormal: normalize, shift sig left until bit 9 is set.
-    if exp == 0 {
-        while sig & 0x0200 == 0 {
+    let sub = exp == 0;
+    if sub {
+        // Match spike's rsqrte7: normalize then shift left ONE more time so
+        // the leading 1 falls off and the table-index extraction uses the
+        // post-normalization mantissa positions.
+        while (sig & 0x200) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0200;
+        sig = (sig << 1) & 0x3FF;
     }
 
-    // Lookup: idx = {exp[0], sig[9:4]}.
-    let idx = (((exp & 1) << 6) | ((sig >> 4) as i32 & 0x3F)) as usize;
-    let out_sig = RSQRT7_TABLE[idx] as u16;
+    // idx = {exp[0], sig[s-2:s-p-1]} with p=7, s=10 → top 6 fraction bits.
+    let idx = (((exp & 1) << 6) | ((sig >> 4) & 0x3F)) as usize;
+    let out_sig = RSQRT7_TABLE[idx] as u32;
 
-    // Output exp = (3 * bias - 1 - exp) / 2  with bias = 15.
-    let out_exp = ((3 * 15 - 1 - exp) >> 1) as u16;
+    // out_exp = (3*bias - 1 - exp) / 2, computed in u64 to mirror spike's
+    // u64 wrap-around arithmetic for negative `exp` values.
+    let out_exp = ((3 * 15 + (!exp & 0xFFFF_FFFF)) / 2) & 0x1F;
 
-    let result = (out_exp << 10) | (out_sig << 3);
-    (result, FpFlags::NONE)
+    let result = ((sign as u32) << 15) | (out_exp << 10) | (out_sig << 3);
+    (result as u16, FpFlags::NONE)
 }
 
 /// Compute vfrec7 for an f16 value. Returns `(f16_result_bits, flags)`.
-fn vfrec7_16(bits: u16) -> (u16, FpFlags) {
-    let sign = bits >> 15;
-    let mut exp = ((bits >> 10) & 0x1F) as i32;
-    let mut sig = (bits & 0x03FF) as u32;
+///
+/// Mirrors spike's `recip7` (softfloat/fall_reciprocal.c): normalize a
+/// subnormal input with an extra left-shift, saturate when normalization
+/// pushes exp past −1, then look up sig[s-2:s-p-1] in the 7-bit table and
+/// adjust out_sig for the two narrow subnormal-output cases (out_exp == 0
+/// or out_exp == −1 in 64-bit unsigned).
+fn vfrec7_16(bits: u16, frm: RoundingMode) -> (u16, FpFlags) {
+    let sign = (bits >> 15) as u32;
+    let mut exp = ((bits >> 10) & 0x1F) as u64;
+    let mut sig = (bits & 0x03FF) as u64;
 
     if exp == 0x1F && sig != 0 {
-        let f = if sig & 0x0200 == 0 { FpFlags::NV } else { FpFlags::NONE };
+        let f = if sig & 0x200 == 0 { FpFlags::NV } else { FpFlags::NONE };
         return (CANONICAL_NAN_F16, f);
     }
-    // ±inf → ±0.
     if exp == 0x1F && sig == 0 {
-        return (sign << 15, FpFlags::NONE);
+        return ((sign << 15) as u16, FpFlags::NONE);
     }
-    // ±0 → ±inf, divide-by-zero.
     if exp == 0 && sig == 0 {
-        return ((sign << 15) | 0x7C00, FpFlags::DZ);
+        return (((sign << 15) | 0x7C00) as u16, FpFlags::DZ);
     }
 
-    // Subnormal: normalize.
-    if exp == 0 {
-        while sig & 0x0200 == 0 {
+    let sub = exp == 0;
+    if sub {
+        while (sig & 0x200) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0200;
+        sig = (sig << 1) & 0x3FF;
+        // If normalization pushed exp below -1 (i.e. exp != 0 and != UINT64_MAX),
+        // the input was small enough that the reciprocal would overflow —
+        // saturate per spike's rounding-mode-dependent return.
+        if exp != 0 && exp != u64::MAX {
+            let saturate_to_max_normal = matches!(
+                frm,
+                RoundingMode::Rtz
+                    | RoundingMode::Rdn  // toward -inf: positive saturates down
+                    | RoundingMode::Rup, // toward +inf: negative saturates up
+            ) && match frm {
+                RoundingMode::Rdn => sign == 0,
+                RoundingMode::Rup => sign != 0,
+                _ => true,
+            };
+            let abs_max = if saturate_to_max_normal { 0x7BFF } else { 0x7C00 };
+            return (((sign << 15) | abs_max) as u16, FpFlags::OF | FpFlags::NX);
+        }
     }
 
     let idx = ((sig >> 3) & 0x7F) as usize;
-    let out_sig = REC7_TABLE[idx] as u32;
+    let mut out_sig = (REC7_TABLE[idx] as u64) << 3;
+    // out_exp uses spike's u64 wrap-around: `2*15 + ~exp`.
+    let mut out_exp = (30u64.wrapping_add(!exp)) & 0xFFFF_FFFF_FFFF_FFFF;
 
-    // Output exp = 2 * bias - 1 - exp = 29 - exp (bias = 15).
-    let out_exp = 29 - exp;
-
-    if out_exp <= 0 {
-        // Subnormal result: insert the implicit 1 (bit 7), shift right by
-        // (1 - out_exp) so the result fits, place at bits [9:2] of the f16
-        // mantissa (top 8 bits, since the implicit 1 becomes part of sig).
-        let shift = (1 - out_exp) as u32;
-        let mantissa = ((out_sig | 0x80) >> shift) << 2;
-        return ((sign << 15) | mantissa as u16, FpFlags::NONE);
-    }
-    if out_exp >= 0x1F {
-        // Overflow → ±inf, raise OF + NX.
-        return ((sign << 15) | 0x7C00, FpFlags::OF | FpFlags::NX);
+    // Narrow subnormal-output cases: shift out_sig down by 1 (or 2 when
+    // out_exp wrapped to UINT64_MAX) and OR the implicit-1 into bit s-1.
+    if out_exp == 0 || out_exp == u64::MAX {
+        out_sig = (out_sig >> 1) | (1u64 << 9);
+        if out_exp == u64::MAX {
+            out_sig >>= 1;
+            out_exp = 0;
+        }
     }
 
-    let result = (sign << 15) | ((out_exp as u16) << 10) | ((out_sig as u16) << 3);
-    (result, FpFlags::NONE)
+    let result = ((sign as u64) << 15) | ((out_exp & 0x1F) << 10) | (out_sig & 0x3FF);
+    (result as u16, FpFlags::NONE)
+}
+
+/// Saturation result for vfrec7 of a very small subnormal input. RNE/RMM
+/// produce `±inf` (with OF + NX); RTZ and "round-toward-the-other-side"
+/// rounding modes produce `±max-normal`. Mirrors spike's recip7 logic.
+#[inline]
+const fn vfrec7_saturate_to_max(sign: u64, frm: RoundingMode) -> bool {
+    match frm {
+        RoundingMode::Rtz => true,
+        RoundingMode::Rdn => sign == 0,
+        RoundingMode::Rup => sign != 0,
+        _ => false,
+    }
 }
 
 /// Compute vfrec7 for an f32 value. Returns `(result_bits, flags)`.
 ///
-/// Implements the RVV 1.0 §13.10 lookup-table algorithm for a 7-bit accurate
-/// approximation of `1/x`.
-fn vfrec7_32(bits: u32) -> (u64, FpFlags) {
-    let sign = bits >> 31;
-    let mut exp = (bits >> 23) as i32 & 0xFF;
-    let mut sig = bits & 0x007F_FFFF;
+/// Mirrors spike's `recip7(_, e=8, s=23)`: normalize subnormal input with
+/// an extra left-shift, saturate when the normalized exp can't be
+/// represented (exp ∉ {0, −1}), then look up sig[s-2:s-p-1] in the 7-bit
+/// table and adjust out_sig for the two narrow subnormal-output cases.
+fn vfrec7_32(bits: u32, frm: RoundingMode) -> (u64, FpFlags) {
+    let sign = bits as u64 >> 31;
+    let mut exp = ((bits >> 23) & 0xFF) as u64;
+    let mut sig = (bits & 0x007F_FFFF) as u64;
 
-    // Special cases
     if exp == 0xFF && sig != 0 {
         let f = if sig & 0x0040_0000 == 0 { FpFlags::NV } else { FpFlags::NONE };
         return (box_f32_canon(f32::NAN) & 0xFFFF_FFFF, f);
     }
     if exp == 0xFF && sig == 0 {
-        // ±inf → ±0
-        let r = sign << 31;
-        return ((r as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE);
+        return (((sign << 31)) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE);
     }
     if exp == 0 && sig == 0 {
-        let r = (sign << 31) | 0x7F80_0000;
-        return ((r as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::DZ);
+        return (((sign << 31) | 0x7F80_0000) | 0xFFFF_FFFF_0000_0000, FpFlags::DZ);
     }
 
-    // Normalize subnormals
-    if exp == 0 {
-        while sig & 0x0040_0000 == 0 {
+    let sub = exp == 0;
+    if sub {
+        while (sig & (1 << 22)) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0040_0000;
+        sig = (sig << 1) & 0x007F_FFFF;
+        if exp != 0 && exp != u64::MAX {
+            let to_max = vfrec7_saturate_to_max(sign, frm);
+            let sat = if to_max { 0x7F7F_FFFFu64 } else { 0x7F80_0000u64 };
+            return (((sign << 31) | sat) | 0xFFFF_FFFF_0000_0000, FpFlags::OF | FpFlags::NX);
+        }
     }
 
-    // Lookup: index = sig[21:15] (7 bits)
-    let idx = ((sig >> 15) & 0x7F) as usize;
-    let out_sig = REC7_TABLE[idx] as u32;
+    let idx = ((sig >> 16) & 0x7F) as usize;
+    let mut out_sig = (REC7_TABLE[idx] as u64) << 16;
+    let mut out_exp = 254u64.wrapping_add(!exp);
 
-    // Result exponent: 2 * 127 - 1 - exp
-    let out_exp = 253 - exp;
-
-    if out_exp <= 0 {
-        // Subnormal result: add implicit 1, shift right by (1 - out_exp)
-        let shift = (1 - out_exp) as u32;
-        let result = (sign << 31) | ((out_sig | 0x80) >> shift << 15);
-        return ((result as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE);
-    }
-    if out_exp >= 0xFF {
-        let result = (sign << 31) | 0x7F80_0000;
-        return ((result as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::OF | FpFlags::NX);
+    if out_exp == 0 || out_exp == u64::MAX {
+        out_sig = (out_sig >> 1) | (1u64 << 22);
+        if out_exp == u64::MAX {
+            out_sig >>= 1;
+            out_exp = 0;
+        }
     }
 
-    let result = (sign << 31) | ((out_exp as u32) << 23) | (out_sig << 16);
-    ((result as u64) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE)
+    let result = (sign << 31) | ((out_exp & 0xFF) << 23) | (out_sig & 0x007F_FFFF);
+    (result | 0xFFFF_FFFF_0000_0000, FpFlags::NONE)
 }
 
 /// Compute vfrec7 for an f64 value. Returns `(result_bits, flags)`.
-fn vfrec7_64(bits: u64) -> (u64, FpFlags) {
+///
+/// Same shape as `vfrec7_32` but with `e=11`, `s=52`.
+fn vfrec7_64(bits: u64, frm: RoundingMode) -> (u64, FpFlags) {
     let sign = bits >> 63;
-    let mut exp = ((bits >> 52) & 0x7FF) as i32;
+    let mut exp = (bits >> 52) & 0x7FF;
     let mut sig = bits & 0x000F_FFFF_FFFF_FFFF;
 
     if exp == 0x7FF && sig != 0 {
@@ -609,36 +656,36 @@ fn vfrec7_64(bits: u64) -> (u64, FpFlags) {
         return (sign << 63, FpFlags::NONE);
     }
     if exp == 0 && sig == 0 {
-        let r = (sign << 63) | 0x7FF0_0000_0000_0000;
-        return (r, FpFlags::DZ);
+        return ((sign << 63) | 0x7FF0_0000_0000_0000, FpFlags::DZ);
     }
 
-    // Normalize subnormals
-    if exp == 0 {
-        while sig & 0x0008_0000_0000_0000 == 0 {
+    let sub = exp == 0;
+    if sub {
+        while (sig & (1u64 << 51)) == 0 {
             sig <<= 1;
-            exp -= 1;
+            exp = exp.wrapping_sub(1);
         }
-        sig &= !0x0008_0000_0000_0000;
+        sig = (sig << 1) & 0x000F_FFFF_FFFF_FFFF;
+        if exp != 0 && exp != u64::MAX {
+            let to_max = vfrec7_saturate_to_max(sign, frm);
+            let sat: u64 = if to_max { 0x7FEF_FFFF_FFFF_FFFF } else { 0x7FF0_0000_0000_0000 };
+            return ((sign << 63) | sat, FpFlags::OF | FpFlags::NX);
+        }
     }
 
-    let idx = ((sig >> 44) & 0x7F) as usize;
-    let out_sig = REC7_TABLE[idx] as u64;
+    let idx = ((sig >> 45) & 0x7F) as usize;
+    let mut out_sig = (REC7_TABLE[idx] as u64) << 45;
+    let mut out_exp = 2046u64.wrapping_add(!exp);
 
-    // Result exponent: 2 * 1023 - 1 - exp
-    let out_exp = 2045 - exp;
-
-    if out_exp <= 0 {
-        let shift = (1 - out_exp) as u64;
-        let result = (sign << 63) | (((out_sig | 0x80) >> shift) << 44);
-        return (result, FpFlags::NONE);
-    }
-    if out_exp >= 0x7FF {
-        let result = (sign << 63) | 0x7FF0_0000_0000_0000;
-        return (result, FpFlags::OF | FpFlags::NX);
+    if out_exp == 0 || out_exp == u64::MAX {
+        out_sig = (out_sig >> 1) | (1u64 << 51);
+        if out_exp == u64::MAX {
+            out_sig >>= 1;
+            out_exp = 0;
+        }
     }
 
-    let result = (sign << 63) | ((out_exp as u64) << 52) | (out_sig << 45);
+    let result = (sign << 63) | ((out_exp & 0x7FF) << 52) | (out_sig & 0x000F_FFFF_FFFF_FFFF);
     (result, FpFlags::NONE)
 }
 
@@ -945,7 +992,7 @@ fn compute_f32(op: VectorOp, vs2_bits: u64, op1_bits: u64, frm: RoundingMode) ->
             (box_f32_canon(r), read_host_fp_flags())
         }
         VectorOp::VFRsqrt7 => vfrsqrt7_32(vs2_bits as u32),
-        VectorOp::VFRec7 => vfrec7_32(vs2_bits as u32),
+        VectorOp::VFRec7 => vfrec7_32(vs2_bits as u32, frm),
         VectorOp::VFMin => {
             let r = fmin_f32(a, b);
             // IEEE 754-2008 minNum: raise NV if either operand is a signaling NaN.
@@ -1055,7 +1102,7 @@ fn compute_f64(op: VectorOp, vs2_bits: u64, op1_bits: u64, frm: RoundingMode) ->
             (canonicalize_f64_bits(r), read_host_fp_flags())
         }
         VectorOp::VFRsqrt7 => vfrsqrt7_64(vs2_bits),
-        VectorOp::VFRec7 => vfrec7_64(vs2_bits),
+        VectorOp::VFRec7 => vfrec7_64(vs2_bits, frm),
         VectorOp::VFMin => {
             let r = fmin_f64(a, b);
             let f = if is_snan_f64(a) || is_snan_f64(b) { FpFlags::NV } else { FpFlags::NONE };
@@ -1239,7 +1286,7 @@ fn compute_f16(op: VectorOp, vs2_bits: u64, op1_bits: u64, rm: RoundingMode) -> 
             (r as u64, f)
         }
         VectorOp::VFRec7 => {
-            let (r, f) = vfrec7_16(ha);
+            let (r, f) = vfrec7_16(ha, rm);
             (r as u64, f)
         }
         _ => (0, FpFlags::NONE),
