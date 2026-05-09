@@ -1242,27 +1242,39 @@ impl ExecutionEngine for O3Engine {
                     };
 
                     if micro_ops.is_empty() {
-                        // VL=0 or vill=1: no element micro-ops to issue. Loads
-                        // still own freshly-renamed destination physregs that
-                        // dependents are waiting on; without a chaining wakeup
-                        // they would block in the IQ forever. Pre-copy the old
-                        // vd contents into the new physregs (so undisturbed
-                        // reads return architectural state), mark them ready,
-                        // then broadcast the wakeup before retiring the ROB.
+                        // VL=0 or vill=1: no element micro-ops to issue, but
+                        // the freshly-renamed destination physregs are still
+                        // live and must surface as ready by the time the FU
+                        // would have signalled writeback. For loads, copy the
+                        // old vd into the new physregs so the new mapping
+                        // observes the architectural undisturbed state; for
+                        // stores there is no destination. Then route through
+                        // the vec_pending machinery — it owns chaining
+                        // wakeup and ROB complete at the correct cycles, and
+                        // matches the deferred-FU model used by vec arith.
                         if !is_store
-                            && let Some((vd_phys_arr, vd_cnt, _vd_reg)) = vec_dst_info
+                            && let Some((vd_phys_arr_local, vd_cnt_local, _)) = vec_dst_info
                         {
-                            for i in 0..vd_cnt as usize {
+                            for i in 0..vd_cnt_local as usize {
                                 if i < saved.vec_src3_count as usize {
                                     self.vec_prf
-                                        .copy_reg(vd_phys_arr[i], saved.vs3_phys[i]);
+                                        .copy_reg(vd_phys_arr_local[i], saved.vs3_phys[i]);
                                 }
-                                self.vec_prf.mark_ready(vd_phys_arr[i]);
-                                self.issue_queue
-                                    .wakeup_vec_phys(vd_phys_arr[i], &self.vec_prf);
                             }
                         }
-                        self.rob.complete(ex_result.rob_tag, 0);
+                        let startup = self.fu_pool.startup_latency(fu_type);
+                        let first_ready =
+                            crate::core::units::vpu::lane_model::first_group_ready(
+                                now, startup,
+                            );
+                        self.vec_pending.push(VecPendingResult {
+                            rob_tag: ex_result.rob_tag,
+                            vd_phys: vd_phys_arr,
+                            vd_count,
+                            first_group_ready: first_ready,
+                            full_complete: complete_cycle,
+                            wakeup_fired: false,
+                        });
                     } else {
                         // Build all element micro-ops up front. They will be
                         // released into the memory pipeline in waves by
