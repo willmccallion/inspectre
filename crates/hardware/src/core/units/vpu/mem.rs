@@ -12,11 +12,12 @@ use crate::core::pipeline::signals::{ControlSignals, VectorOp};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::vpu::types::{ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, VtypeFields, parse_vtype};
 
-/// Returns `(data_emul_regs, idx_emul_regs)` for a vec memory op given its
-/// EEW, vtype SEW, and LMUL. `data_emul_regs` is the destination (or stored
-/// value) register-group size in registers; `idx_emul_regs` is the index
-/// vector size in registers for indexed loads/stores (0 otherwise). Each is
-/// at least 1, mirroring the spec's `max(1, EEW × LMUL / SEW)` floor.
+/// Returns `(data_emul_regs, idx_emul_regs)` for a vec memory op.
+///
+/// `data_emul_regs` is the destination (or stored value) register-group size
+/// in registers; `idx_emul_regs` is the index vector size in registers for
+/// indexed loads/stores (0 otherwise). Each is at least 1, mirroring the
+/// spec's `max(1, EEW × LMUL / SEW)` floor.
 #[must_use]
 pub fn vec_mem_emul_regs(
     op: VectorOp,
@@ -71,12 +72,16 @@ pub fn vec_mem_dst_count(
     }
 }
 
-/// Reject vector memory operations whose effective register-group size or
-/// destination alignment violates RVV 1.0 §10.1.4 (`EMUL > 8`, `EMUL < 1/8`,
-/// or `vd` not aligned to `EMUL × NF`). The encoding is reserved for those
-/// cases.
+/// Reject vector memory ops that violate the §10.1.4 register-group rules.
 ///
-/// Returns `Err(IllegalInstruction)` for the offending case.
+/// Encodings producing `EMUL > 8`, `EMUL < 1/8`, or a destination that is
+/// not aligned to `EMUL × NF` are reserved.
+///
+/// # Errors
+///
+/// Returns `Err(Trap::IllegalInstruction)` when the op's EMUL exceeds 8,
+/// the destination overflows past `v31`, or the destination is misaligned.
+#[allow(clippy::missing_const_for_fn)]
 pub fn check_vec_mem_emul(
     inst: u32,
     op: VectorOp,

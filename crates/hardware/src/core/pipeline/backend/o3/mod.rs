@@ -1258,27 +1258,34 @@ impl ExecutionEngine for O3Engine {
                         )
                     };
 
+                    // Pre-copy old vd into the freshly-renamed physregs so
+                    // tail and mask-undisturbed elements observe the
+                    // architectural prior value once writeback writes the
+                    // active elements. Without this, the new physreg would
+                    // carry whatever stale bytes the free list happened to
+                    // hand back, and dependent reads through the new mapping
+                    // would see garbage past `vl`. Stores have no
+                    // destination so vec_src3_count == 0 and the loop is a
+                    // no-op for them.
+                    if !is_store
+                        && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info
+                    {
+                        for i in 0..vd_cnt_pre as usize {
+                            if i < saved.vec_src3_count as usize {
+                                self.vec_prf
+                                    .copy_reg(vd_phys_arr_pre[i], saved.vs3_phys[i]);
+                            }
+                        }
+                    }
+
                     if micro_ops.is_empty() {
                         // VL=0 or vill=1: no element micro-ops to issue, but
                         // the freshly-renamed destination physregs are still
                         // live and must surface as ready by the time the FU
-                        // would have signalled writeback. For loads, copy the
-                        // old vd into the new physregs so the new mapping
-                        // observes the architectural undisturbed state; for
-                        // stores there is no destination. Then route through
-                        // the vec_pending machinery — it owns chaining
-                        // wakeup and ROB complete at the correct cycles, and
-                        // matches the deferred-FU model used by vec arith.
-                        if !is_store
-                            && let Some((vd_phys_arr_local, vd_cnt_local, _)) = vec_dst_info
-                        {
-                            for i in 0..vd_cnt_local as usize {
-                                if i < saved.vec_src3_count as usize {
-                                    self.vec_prf
-                                        .copy_reg(vd_phys_arr_local[i], saved.vs3_phys[i]);
-                                }
-                            }
-                        }
+                        // would have signalled writeback. Route through
+                        // vec_pending — it owns chaining wakeup and ROB
+                        // complete at the correct cycles and matches the
+                        // deferred-FU model used by vec arith.
                         let startup = self.fu_pool.startup_latency(fu_type);
                         let first_ready =
                             crate::core::units::vpu::lane_model::first_group_ready(
@@ -1293,24 +1300,6 @@ impl ExecutionEngine for O3Engine {
                             wakeup_fired: false,
                         });
                     } else {
-                        // Pre-copy old vd into the freshly-renamed physregs so
-                        // tail and mask-undisturbed elements observe the
-                        // architectural prior value once writeback writes
-                        // the active elements. Without this, the new physreg
-                        // would carry whatever stale bytes the free list
-                        // happened to hand back, and dependent reads through
-                        // the new mapping would see garbage past `vl`.
-                        // Stores have no destination, so vec_src3_count == 0.
-                        if !is_store
-                            && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info
-                        {
-                            for i in 0..vd_cnt_pre as usize {
-                                if i < saved.vec_src3_count as usize {
-                                    self.vec_prf
-                                        .copy_reg(vd_phys_arr_pre[i], saved.vs3_phys[i]);
-                                }
-                            }
-                        }
                         // Build all element micro-ops up front. They will be
                         // released into the memory pipeline in waves by
                         // issue_vec_mem_waves; loads bound on LQ capacity,
