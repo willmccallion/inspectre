@@ -528,6 +528,8 @@ def _backend_to_pipeline_fields(be) -> dict:
             "checkpoint_count": be.checkpoint_count,
             "prf_vpr_size": be.prf_vpr_size,
             "vec_chaining": be.vec_chaining,
+            "vec_store_buffer_size": be.vec_store_buffer_size,
+            "vec_store_forwarding": be.vec_store_forwarding,
         }
     # InOrder: emit safe defaults so Rust serde never chokes on missing keys
     return {
@@ -542,6 +544,8 @@ def _backend_to_pipeline_fields(be) -> dict:
         "fu_config": _fu_config_to_dict(Fu()),
         "prf_vpr_size": 64,
         "vec_chaining": True,
+        "vec_store_buffer_size": 8,
+        "vec_store_forwarding": "byte_mask",
     }
 
 

@@ -564,6 +564,8 @@ class Backend:
             checkpoint_count: int = 0,
             prf_vpr_size: int = 64,
             vec_chaining: bool = True,
+            vec_store_buffer_size: int = 8,
+            vec_store_forwarding: str = "byte_mask",
         ):
             self.rob_size = rob_size
             self.store_buffer_size = store_buffer_size
@@ -577,6 +579,13 @@ class Backend:
             self.checkpoint_count = checkpoint_count
             self.prf_vpr_size = prf_vpr_size
             self.vec_chaining = vec_chaining
+            self.vec_store_buffer_size = vec_store_buffer_size
+            if vec_store_forwarding not in ("byte_mask", "stall", "off"):
+                raise ValueError(
+                    f"vec_store_forwarding must be 'byte_mask', 'stall', or 'off'; "
+                    f"got {vec_store_forwarding!r}"
+                )
+            self.vec_store_forwarding = vec_store_forwarding
 
         def __repr__(self) -> str:
             return (
@@ -585,7 +594,9 @@ class Backend:
                 f"issue_queue_size={self.issue_queue_size}, "
                 f"load_queue_size={self.load_queue_size}, "
                 f"load_ports={self.load_ports}, "
-                f"store_ports={self.store_ports})"
+                f"store_ports={self.store_ports}, "
+                f"vec_store_buffer_size={self.vec_store_buffer_size}, "
+                f"vec_store_forwarding={self.vec_store_forwarding!r})"
             )
 
 

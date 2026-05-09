@@ -166,6 +166,9 @@ mod defaults {
     /// Default Store Buffer size (16 entries).
     pub const STORE_BUFFER_SIZE: usize = 16;
 
+    /// Default Vector Store Buffer size (8 in-flight vec stores).
+    pub const VEC_STORE_BUFFER_SIZE: usize = 8;
+
     /// Default Issue Queue size (32 entries) for out-of-order backend.
     pub const ISSUE_QUEUE_SIZE: usize = 32;
 
@@ -1096,6 +1099,17 @@ pub struct PipelineConfig {
     /// Enable vector operation chaining.
     #[serde(default = "PipelineConfig::default_vec_chaining")]
     pub vec_chaining: bool,
+
+    /// Vector Store Buffer capacity (in-flight vec stores). O3 backend only.
+    #[serde(default = "PipelineConfig::default_vec_store_buffer_size")]
+    pub vec_store_buffer_size: usize,
+
+    /// Forwarding policy for vector-store→load. O3 backend only. Default
+    /// `byte_mask` matches BOOM/Apple/Intel/AMD/ARM. `stall` matches Saturn.
+    /// `off` always stalls.
+    #[serde(default)]
+    pub vec_store_forwarding:
+        crate::core::pipeline::vec_store_buffer::VecStoreForwarding,
 }
 
 impl PipelineConfig {
@@ -1184,6 +1198,11 @@ impl PipelineConfig {
         true
     }
 
+    /// Returns the default Vector Store Buffer size.
+    const fn default_vec_store_buffer_size() -> usize {
+        defaults::VEC_STORE_BUFFER_SIZE
+    }
+
     /// Returns the default Zvfh setting (the simulator ships a Zvfh impl).
     const fn default_zvfh() -> bool {
         true
@@ -1227,6 +1246,9 @@ impl Default for PipelineConfig {
             num_vec_lanes: None,
             prf_vpr_size: 64,
             vec_chaining: true,
+            vec_store_buffer_size: defaults::VEC_STORE_BUFFER_SIZE,
+            vec_store_forwarding:
+                crate::core::pipeline::vec_store_buffer::VecStoreForwarding::ByteMask,
         }
     }
 }

@@ -27,6 +27,10 @@ pub mod scoreboard;
 /// Store buffer with forwarding.
 pub mod store_buffer;
 
+/// Vector Store Buffer: holds in-flight vector stores with byte-mask
+/// forwarding and per-line drain. Parallel to `store_buffer` for scalar.
+pub mod vec_store_buffer;
+
 /// Write Combining Buffer for store coalescing.
 pub mod write_buffer;
 
