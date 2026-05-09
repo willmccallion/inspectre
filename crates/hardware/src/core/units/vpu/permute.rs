@@ -238,7 +238,9 @@ fn exec_slidedown(
             continue;
         }
 
-        let src_idx = i + offset;
+        // Saturating add prevents wrap when offset is huge (e.g. rs1 = -1
+        // sign-extended to 0xFFFF…FFFF treated as unsigned per spec §16.4).
+        let src_idx = i.saturating_add(offset);
         let val =
             if src_idx < vlmax { vpr.read_element(vs2, ElemIdx::new(src_idx), ctx.sew) } else { 0 };
         vpr.write_element(vd, ElemIdx::new(i), ctx.sew, val);
