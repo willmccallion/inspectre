@@ -129,6 +129,7 @@ impl ExecutionEngine for InOrderEngine {
             None, // in-order backend: no vec PRF
             None, // in-order backend: no vec free list
             None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
+            None, // in-order backend: no VSB (vec stores complete in execute)
         );
 
         // Handle trap: flush everything
@@ -161,6 +162,7 @@ impl ExecutionEngine for InOrderEngine {
             &mut self.rob,
             None, // in-order backend: no load queue
             None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
+            None, // in-order backend: no VSB
         );
 
         // Memory1: address translation (gated by mem1_stall)

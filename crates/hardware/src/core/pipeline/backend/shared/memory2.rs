@@ -29,6 +29,7 @@ pub fn memory2_stage(
     _rob: &mut Rob,
     mut load_queue: Option<&mut LoadQueue>,
     vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
+    _vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) -> Option<(RobTag, u64)> {
     let mut violation: Option<(RobTag, u64)> = None;
     let mut entries = std::mem::take(input);
@@ -552,7 +553,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0);
@@ -591,7 +592,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0); // Input is drained because trap is pushed
@@ -637,7 +638,7 @@ mod tests {
         }];
         let mut output = Vec::new();
 
-        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, &mut rob, None, None);
+        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, &mut rob, None, None, None);
         // LR does NOT set reservation at Memory2 — deferred to commit
         assert!(!cpu.check_reservation(PhysAddr::new(0x8000_0000)));
         // But the output carries the deferred LR record
@@ -671,7 +672,7 @@ mod tests {
             vec_mem: None,
         }];
 
-        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, &mut rob, None, None);
+        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, &mut rob, None, None, None);
         // SC optimistically returns 0 (success) — actual check deferred to commit
         assert_eq!(output[0].load_data, 0);
         assert!(matches!(output[0].lr_sc, Some(LrScRecord::Sc { paddr: PhysAddr(0x8000_0000) })));
@@ -730,6 +731,7 @@ mod tests {
             &mut store_buffer,
             &mut rob,
             Some(&mut load_queue),
+            None,
             None,
         );
 

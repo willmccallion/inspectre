@@ -26,6 +26,7 @@ use crate::core::pipeline::scoreboard::Scoreboard;
 use crate::core::pipeline::signals::{ControlFlow, VectorOp};
 use crate::core::pipeline::store_buffer::StoreBuffer;
 use crate::core::pipeline::vec_prf::VecPhysRegFile;
+use crate::core::pipeline::vec_store_buffer::VecStoreBuffer;
 use crate::core::units::bru::BranchPredictor;
 use crate::core::units::mdp::MemDepUnit;
 use crate::core::units::vpu::chaining::VecPendingResult;
@@ -115,6 +116,9 @@ pub struct O3Engine {
     pub vec_mem_pending: std::collections::VecDeque<VecMemMicroOp>,
     /// Tracks in-flight vector memory instructions and their remaining element count.
     pub vec_mem_inflight: Vec<VecMemInflight>,
+    /// Dedicated store buffer for in-flight vector stores. See
+    /// `core::pipeline::vec_store_buffer` for forwarding/drain semantics.
+    pub vec_store_buffer: VecStoreBuffer,
 }
 
 /// A single vector memory micro-op representing one element (or cache-line chunk)
@@ -232,6 +236,10 @@ impl O3Engine {
             ),
             vec_mem_pending: std::collections::VecDeque::new(),
             vec_mem_inflight: Vec::new(),
+            vec_store_buffer: VecStoreBuffer::new(
+                config.pipeline.vec_store_buffer_size,
+                config.pipeline.vec_store_forwarding,
+            ),
         }
     }
 
@@ -386,6 +394,7 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.vec_prf),
             Some(&mut self.vec_free_list),
             Some(&mut self.vec_mem_inflight),
+            Some(&mut self.vec_store_buffer),
         );
 
         // Handle trap: flush everything
@@ -560,6 +569,7 @@ impl ExecutionEngine for O3Engine {
             &mut self.rob,
             Some(&mut self.load_queue),
             Some(&self.vec_mem_inflight),
+            Some(&mut self.vec_store_buffer),
         );
 
         // Notify MDP when stores resolve — wake instructions waiting on them.
@@ -619,6 +629,7 @@ impl ExecutionEngine for O3Engine {
                 self.vec_pending.retain(|v| v.rob_tag.is_older_or_eq(keep_tag));
                 self.vec_mem_pending.retain(|m| m.entry.rob_tag.is_older_or_eq(keep_tag));
                 self.vec_mem_inflight.retain(|m| m.rob_tag.is_older_or_eq(keep_tag));
+                self.vec_store_buffer.flush_after(keep_tag);
                 self.execute_mem1.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
 
                 // Memory violations never have checkpoints (the violating load
@@ -651,6 +662,7 @@ impl ExecutionEngine for O3Engine {
                 self.vec_pending.clear();
                 self.vec_mem_pending.clear();
                 self.vec_mem_inflight.clear();
+                self.vec_store_buffer.flush_all();
                 self.execute_mem1.clear();
 
                 // Full flush: 0 surviving, no rename rebuild needed.
@@ -1392,6 +1404,7 @@ impl ExecutionEngine for O3Engine {
             self.vec_pending.retain(|v| v.rob_tag.is_older_or_eq(keep_tag));
             self.vec_mem_pending.retain(|m| m.entry.rob_tag.is_older_or_eq(keep_tag));
             self.vec_mem_inflight.retain(|m| m.rob_tag.is_older_or_eq(keep_tag));
+            self.vec_store_buffer.flush_after(keep_tag);
             self.execute_mem1.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
             // Restore speculative rename map: try checkpoint (O(1)), fallback to rebuild (O(n)).
             // With a checkpoint, the rename map is restored in O(1) from the snapshot
@@ -1546,6 +1559,11 @@ impl ExecutionEngine for O3Engine {
         self.vec_pending.clear();
         self.vec_mem_pending.clear();
         self.vec_mem_inflight.clear();
+        // Drain any committed VSB writes to memory before clearing speculative
+        // entries; trap-driven flushes still owe architectural writes for
+        // already-committed vec stores.
+        self.vec_store_buffer.drain_all_committed(cpu);
+        self.vec_store_buffer.flush_all();
         self.execute_mem1.clear();
         self.mem1_mem2.clear();
         self.mem2_wb.clear();

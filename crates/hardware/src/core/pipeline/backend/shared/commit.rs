@@ -56,6 +56,9 @@ pub fn commit_stage(
     mut vec_mem_inflight: Option<
         &mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>,
     >,
+    mut _vec_store_buffer: Option<
+        &mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer,
+    >,
 ) -> Option<(Trap, u64)> {
     let mut trap_event: Option<(Trap, u64)> = None;
 
@@ -1341,6 +1344,7 @@ mod tests {
             &mut committed_rename_map,
             &mut free_list,
             1,
+            None,
             None,
             None,
             None,
