@@ -20,13 +20,13 @@ impl Default for TestContext {
 
 impl TestContext {
     pub fn new() -> Self {
-        Self::new_with_config(Config::default())
+        Self::new_with_config(&Config::default())
     }
 
     /// Construct a TestContext with a caller-supplied `Config` (e.g. to vary
     /// pipeline width or backend type when reproducing pipeline-integration
     /// bugs). Otherwise identical to `new()`.
-    pub fn new_with_config(config: Config) -> Self {
+    pub fn new_with_config(config: &Config) -> Self {
         let _ = env_logger::builder().is_test(true).try_init();
 
         let bus = Bus::new(8, 0);
@@ -37,7 +37,7 @@ impl TestContext {
             exit_request: Arc::new(AtomicU64::new(u64::MAX)),
         };
 
-        let mut sim = Simulator::new(system, &config);
+        let mut sim = Simulator::new(system, config);
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
         // every access through multi-cycle DRAM, starving the pipeline.

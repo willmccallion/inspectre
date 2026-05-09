@@ -311,15 +311,14 @@ pub fn commit_stage(
         }
 
         #[cfg(feature = "commit-log")]
-        if let Some((pc, inst, has_rd, rd, val)) = commit_log_entry {
-            if let Some(ref mut log) = cpu.commit_log {
-                use std::io::Write;
-                if has_rd {
-                    let _ =
-                        writeln!(log, "core   0: 0x{pc:016x} (0x{inst:08x}) x{rd} 0x{val:016x}");
-                } else {
-                    let _ = writeln!(log, "core   0: 0x{pc:016x} (0x{inst:08x})");
-                }
+        if let Some((pc, inst, has_rd, rd, val)) = commit_log_entry
+            && let Some(ref mut log) = cpu.commit_log
+        {
+            use std::io::Write;
+            if has_rd {
+                let _ = writeln!(log, "core   0: 0x{pc:016x} (0x{inst:08x}) x{rd} 0x{val:016x}");
+            } else {
+                let _ = writeln!(log, "core   0: 0x{pc:016x} (0x{inst:08x})");
             }
         }
 

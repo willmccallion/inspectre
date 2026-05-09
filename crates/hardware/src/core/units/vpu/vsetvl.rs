@@ -166,7 +166,7 @@ mod tests {
             vill: false,
         });
         let (vl, vtype) = execute_vsetvl(4, bad_vtype, false, false, vlen128(), 0);
-        assert!(vtype & (1u64 << 63) == 0, "vill must not be set: vtype=0x{:x}", vtype);
+        assert!(vtype & (1u64 << 63) == 0, "vill must not be set: vtype=0x{vtype:x}");
         assert_eq!(vl, 4, "expected vl=4 for AVL=4 e32/m8");
     }
 

@@ -402,7 +402,6 @@ mod tests {
     use super::*;
     use crate::common::{InstSize, PhysAddr, RegIdx, VirtAddr};
     use crate::config::Config;
-    use crate::core::pipeline::rob::Rob;
     use crate::core::pipeline::signals::ControlSignals;
     use crate::core::pipeline::store_buffer::StoreBuffer;
     use crate::soc::builder::System;
@@ -413,7 +412,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
         let mut store_buffer = StoreBuffer::new(4);
-        let mut rob = Rob::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
             rob_tag: RobTag(1),
@@ -452,7 +450,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
         let mut store_buffer = StoreBuffer::new(4);
-        let mut rob = Rob::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
             rob_tag: RobTag(1),
@@ -493,7 +490,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
         let mut store_buffer = StoreBuffer::new(4);
-        let mut rob = Rob::new(4);
 
         let ctrl_lr = ControlSignals {
             atomic_op: crate::core::pipeline::signals::AtomicOp::Lr,
@@ -571,7 +567,6 @@ mod tests {
         let system = System::new(&config, "");
         let mut cpu = Cpu::new(system, &config);
         let mut store_buffer = StoreBuffer::new(4);
-        let mut rob = Rob::new(4);
         let mut load_queue = LoadQueue::new(4);
 
         // A younger load already executed to the same address

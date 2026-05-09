@@ -50,7 +50,7 @@ const LMUL_M1: u32 = 0b000;
 const LMUL_M8: u32 = 0b011;
 const LMUL_MF8: u32 = 0b101;
 
-fn run_program(config: Config, program: &[u32], cycles: u64) -> TestContext {
+fn run_program(config: &Config, program: &[u32], cycles: u64) -> TestContext {
     let mut ctx = TestContext::new_with_config(config).with_memory(RAM_SIZE, RAM_BASE);
     for (i, inst) in program.iter().enumerate() {
         let addr = RAM_BASE + (i as u64) * 4;
@@ -72,10 +72,10 @@ fn vsetvli_consumes_immediately_preceding_li() {
             addi(5, 0, 4),                                // li t0, 4
             vsetvli(6, 5, vtype(SEW_E32, LMUL_M1, 0, 0)), // vsetvli t1, t0, e32,m1,tu,mu
         ])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(wide_inorder_config(), &program, 64);
+    let ctx = run_program(&wide_inorder_config(), &program, 64);
 
     assert_eq!(ctx.get_reg(5), 4, "t0 should hold 4 after li");
     assert_eq!(
@@ -94,10 +94,10 @@ fn vsetvli_consumes_immediately_preceding_li() {
 fn vsetvli_consumes_immediately_preceding_li_width1() {
     let program: Vec<u32> = std::iter::empty()
         .chain([addi(5, 0, 4), vsetvli(6, 5, vtype(SEW_E32, LMUL_M1, 0, 0))])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(Config::default(), &program, 64);
+    let ctx = run_program(&Config::default(), &program, 64);
 
     assert_eq!(ctx.get_reg(5), 4);
     assert_eq!(ctx.cpu().csrs.vl, 4, "got vl={}", ctx.cpu().csrs.vl);
@@ -121,10 +121,10 @@ fn vsetvli_after_flushing_vsetvli_then_li() {
             // Reconfigure with new AVL — this must see t0 = 12.
             vsetvli(6, 5, vtype(SEW_E8, LMUL_MF8, 0, 0)),
         ])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 96);
 
     assert_eq!(ctx.get_reg(5), 12, "t0 should hold 12");
     assert_eq!(
@@ -145,10 +145,10 @@ fn vsetvli_after_flushing_vsetvli_then_li_width1() {
             addi(5, 0, 12),
             vsetvli(6, 5, vtype(SEW_E8, LMUL_MF8, 0, 0)),
         ])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(Config::default(), &program, 96);
+    let ctx = run_program(&Config::default(), &program, 96);
 
     assert_eq!(ctx.get_reg(5), 12);
     assert_eq!(
@@ -195,10 +195,10 @@ fn vwaddu_vv_at_mf8_does_not_trap_for_odd_vd() {
             vsetvli(6, 5, vtype(SEW_E8, LMUL_MF8, 0, 0)), // vl=2 at e8/mf8
             vwaddu_vv(27, 26, 1),                         // odd vd=v27, legal at mf8
         ])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 96);
 
     // mcause = 2 (illegal instruction) is the failure mode we're catching.
     let mcause = ctx.cpu().csrs.mcause;
@@ -225,10 +225,10 @@ fn vid_v_does_not_check_vs2_alignment() {
             // Non-canonical vs2_field=1 would be misaligned at lmul=m2 if treated as an operand.
             vid_v(12, 1),
         ])
-        .chain(std::iter::repeat(NOP).take(32))
+        .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 96);
 
     let mcause = ctx.cpu().csrs.mcause;
     assert_eq!(mcause, 0, "vid.v with vs2_field=1 must not trap (mcause={:#x})", mcause);
