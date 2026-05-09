@@ -713,61 +713,9 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
     true
 }
 
-/// (Dead in step 3; deleted in step 4.) Legacy per-vec-store side-buffer
-/// drain — superseded by `VecStoreBuffer::drain_one_committed`.
-#[allow(dead_code)]
-fn try_drain_one_vec_store_write(
-    cpu: &mut Cpu,
-    inflight_vec: &mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>,
-) -> bool {
-    // Find the oldest committed entry with non-empty pending_writes.
-    let mut chosen: Option<usize> = None;
-    for (i, e) in inflight_vec.iter().enumerate() {
-        if e.committed && !e.pending_writes.is_empty() {
-            match chosen {
-                None => chosen = Some(i),
-                Some(prev) if e.rob_tag.is_older_than(inflight_vec[prev].rob_tag) => {
-                    chosen = Some(i);
-                }
-                _ => {}
-            }
-        }
-    }
-    let Some(idx) = chosen else { return false };
-    let (paddr, data, width) = inflight_vec[idx].pending_writes.remove(0);
-
-    let is_ram = paddr.val() >= cpu.ram_start && paddr.val() < cpu.ram_end;
-    let width_bytes = width_to_bytes(width);
-    if !cpu.wcb.is_disabled() && is_ram {
-        let evicted = cpu.wcb.merge_store(paddr, data, width_bytes);
-        if evicted.is_none() {
-            cpu.stats.wcb_coalesces += 1;
-        }
-        if let Some(drain) = evicted {
-            let addr = crate::common::PhysAddr::new(drain.line_addr);
-            let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
-            cpu.stats.wcb_drains += 1;
-        }
-    } else if is_ram {
-        let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
-    }
-    write_store_to_memory(cpu, paddr, data, width);
-
-    // Once the side buffer drains and the vec op has no more in-flight
-    // micro-ops, mark it not in_progress so the IQ guard releases.
-    let entry = &mut inflight_vec[idx];
-    if entry.pending_writes.is_empty()
-        && entry.pending_micro_ops.is_empty()
-        && entry.remaining == 0
-    {
-        entry.in_progress = false;
-    }
-    true
-}
-
 /// Drains **all** committed stores from the store buffer to memory, and
-/// flushes any committed vec-store side-buffer writes too. Also flushes the
-/// WCB.
+/// flushes any committed vec-store writes from the VSB too. Also flushes
+/// the WCB.
 ///
 /// Called before SATP writes (so the PTW sees up-to-date PTEs) and on FENCE
 /// commit (so younger memory ops see older committed writes).

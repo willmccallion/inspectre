@@ -139,19 +139,17 @@ pub struct VecMemMicroOp {
     pub is_store: bool,
 }
 
-/// Tracks an in-flight vector memory instruction's completion state.
+/// Tracks an in-flight vector memory instruction's per-element progress.
 ///
-/// Vector memory ops are too wide for a fixed-size LQ/SB to hold all elements
-/// at once (e.g. e8/m8 at VLEN=128 produces 128 elements; LQ/SB defaults are
-/// 32/16). This entry implements wave-based issue: micro-ops are generated up
-/// front but only as many LQ/SB slots as are available are taken at first.
-/// The remaining micro-ops sit in `pending_micro_ops` and are pushed into the
-/// memory pipeline as LQ/SB slots free at writeback.
+/// Vector memory ops have far more elements than a fixed-size LQ/SB can hold
+/// (e.g. e8/m8 at VLEN=128 → 128 elements vs default LQ=32). Wave-based issue
+/// generates all element micro-ops up front but only releases as many into
+/// the memory pipeline as the LQ has free slots; the remainder sit in
+/// `pending_micro_ops` and drain as elements complete at writeback.
 ///
-/// For vec stores, resolved (paddr, data, width) tuples are captured in
-/// `pending_writes` at memory2 time. The SB slot is freed at writeback. At
-/// commit, `committed` is set; the tick-level `drain_one_vec_store_write`
-/// pops one entry per cycle from `pending_writes` and writes it to memory.
+/// Store data lives in `crate::core::pipeline::vec_store_buffer`, not here.
+/// This entry only tracks element-completion bookkeeping needed for chaining
+/// wakeup and ROB completion.
 #[derive(Debug, Clone)]
 pub struct VecMemInflight {
     /// ROB tag of the parent vector memory instruction.
@@ -165,17 +163,8 @@ pub struct VecMemInflight {
     /// Whether chaining wakeup has fired (first cache-line returned).
     pub wakeup_fired: bool,
     /// Micro-ops generated at issue but not yet pushed into the memory
-    /// pipeline (waiting for LQ/SB slots to free up).
+    /// pipeline (waiting for LQ slots to free up).
     pub pending_micro_ops: std::collections::VecDeque<VecMemMicroOp>,
-    /// Resolved (paddr, data, width) tuples for vec store elements,
-    /// captured at memory2 time. Drained to memory at commit.
-    pub pending_writes: Vec<(crate::common::PhysAddr, u64, crate::core::pipeline::signals::MemWidth)>,
-    /// Whether the parent vec store has committed (gates side-buffer drain).
-    pub committed: bool,
-    /// True from allocation until the entry is fully done (all micro-ops
-    /// completed and, for stores, all `pending_writes` drained). Used to gate
-    /// younger vec mem ops in the issue queue.
-    pub in_progress: bool,
 }
 
 impl O3Engine {
@@ -447,16 +436,10 @@ impl ExecutionEngine for O3Engine {
                         );
                     }
                     // Wave-based reclaim: free this element's LQ/SB slot now.
-                    // For stores, also stash the resolved (paddr, data, width)
-                    // into the per-vec-store side buffer so it can drain to
-                    // memory at commit time.
+                    // Vec store data already lives in the VSB (written by
+                    // memory2); writeback only needs to release the per-element
+                    // SB slot. Step 5 stops allocating SB slots for vec stores.
                     if vme.is_store {
-                        if let Some(write) = wb.vec_store_drain {
-                            let pidx = vme.parent_idx.0;
-                            if pidx < self.vec_mem_inflight.len() {
-                                self.vec_mem_inflight[pidx].pending_writes.push(write);
-                            }
-                        }
                         self.store_buffer.deallocate_elem(wb.rob_tag, vme.elem_idx);
                     } else {
                         self.load_queue.deallocate_elem(wb.rob_tag, vme.elem_idx);
@@ -481,15 +464,10 @@ impl ExecutionEngine for O3Engine {
                             parent.wakeup_fired = true;
                         }
 
-                        // All elements done: mark ROB complete. For loads,
-                        // mark not in_progress (no further side-buffer drain).
-                        // For stores, in_progress stays true until the
-                        // committed pending_writes drain to memory.
+                        // All elements done: mark ROB complete. The VSB owns
+                        // any further drain bookkeeping for stores.
                         if parent.remaining == 0 {
                             self.rob.complete(parent.rob_tag, 0);
-                            if !vme.is_store && parent.pending_micro_ops.is_empty() {
-                                parent.in_progress = false;
-                            }
                         }
                     }
                     // Do NOT pass to normal writeback — we handled it
@@ -1293,9 +1271,6 @@ impl ExecutionEngine for O3Engine {
                             vd_count,
                             wakeup_fired: false,
                             pending_micro_ops: all_micro_ops,
-                            pending_writes: Vec::new(),
-                            committed: false,
-                            in_progress: true,
                         });
                     }
 
@@ -1519,49 +1494,10 @@ impl ExecutionEngine for O3Engine {
     }
 
     fn flush(&mut self, cpu: &mut Cpu) {
-        // Drain any committed vec-store side-buffer writes BEFORE clearing
-        // vec_mem_inflight. A trap-driven flush (e.g. ECALL) tears down
-        // every in-flight structure but the side buffer holds the resolved
-        // store data for committed-but-not-yet-drained vec stores; losing
-        // it would silently drop architectural writes that committed before
-        // the trap. Speculative (not-yet-committed) entries are correctly
-        // discarded with the rest of the pipeline.
-        for inflight in &mut self.vec_mem_inflight {
-            if !inflight.committed {
-                continue;
-            }
-            while !inflight.pending_writes.is_empty() {
-                let (paddr, data, width) = inflight.pending_writes.remove(0);
-                let raw = paddr.val();
-                let in_htif = cpu.htif_range.is_some_and(|(lo, hi)| raw >= lo && raw < hi);
-                let is_ram = !in_htif && raw >= cpu.ram_start && raw < cpu.ram_end;
-                if is_ram {
-                    let offset = (raw - cpu.ram_start) as usize;
-                    use crate::core::pipeline::signals::MemWidth as MW;
-                    unsafe {
-                        match width {
-                            MW::Byte => *cpu.ram_ptr.add(offset) = data as u8,
-                            MW::Half => (cpu.ram_ptr.add(offset) as *mut u16)
-                                .write_unaligned(data as u16),
-                            MW::Word => (cpu.ram_ptr.add(offset) as *mut u32)
-                                .write_unaligned(data as u32),
-                            MW::Double => (cpu.ram_ptr.add(offset) as *mut u64)
-                                .write_unaligned(data),
-                            MW::Nop => {}
-                        }
-                    }
-                } else {
-                    use crate::core::pipeline::signals::MemWidth as MW;
-                    match width {
-                        MW::Byte => cpu.bus.bus.write_u8(paddr, data as u8),
-                        MW::Half => cpu.bus.bus.write_u16(paddr, data as u16),
-                        MW::Word => cpu.bus.bus.write_u32(paddr, data as u32),
-                        MW::Double => cpu.bus.bus.write_u64(paddr, data),
-                        MW::Nop => {}
-                    }
-                }
-            }
-        }
+        // Drain committed VSB writes to memory before tearing down speculative
+        // structures. Trap-driven flushes still owe architectural writes for
+        // any vec store that retired before the trap fired.
+        self.vec_store_buffer.drain_all_committed(cpu);
 
         // Reclaim all phys_dst regs for every in-flight ROB entry
         for entry in self.rob.iter_all() {
@@ -1588,10 +1524,6 @@ impl ExecutionEngine for O3Engine {
         self.vec_pending.clear();
         self.vec_mem_pending.clear();
         self.vec_mem_inflight.clear();
-        // Drain any committed VSB writes to memory before clearing speculative
-        // entries; trap-driven flushes still owe architectural writes for
-        // already-committed vec stores.
-        self.vec_store_buffer.drain_all_committed(cpu);
         self.vec_store_buffer.flush_all();
         self.execute_mem1.clear();
         self.mem1_mem2.clear();

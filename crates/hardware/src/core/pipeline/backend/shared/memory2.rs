@@ -10,7 +10,7 @@ use crate::core::pipeline::latches::{Mem1Mem2Entry, Mem2WbEntry};
 use crate::core::pipeline::load_queue::LoadQueue;
 use crate::core::pipeline::rob::{Rob, RobTag};
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};
-use crate::core::pipeline::store_buffer::{ForwardResult, StoreBuffer, width_to_bytes};
+use crate::core::pipeline::store_buffer::{ForwardResult, StoreBuffer};
 use crate::core::units::lsu::Lsu;
 use crate::trace_fwd;
 use crate::trace_mem;
@@ -71,7 +71,6 @@ pub fn memory2_stage(
                 sfence_vma: mem.sfence_vma,
                 lr_sc: None,
                 vec_mem: mem.vec_mem,
-                vec_store_drain: None,
             });
             // Trap: remaining entries stay in the input latch for next cycle.
             // They will be flushed by the commit-stage trap handler, but must
@@ -88,10 +87,6 @@ pub fn memory2_stage(
         let trap: Option<Trap> = None;
         let exception_stage: Option<ExceptionStage> = None;
         let mut lr_sc: Option<LrScRecord> = None;
-        // Vec stores route resolved data into the dedicated `VecStoreBuffer`,
-        // not the side buffer. The `vec_store_drain` field on `Mem2WbEntry`
-        // is retained for now but always `None`; step 4 deletes the field.
-        let vec_store_drain_for_wb: Option<(crate::common::PhysAddr, u64, MemWidth)> = None;
 
         if mem.ctrl.atomic_op != AtomicOp::None {
             // Atomic operations
@@ -432,7 +427,6 @@ pub fn memory2_stage(
             sfence_vma: mem.sfence_vma,
             lr_sc,
             vec_mem: mem.vec_mem,
-            vec_store_drain: vec_store_drain_for_wb,
         });
 
         if trap.is_some() {
@@ -442,73 +436,6 @@ pub fn memory2_stage(
     }
 
     violation
-}
-
-/// (Dead in step 3; deleted in step 4.) Forwards from the legacy per-vec-store
-/// side buffers — superseded by `VecStoreBuffer::forward_load`.
-#[allow(dead_code)]
-fn forward_from_vec_side_buffers(
-    paddr: crate::common::PhysAddr,
-    width: MemWidth,
-    load_rob_tag: RobTag,
-    vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
-) -> ForwardResult {
-    let Some(inflight) = vec_inflight else { return ForwardResult::Miss };
-    let load_size = width_to_bytes(width);
-    let load_start = paddr.val();
-    let load_end = load_start + load_size as u64;
-
-    let mut best: Option<(RobTag, u8, u64)> = None; // (tag, store_size, hit_data)
-    let mut had_partial_overlap_from_older = false;
-
-    for entry in inflight {
-        // Only older vec stores are candidates (older than the load).
-        if !entry.rob_tag.is_older_than(load_rob_tag) {
-            continue;
-        }
-        if entry.pending_writes.is_empty() {
-            continue;
-        }
-        for &(store_paddr, store_data, store_width) in &entry.pending_writes {
-            let store_size = width_to_bytes(store_width) as u64;
-            let store_start = store_paddr.val();
-            let store_end = store_start + store_size;
-            if load_start >= store_end || load_end <= store_start {
-                continue; // no overlap
-            }
-            if store_start <= load_start && store_end >= load_end {
-                // Full cover: prefer the youngest such match.
-                let offset = (load_start - store_start) as u32;
-                let shifted = store_data >> (offset * 8);
-                let mask = if load_size >= 8 {
-                    u64::MAX
-                } else {
-                    (1u64 << (load_size * 8)) - 1
-                };
-                let hit = shifted & mask;
-                match best {
-                    None => best = Some((entry.rob_tag, store_size as u8, hit)),
-                    Some((prev_tag, _, _)) if entry.rob_tag.is_newer_than(prev_tag) => {
-                        best = Some((entry.rob_tag, store_size as u8, hit));
-                    }
-                    _ => {}
-                }
-            } else {
-                // Partial overlap from an older vec store: must stall (rare —
-                // chipsalliance tests don't mix scalar/vec at sub-element
-                // alignment, but we model the conservative case).
-                had_partial_overlap_from_older = true;
-            }
-        }
-    }
-
-    if let Some((_, _, hit)) = best {
-        ForwardResult::Hit(hit)
-    } else if had_partial_overlap_from_older {
-        ForwardResult::Stall
-    } else {
-        ForwardResult::Miss
-    }
 }
 
 #[cfg(test)]

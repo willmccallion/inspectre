@@ -400,9 +400,4 @@ pub struct Mem2WbEntry {
     pub lr_sc: Option<LrScRecord>,
     /// Vector memory element metadata (flows through from ExMem1Entry).
     pub vec_mem: Option<VecMemElement>,
-    /// Resolved (paddr, data, width) for vector store elements, captured at
-    /// memory2 time. Consumed by the writeback handler to populate the
-    /// per-vec-store side buffer (`VecMemInflight::pending_writes`). `None`
-    /// for non-store entries.
-    pub vec_store_drain: Option<(crate::common::PhysAddr, u64, crate::core::pipeline::signals::MemWidth)>,
 }
