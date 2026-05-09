@@ -16,7 +16,7 @@ use crate::core::pipeline::signals::{VecSrcEncoding, VectorOp};
 use crate::core::units::vpu::alu::{VecExecCtx, VecOperand, vec_execute};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::fpu::rounding_modes::RoundingMode;
-use crate::core::units::vpu::types::{Vxrm, parse_vtype_with_elen};
+use crate::core::units::vpu::types::{Vlmul, Vxrm, parse_vtype_with_elen};
 use crate::core::units::vpu::vsetvl::execute_vsetvl;
 use crate::core::units::vpu::{crypto, fpu, mask, mem, permute, reduction};
 use crate::isa::rvv::encoding as v_enc;
@@ -213,11 +213,56 @@ const fn check_vill(inst: u32, vtype_bits: u64, elen: usize) -> Result<(), Trap>
     Ok(())
 }
 
+/// Returns `true` if `op` widens (or reads/writes a 2×SEW operand) and would
+/// therefore require `EMUL = 2 × LMUL`.
+const fn op_uses_widened_emul(op: VectorOp) -> bool {
+    matches!(
+        op,
+        // Integer/Zvbb widening
+        VectorOp::VWAddU | VectorOp::VWAdd | VectorOp::VWSubU | VectorOp::VWSub
+        | VectorOp::VWAddUW | VectorOp::VWAddW | VectorOp::VWSubUW | VectorOp::VWSubW
+        | VectorOp::VWMulU | VectorOp::VWMul | VectorOp::VWMulSU
+        | VectorOp::VWMaccU | VectorOp::VWMacc | VectorOp::VWMaccSU | VectorOp::VWMaccUS
+        | VectorOp::VWsll
+        // FP widening arithmetic + FMA
+        | VectorOp::VFWAdd | VectorOp::VFWSub | VectorOp::VFWMul
+        | VectorOp::VFWAddW | VectorOp::VFWSubW
+        | VectorOp::VFWMacc | VectorOp::VFWNMacc | VectorOp::VFWMSac | VectorOp::VFWNMSac
+        // FP widening conversions
+        | VectorOp::VFWCvtXuF | VectorOp::VFWCvtXF
+        | VectorOp::VFWCvtFXu | VectorOp::VFWCvtFX | VectorOp::VFWCvtFF
+        | VectorOp::VFWCvtRtzXuF | VectorOp::VFWCvtRtzXF
+        // Narrowing reads vs2 at 2×SEW
+        | VectorOp::VNSrl | VectorOp::VNSra | VectorOp::VNClipU | VectorOp::VNClip
+        | VectorOp::VFNCvtXuF | VectorOp::VFNCvtXF
+        | VectorOp::VFNCvtFXu | VectorOp::VFNCvtFX | VectorOp::VFNCvtFF
+        | VectorOp::VFNCvtRodFF
+        | VectorOp::VFNCvtRtzXuF | VectorOp::VFNCvtRtzXF
+    )
+}
+
+/// Reject widening / narrowing instructions when `2 × LMUL` would exceed the
+/// architectural ceiling of 8 register-group registers.
+///
+/// Widening reductions are excluded: their destination is a single-register
+/// scalar accumulator, so the EMUL ≤ 8 ceiling does not apply.
+#[inline]
+const fn check_widening_lmul(
+    inst: u32,
+    op: VectorOp,
+    vlmul: Vlmul,
+) -> Result<(), Trap> {
+    if matches!(vlmul, Vlmul::M8) && op_uses_widened_emul(op) {
+        return Err(Trap::IllegalInstruction(inst));
+    }
+    Ok(())
+}
+
 /// Execute a vector integer arithmetic operation on the VPR.
 fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
     check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
-
     let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
+    check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
     let operand1 = build_operand1(id);
@@ -249,6 +294,8 @@ fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> 
 /// Execute a vector floating-point operation.
 fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
     check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
+    let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
+    check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -437,6 +484,8 @@ pub fn execute_vec_op_on<V: VectorRegFile>(
     );
 
     check_vill(id.inst, vtype_bits, elen)?;
+    let vtype = parse_vtype_with_elen(vtype_bits, elen);
+    check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
 
     let mut ctx = build_ctx_from_csrs(vtype_bits, vl, vstart, vxrm, frm, elen, zvfh);
     ctx.vm = id.ctrl.vm;
