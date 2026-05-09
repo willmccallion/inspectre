@@ -28,7 +28,8 @@ use crate::core::units::fpu::nan_handling::{
 };
 use crate::core::units::fpu::rounding_modes::RoundingMode;
 use crate::core::units::fpu::{
-    clear_host_fp_flags, read_host_fp_flags, restore_host_round_mode, set_host_round_mode,
+    clear_host_fp_flags, read_host_fp_flags, restore_host_round_mode, rmm_round_f64_to_f32,
+    set_host_round_mode,
 };
 use crate::core::units::vpu::alu::{VecExecCtx, VecExecResult, VecOperand};
 use crate::core::units::vpu::regfile::VectorRegFile;
@@ -1187,7 +1188,15 @@ fn compute_f64(op: VectorOp, vs2_bits: u64, op1_bits: u64, frm: RoundingMode) ->
         }
         VectorOp::VFCvtFXu => {
             clear_host_fp_flags();
-            let r = std::hint::black_box(vs2_bits as f64);
+            // Workaround for an LLVM codegen quirk: `0u64 as f64` under host
+            // FE_DOWNWARD/FE_UPWARD produces a signed zero with the wrong
+            // sign (the software fallback used when CVTUSI2SD_q is unavailable
+            // doesn't short-circuit the zero case). Treat val=0 explicitly.
+            let r = if vs2_bits == 0 {
+                0.0
+            } else {
+                std::hint::black_box(vs2_bits as f64)
+            };
             (canonicalize_f64_bits(r), read_host_fp_flags())
         }
         VectorOp::VFCvtFX => {
@@ -1942,11 +1951,20 @@ fn exec_fp_widening(
             });
             let f = read_host_fp_flags();
             flags = flags | f;
+            // RMM has no native host equivalent (set_host_round_mode mapped it
+            // to FE_TONEAREST). f16+f16 in f64 is exact, so the only rounding
+            // happens in the f64→f32 cast at the end. Use rmm_round_f64_to_f32
+            // to fix the half-ULP ties to max-magnitude under RMM.
+            let r_f32 = if ctx.frm == RoundingMode::Rmm {
+                rmm_round_f64_to_f32(r_f64)
+            } else {
+                r_f64 as f32
+            };
             vpr.write_element(
                 vd_idx,
                 ElemIdx::new(i),
                 wsew,
-                box_f32_canon(r_f64 as f32),
+                box_f32_canon(r_f32),
             );
         }
     }
