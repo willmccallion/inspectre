@@ -2,7 +2,18 @@
 //!
 //! Tracks pending loads and detects memory ordering violations when a store
 //! resolves its address and overlaps with a younger load that has already
-//! executed with potentially stale data. Same circular FIFO design as StoreBuffer.
+//! executed with potentially stale data.
+//!
+//! ## Structure
+//!
+//! Unlike the scalar [`StoreBuffer`](super::store_buffer::StoreBuffer), the
+//! load queue is a **set of slots**, not a circular FIFO. Vector load element
+//! micro-ops complete out of program order — under wave-based issue, an
+//! element near the tail can release its slot before an element at the head
+//! finishes — and a circular FIFO with lazy invalidation deadlocks under
+//! that pattern (middle invalidations don't free the slot until the head
+//! catches up). This implementation reuses any invalidated slot for the
+//! next allocation; ROB ordering is recovered from `rob_tag` on each entry.
 
 use crate::common::{PhysAddr, VirtAddr};
 use crate::core::pipeline::rob::RobTag;
@@ -42,16 +53,12 @@ pub struct LoadQueueEntry {
     pub elem_idx: Option<ElemIdx>,
 }
 
-/// Load queue — FIFO queue of pending loads.
+/// Load queue — bounded set of in-flight loads.
 #[derive(Debug)]
 pub struct LoadQueue {
     entries: Vec<LoadQueueEntry>,
-    /// Index of the oldest entry.
-    head: usize,
-    /// Index where the next entry will be allocated.
-    tail: usize,
-    /// Number of valid entries.
-    count: usize,
+    /// Cached count of valid entries.
+    valid_count: usize,
 }
 
 impl LoadQueue {
@@ -59,7 +66,7 @@ impl LoadQueue {
     pub fn new(capacity: usize) -> Self {
         let mut entries = Vec::with_capacity(capacity);
         entries.resize_with(capacity, LoadQueueEntry::default);
-        Self { entries, head: 0, tail: 0, count: 0 }
+        Self { entries, valid_count: 0 }
     }
 
     /// Returns the capacity.
@@ -68,40 +75,45 @@ impl LoadQueue {
         self.entries.len()
     }
 
-    /// Returns the number of occupied entries.
+    /// Returns the number of valid entries.
     #[inline]
     pub const fn len(&self) -> usize {
-        self.count
+        self.valid_count
     }
 
     /// Returns true if the load queue is empty.
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.count == 0
+        self.valid_count == 0
     }
 
     /// Returns true if the load queue is full.
     #[inline]
     pub const fn is_full(&self) -> bool {
-        self.count == self.entries.len()
+        self.valid_count == self.entries.len()
     }
 
     /// Returns the number of free slots.
     #[inline]
     pub const fn free_slots(&self) -> usize {
-        self.entries.len() - self.count
+        self.entries.len() - self.valid_count
     }
 
-    /// Allocates a slot for a new load. Returns false if the buffer is full.
+    /// Allocates a slot for a new load. Reuses any invalidated slot.
+    /// Returns false if every slot is currently valid.
     ///
     /// `elem_idx` is `None` for scalar loads and `Some(i)` for vector load
     /// element micro-ops.
-    pub fn allocate(&mut self, rob_tag: RobTag, width: MemWidth, elem_idx: Option<ElemIdx>) -> bool {
-        if self.is_full() {
+    pub fn allocate(
+        &mut self,
+        rob_tag: RobTag,
+        width: MemWidth,
+        elem_idx: Option<ElemIdx>,
+    ) -> bool {
+        let Some(slot) = self.entries.iter_mut().find(|e| !e.valid) else {
             return false;
-        }
-
-        self.entries[self.tail] = LoadQueueEntry {
+        };
+        *slot = LoadQueueEntry {
             rob_tag,
             vaddr: VirtAddr::new(0),
             paddr: None,
@@ -111,16 +123,18 @@ impl LoadQueue {
             valid: true,
             elem_idx,
         };
-
-        self.tail = (self.tail + 1) % self.entries.len();
-        self.count += 1;
+        self.valid_count += 1;
         true
     }
 
     /// Fills the translated address for a load after Memory1.
-    ///
-    /// `elem_idx` is `None` for scalar loads and `Some(i)` for vector load elements.
-    pub fn fill_address(&mut self, rob_tag: RobTag, elem_idx: Option<ElemIdx>, vaddr: VirtAddr, paddr: PhysAddr) {
+    pub fn fill_address(
+        &mut self,
+        rob_tag: RobTag,
+        elem_idx: Option<ElemIdx>,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+    ) {
         if let Some(entry) = self.find_by_tag_and_elem_mut(rob_tag, elem_idx) {
             entry.vaddr = vaddr;
             entry.paddr = Some(paddr);
@@ -129,8 +143,6 @@ impl LoadQueue {
     }
 
     /// Fills the loaded data for a load after Memory2.
-    ///
-    /// `elem_idx` is `None` for scalar loads and `Some(i)` for vector load elements.
     pub fn fill_data(&mut self, rob_tag: RobTag, elem_idx: Option<ElemIdx>, data: u64) {
         if let Some(entry) = self.find_by_tag_and_elem_mut(rob_tag, elem_idx) {
             entry.data = data;
@@ -141,7 +153,7 @@ impl LoadQueue {
     /// Checks for memory ordering violations when a store resolves its address.
     ///
     /// Scans for younger loads (`rob_tag` > `store_rob_tag`) that have already
-    /// executed and overlap with the store's address range. Returns the oldest
+    /// executed and overlap the store's address range. Returns the oldest
     /// violating load's `rob_tag`, if any.
     pub fn check_ordering_violation(
         &self,
@@ -149,95 +161,56 @@ impl LoadQueue {
         store_width: MemWidth,
         store_rob_tag: RobTag,
     ) -> Option<RobTag> {
-        if self.count == 0 {
-            return None;
-        }
-
         let store_size = width_to_bytes(store_width) as u64;
         let store_start = store_paddr.val();
         let store_end = store_start + store_size;
 
-        let cap = self.entries.len();
-        let mut idx = self.head;
         let mut oldest_violator: Option<RobTag> = None;
-
-        for _ in 0..self.count {
-            let entry = &self.entries[idx];
-            if entry.valid
-                && entry.rob_tag.is_newer_than(store_rob_tag)
-                && entry.state == LoadState::Executed
-                && let Some(load_paddr) = entry.paddr
+        for entry in &self.entries {
+            if !entry.valid
+                || !entry.rob_tag.is_newer_than(store_rob_tag)
+                || entry.state != LoadState::Executed
             {
-                let load_size = width_to_bytes(entry.width) as u64;
-                let load_start = load_paddr.val();
-                let load_end = load_start + load_size;
-
-                // Check for any overlap
-                if load_start < store_end && load_end > store_start {
-                    match oldest_violator {
-                        None => oldest_violator = Some(entry.rob_tag),
-                        Some(prev) if entry.rob_tag.is_older_than(prev) => {
-                            oldest_violator = Some(entry.rob_tag);
-                        }
-                        _ => {}
+                continue;
+            }
+            let Some(load_paddr) = entry.paddr else { continue };
+            let load_size = width_to_bytes(entry.width) as u64;
+            let load_start = load_paddr.val();
+            let load_end = load_start + load_size;
+            if load_start < store_end && load_end > store_start {
+                match oldest_violator {
+                    None => oldest_violator = Some(entry.rob_tag),
+                    Some(prev) if entry.rob_tag.is_older_than(prev) => {
+                        oldest_violator = Some(entry.rob_tag);
                     }
+                    _ => {}
                 }
             }
-            idx = (idx + 1) % cap;
         }
-
         oldest_violator
     }
 
     /// Deallocates all load queue entries with the given ROB tag.
-    ///
-    /// For scalar loads this removes a single entry. For vector loads this
-    /// removes all per-element entries that share the same `rob_tag`.
     pub fn deallocate(&mut self, rob_tag: RobTag) {
-        if self.count == 0 {
-            return;
-        }
-
-        let cap = self.entries.len();
-        let mut idx = self.head;
-        for _ in 0..self.count {
-            if self.entries[idx].valid && self.entries[idx].rob_tag == rob_tag {
-                self.entries[idx].valid = false;
+        for entry in &mut self.entries {
+            if entry.valid && entry.rob_tag == rob_tag {
+                entry.valid = false;
+                self.valid_count -= 1;
             }
-            idx = (idx + 1) % cap;
-        }
-
-        // Advance head past any invalid entries at the front.
-        while self.count > 0 && !self.entries[self.head].valid {
-            self.head = (self.head + 1) % cap;
-            self.count -= 1;
         }
     }
 
     /// Deallocates a single LQ entry matching `(rob_tag, elem_idx)`.
     ///
     /// Used for vector load element micro-ops, which are released individually
-    /// at writeback (per-element wave-based reclaim). The IQ guard prevents
-    /// any older store from resolving after the vec load's issue, so once an
-    /// element passes Memory2 its LQ entry is no longer needed for ordering
-    /// checks and the slot can be reused for the next wave.
+    /// at writeback (per-element wave-based reclaim).
     pub fn deallocate_elem(&mut self, rob_tag: RobTag, elem_idx: ElemIdx) {
-        if self.count == 0 {
-            return;
-        }
-        let cap = self.entries.len();
-        let mut idx = self.head;
-        for _ in 0..self.count {
-            let e = &mut self.entries[idx];
-            if e.valid && e.rob_tag == rob_tag && e.elem_idx == Some(elem_idx) {
-                e.valid = false;
-                break;
+        for entry in &mut self.entries {
+            if entry.valid && entry.rob_tag == rob_tag && entry.elem_idx == Some(elem_idx) {
+                entry.valid = false;
+                self.valid_count -= 1;
+                return;
             }
-            idx = (idx + 1) % cap;
-        }
-        while self.count > 0 && !self.entries[self.head].valid {
-            self.head = (self.head + 1) % cap;
-            self.count -= 1;
         }
     }
 
@@ -246,59 +219,27 @@ impl LoadQueue {
         for entry in &mut self.entries {
             entry.valid = false;
         }
-        self.head = 0;
-        self.tail = 0;
-        self.count = 0;
+        self.valid_count = 0;
     }
 
     /// Flushes entries newer than `keep_tag` (misprediction recovery).
     pub fn flush_after(&mut self, keep_tag: RobTag) {
-        if self.count == 0 {
-            return;
-        }
-
-        let cap = self.entries.len();
-        let mut new_tail = self.head;
-        let mut new_count = 0;
-        let mut idx = self.head;
-
-        for _ in 0..self.count {
-            let entry = &self.entries[idx];
-            if entry.valid && entry.rob_tag.is_older_or_eq(keep_tag) {
-                if idx != new_tail {
-                    self.entries[new_tail] = self.entries[idx].clone();
-                    self.entries[idx].valid = false;
-                }
-                new_tail = (new_tail + 1) % cap;
-                new_count += 1;
-            } else {
-                self.entries[idx].valid = false;
+        for entry in &mut self.entries {
+            if entry.valid && entry.rob_tag.is_newer_than(keep_tag) {
+                entry.valid = false;
+                self.valid_count -= 1;
             }
-            idx = (idx + 1) % cap;
         }
-
-        self.tail = new_tail;
-        self.count = new_count;
     }
 
-    /// Finds the entry with the given ROB tag and element index.
     fn find_by_tag_and_elem_mut(
         &mut self,
         rob_tag: RobTag,
         elem_idx: Option<ElemIdx>,
     ) -> Option<&mut LoadQueueEntry> {
-        let cap = self.entries.len();
-        let mut idx = self.head;
-        for _ in 0..self.count {
-            if self.entries[idx].valid
-                && self.entries[idx].rob_tag == rob_tag
-                && self.entries[idx].elem_idx == elem_idx
-            {
-                return Some(&mut self.entries[idx]);
-            }
-            idx = (idx + 1) % cap;
-        }
-        None
+        self.entries
+            .iter_mut()
+            .find(|e| e.valid && e.rob_tag == rob_tag && e.elem_idx == elem_idx)
     }
 }
 
@@ -319,7 +260,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_allocate_and_deallocate() {
+    fn allocate_and_deallocate() {
         let mut lq = LoadQueue::new(4);
         assert!(lq.is_empty());
 
@@ -335,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn test_full_queue() {
+    fn full_queue() {
         let mut lq = LoadQueue::new(2);
         assert!(lq.allocate(RobTag(1), MemWidth::Word, None));
         assert!(lq.allocate(RobTag(2), MemWidth::Word, None));
@@ -344,7 +285,27 @@ mod tests {
     }
 
     #[test]
-    fn test_ordering_violation() {
+    fn deallocate_elem_reuses_slot_after_middle_invalidation() {
+        // Out-of-order completion: invalidate a middle entry, then allocate.
+        // The freed slot must be reusable. (Regression: the previous circular
+        // FIFO leaked middle slots and deadlocked vec-segment loads.)
+        let mut lq = LoadQueue::new(3);
+        lq.allocate(RobTag(1), MemWidth::Word, Some(ElemIdx::new(0)));
+        lq.allocate(RobTag(1), MemWidth::Word, Some(ElemIdx::new(1)));
+        lq.allocate(RobTag(1), MemWidth::Word, Some(ElemIdx::new(2)));
+        assert!(lq.is_full());
+
+        // Free the middle entry, not the head.
+        lq.deallocate_elem(RobTag(1), ElemIdx::new(1));
+        assert!(!lq.is_full());
+        assert_eq!(lq.free_slots(), 1);
+
+        // The freed slot must be reusable.
+        assert!(lq.allocate(RobTag(2), MemWidth::Word, Some(ElemIdx::new(0))));
+    }
+
+    #[test]
+    fn ordering_violation() {
         let mut lq = LoadQueue::new(4);
 
         // Younger load (tag=3) executes before older store (tag=2) resolves
@@ -360,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_violation_different_address() {
+    fn no_violation_different_address() {
         let mut lq = LoadQueue::new(4);
 
         let load_tag = RobTag(3);
@@ -368,17 +329,15 @@ mod tests {
         lq.fill_address(load_tag, None, VirtAddr::new(0x2000), PhysAddr::new(0x8000_0004));
         lq.fill_data(load_tag, None, 0x12345678);
 
-        // Store to different address — no violation
         let result =
             lq.check_ordering_violation(PhysAddr::new(0x8000_0000), MemWidth::Word, RobTag(2));
         assert_eq!(result, None);
     }
 
     #[test]
-    fn test_no_violation_older_load() {
+    fn no_violation_older_load() {
         let mut lq = LoadQueue::new(4);
 
-        // Load is older than store — no violation (correct ordering)
         let load_tag = RobTag(1);
         lq.allocate(load_tag, MemWidth::Word, None);
         lq.fill_address(load_tag, None, VirtAddr::new(0x1000), PhysAddr::new(0x8000_0000));
@@ -390,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_after() {
+    fn flush_after_keeps_older() {
         let mut lq = LoadQueue::new(4);
         lq.allocate(RobTag(1), MemWidth::Word, None);
         lq.allocate(RobTag(2), MemWidth::Word, None);
@@ -401,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn test_flush_all() {
+    fn flush_clears_all() {
         let mut lq = LoadQueue::new(4);
         lq.allocate(RobTag(1), MemWidth::Word, None);
         lq.allocate(RobTag(2), MemWidth::Word, None);
@@ -411,11 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn test_circular_wraparound() {
+    fn capacity_two_repeatedly_reused() {
         let mut lq = LoadQueue::new(2);
         for i in 1..=10 {
             let tag = RobTag(i);
-            lq.allocate(tag, MemWidth::Word, None);
+            assert!(lq.allocate(tag, MemWidth::Word, None));
             lq.fill_address(tag, None, VirtAddr::new(0x1000), PhysAddr::new(0x8000_0000));
             lq.fill_data(tag, None, i as u64);
             lq.deallocate(tag);
