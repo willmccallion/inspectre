@@ -1270,11 +1270,10 @@ impl ExecutionEngine for O3Engine {
                     if !is_store
                         && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info
                     {
-                        for i in 0..vd_cnt_pre as usize {
-                            if i < saved.vec_src3_count as usize {
-                                self.vec_prf
-                                    .copy_reg(vd_phys_arr_pre[i], saved.vs3_phys[i]);
-                            }
+                        let copy_count = (vd_cnt_pre as usize)
+                            .min(saved.vec_src3_count as usize);
+                        for (i, &dst) in vd_phys_arr_pre.iter().enumerate().take(copy_count) {
+                            self.vec_prf.copy_reg(dst, saved.vs3_phys[i]);
                         }
                     }
 
