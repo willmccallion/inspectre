@@ -1177,6 +1177,25 @@ impl ExecutionEngine for O3Engine {
                     let vd_count = vec_dst_info.map_or(0u8, |(_, c, _)| c);
                     let vd_phys_arr = vec_dst_info.map_or([VecPhysReg::ZERO; 8], |(p, _, _)| p);
 
+                    // Reject illegal EMUL (>8) before generating micro-ops;
+                    // generate_element_addrs_vrf would otherwise compute a
+                    // VRegIdx beyond 31 and panic. Both InOrder and O3 share
+                    // this check via mem::check_vec_mem_emul.
+                    let vtype = crate::core::units::vpu::types::parse_vtype(saved.vec_vtype);
+                    if let Err(trap) = crate::core::units::vpu::mem::check_vec_mem_emul(
+                        ex_result.inst,
+                        vec_op,
+                        &saved.ctrl,
+                        &vtype,
+                    ) {
+                        self.rob.fault(
+                            ex_result.rob_tag,
+                            trap,
+                            crate::common::error::ExceptionStage::Execute,
+                        );
+                        continue;
+                    }
+
                     // Build VecPrfView with rename-time physregs for the
                     // operands this vec mem op reads. Without these overrides,
                     // a younger instruction that has re-renamed e.g. v1 would

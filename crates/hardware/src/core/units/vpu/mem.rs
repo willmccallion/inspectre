@@ -10,7 +10,62 @@ use crate::core::Cpu;
 use crate::core::pipeline::latches::{ExMem1Entry, RenameIssueEntry};
 use crate::core::pipeline::signals::{ControlSignals, VectorOp};
 use crate::core::units::vpu::regfile::VectorRegFile;
-use crate::core::units::vpu::types::{ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, parse_vtype};
+use crate::core::units::vpu::types::{ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, VtypeFields, parse_vtype};
+
+/// Reject vector memory operations whose effective register-group size or
+/// destination alignment violates RVV 1.0 §10.1.4 (`EMUL > 8`, `EMUL < 1/8`,
+/// or `vd` not aligned to `EMUL × NF`). The encoding is reserved for those
+/// cases.
+///
+/// Returns `Err(IllegalInstruction)` for the offending case.
+pub fn check_vec_mem_emul(
+    inst: u32,
+    op: VectorOp,
+    ctrl: &ControlSignals,
+    vtype: &VtypeFields,
+) -> Result<(), Trap> {
+    if vtype.vill {
+        return Ok(());
+    }
+    let eew = ctrl.vec_eew;
+    let sew = vtype.vsew;
+    let lmul = vtype.vlmul;
+    let vd = ctrl.vd.as_u8() as usize;
+    let illegal = match op {
+        VectorOp::VLoadUnit | VectorOp::VStoreUnit | VectorOp::VLoadFF
+        | VectorOp::VLoadStride | VectorOp::VStoreStride => {
+            let nf = (ctrl.vec_nf as usize).saturating_add(1);
+            let (lnum, lden) = lmul.as_fraction();
+            let emul_num = eew.bits() * lnum;
+            let emul_den = sew.bits() * lden;
+            let emul = if emul_num >= emul_den { emul_num / emul_den } else { 0 };
+            let total = emul.saturating_mul(nf);
+            emul > 8 || total > 8 || vd + total > 32 || (emul > 0 && !vd.is_multiple_of(emul))
+        }
+        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+            // Index EMUL = (idx_EEW * LMUL) / SEW; data EMUL = LMUL.
+            let nf = (ctrl.vec_nf as usize).saturating_add(1);
+            let (lnum, lden) = lmul.as_fraction();
+            let idx_num = eew.bits() * lnum;
+            let idx_den = sew.bits() * lden;
+            let idx_emul = if idx_num >= idx_den { idx_num / idx_den } else { 0 };
+            let data_emul = if lnum >= lden { lnum / lden } else { 0 };
+            let total = data_emul.saturating_mul(nf);
+            idx_emul > 8
+                || total > 8
+                || vd + total > 32
+                || (data_emul > 0 && !vd.is_multiple_of(data_emul))
+        }
+        // Mask and whole-register accesses are constrained at the encoding
+        // level (NF = 0/1/3/7) and never exceed 8 registers.
+        _ => false,
+    };
+    if illegal {
+        return Err(Trap::IllegalInstruction(inst));
+    }
+    Ok(())
+}
 
 /// A single element address micro-op generated for the O3 vector memory pipeline.
 ///
@@ -42,6 +97,8 @@ pub struct VecMemAddrOp {
 /// fault or access fault (except for fault-only-first loads where only
 /// element 0 faults propagate).
 pub fn execute_vec_load(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
+    let vtype = parse_vtype(cpu.csrs.vtype);
+    check_vec_mem_emul(id.inst, id.ctrl.vec_op, &id.ctrl, &vtype)?;
     let eew = id.ctrl.vec_eew;
     let vd = id.ctrl.vd;
     let base_addr = id.rv1; // rs1 holds the base address
@@ -72,6 +129,8 @@ pub fn execute_vec_load(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Tra
 /// Returns a `Trap` if any element access causes an address translation
 /// fault or access fault.
 pub fn execute_vec_store(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
+    let vtype = parse_vtype(cpu.csrs.vtype);
+    check_vec_mem_emul(id.inst, id.ctrl.vec_op, &id.ctrl, &vtype)?;
     let eew = id.ctrl.vec_eew;
     let vs3 = id.ctrl.vd; // vd field encodes vs3 (store data source) for stores
     let base_addr = id.rv1;
