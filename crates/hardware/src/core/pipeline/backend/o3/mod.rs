@@ -919,13 +919,30 @@ impl ExecutionEngine for O3Engine {
                 let is_vec_mem_op = fu_type == FuType::VecMem;
 
                 // Save vector destination info before execute_one consumes the entry.
-                let vec_grp = entry.ctrl.vec_op.operand_groups(
+                // For vec mem ops the dest group spans `nf × EMUL_data`
+                // registers, not just LMUL — match what rename allocated by
+                // overriding from vec_mem_dst_count (operand_groups can't
+                // compute it without the architectural vtype).
+                let mut vec_grp = entry.ctrl.vec_op.operand_groups(
                     entry.ctrl.vec_lmul_regs,
                     entry.ctrl.vec_lmul_is_fractional,
                     entry.ctrl.vec_src_encoding,
                     entry.ctrl.vec_nf,
                     entry.ctrl.vec_broadcast_vs2,
                 );
+                if is_vec_mem_op {
+                    let vtype =
+                        crate::core::units::vpu::types::parse_vtype(entry.vec_vtype);
+                    if !vtype.vill {
+                        vec_grp.vd = crate::core::units::vpu::mem::vec_mem_dst_count(
+                            entry.ctrl.vec_op,
+                            entry.ctrl.vec_eew,
+                            vtype.vsew,
+                            vtype.vlmul,
+                            entry.ctrl.vec_nf,
+                        );
+                    }
+                }
                 let vec_dst_info = if entry.ctrl.vec_reg_write && vec_grp.vd > 0 {
                     Some((entry.vd_phys, vec_grp.vd, entry.ctrl.vd))
                 } else {

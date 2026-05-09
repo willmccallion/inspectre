@@ -13,8 +13,8 @@ use crate::core::pipeline::engine::ExecutionEngine;
 use crate::core::pipeline::latches::{IdExEntry, RenameIssueEntry};
 use crate::core::pipeline::prf::PhysReg;
 use crate::core::pipeline::signals::{ControlFlow, VectorOp};
-use crate::core::units::vpu::mem::is_vec_store;
-use crate::core::units::vpu::types::{VRegIdx, VecPhysReg};
+use crate::core::units::vpu::mem::{is_vec_load, is_vec_store, vec_mem_dst_count, vec_mem_emul_regs};
+use crate::core::units::vpu::types::{VRegIdx, VecPhysReg, parse_vtype};
 use crate::trace_rename;
 
 /// Executes the rename stage: allocate ROB/SB entries, capture source tags, mark scoreboard.
@@ -82,13 +82,41 @@ pub fn rename_stage<E: ExecutionEngine>(
             // Must happen BEFORE vector destination rename (same principle
             // as scalar: capture old mappings before rename map update).
             let lmul = id.ctrl.vec_lmul_regs;
-            let grp = id.ctrl.vec_op.operand_groups(
+            let mut grp = id.ctrl.vec_op.operand_groups(
                 lmul,
                 id.ctrl.vec_lmul_is_fractional,
                 id.ctrl.vec_src_encoding,
                 id.ctrl.vec_nf,
                 id.ctrl.vec_broadcast_vs2,
             );
+            // For vec mem ops the dest register-group is `nf × EMUL_data`,
+            // not LMUL — and indexed loads have a separate index EMUL for
+            // vs2. operand_groups can't compute these without EEW/SEW so
+            // override here using the architectural vtype snapshot.
+            let is_mem = is_vec_load(id.ctrl.vec_op) || is_vec_store(id.ctrl.vec_op);
+            if is_mem {
+                let vtype = parse_vtype(cpu.csrs.vtype);
+                if !vtype.vill {
+                    grp.vd = vec_mem_dst_count(
+                        id.ctrl.vec_op,
+                        id.ctrl.vec_eew,
+                        vtype.vsew,
+                        vtype.vlmul,
+                        id.ctrl.vec_nf,
+                    );
+                    let (_, idx_emul) = vec_mem_emul_regs(
+                        id.ctrl.vec_op,
+                        id.ctrl.vec_eew,
+                        vtype.vsew,
+                        vtype.vlmul,
+                    );
+                    if idx_emul > 0 {
+                        grp.vs2 = idx_emul;
+                    } else {
+                        grp.vs2 = 0;
+                    }
+                }
+            }
             let mut vs1_phys = [VecPhysReg::ZERO; 8];
             let mut vs2_phys = [VecPhysReg::ZERO; 8];
             let mut vs3_phys = [VecPhysReg::ZERO; 8];

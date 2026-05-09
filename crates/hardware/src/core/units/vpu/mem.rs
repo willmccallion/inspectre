@@ -12,6 +12,65 @@ use crate::core::pipeline::signals::{ControlSignals, VectorOp};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::vpu::types::{ElemIdx, Emul, Nf, Sew, VRegIdx, VecPhysReg, VtypeFields, parse_vtype};
 
+/// Returns `(data_emul_regs, idx_emul_regs)` for a vec memory op given its
+/// EEW, vtype SEW, and LMUL. `data_emul_regs` is the destination (or stored
+/// value) register-group size in registers; `idx_emul_regs` is the index
+/// vector size in registers for indexed loads/stores (0 otherwise). Each is
+/// at least 1, mirroring the spec's `max(1, EEW × LMUL / SEW)` floor.
+#[must_use]
+pub fn vec_mem_emul_regs(
+    op: VectorOp,
+    eew: Sew,
+    sew: Sew,
+    lmul: crate::core::units::vpu::types::Vlmul,
+) -> (u8, u8) {
+    let (lnum, lden) = lmul.as_fraction();
+    let lmul_regs = if lnum >= lden { (lnum / lden) as u8 } else { 1 };
+    match op {
+        VectorOp::VLoadIndexOrd | VectorOp::VLoadIndexUnord
+        | VectorOp::VStoreIndexOrd | VectorOp::VStoreIndexUnord => {
+            // Indexed: data EMUL = LMUL, index EMUL = (idx_EEW × LMUL) / SEW.
+            let idx_num = eew.bits() * lnum;
+            let idx_den = sew.bits() * lden;
+            let idx = if idx_num >= idx_den {
+                ((idx_num / idx_den) as u8).max(1)
+            } else {
+                1
+            };
+            (lmul_regs, idx)
+        }
+        VectorOp::VLoadUnit | VectorOp::VLoadFF | VectorOp::VStoreUnit
+        | VectorOp::VLoadStride | VectorOp::VStoreStride => {
+            // Unit/strided: data EMUL = (EEW × LMUL) / SEW.
+            let num = eew.bits() * lnum;
+            let den = sew.bits() * lden;
+            let emul = if num >= den { ((num / den) as u8).max(1) } else { 1 };
+            (emul, 0)
+        }
+        // Mask and whole-reg ops have fixed group sizes encoded elsewhere.
+        _ => (lmul_regs, 0),
+    }
+}
+
+/// Returns the total destination register-group size for a vec mem op,
+/// already multiplied by the segment count `nf+1`.
+#[must_use]
+pub fn vec_mem_dst_count(
+    op: VectorOp,
+    eew: Sew,
+    sew: Sew,
+    lmul: crate::core::units::vpu::types::Vlmul,
+    nf_field: u8,
+) -> u8 {
+    let (data_emul, _) = vec_mem_emul_regs(op, eew, sew, lmul);
+    let nf = (nf_field as u16 + 1).min(8) as u8;
+    match op {
+        VectorOp::VLoadMask | VectorOp::VStoreMask => 1,
+        VectorOp::VLoadWholeReg | VectorOp::VStoreWholeReg => (nf_field + 1).min(8),
+        _ => data_emul.saturating_mul(nf).min(8),
+    }
+}
+
 /// Reject vector memory operations whose effective register-group size or
 /// destination alignment violates RVV 1.0 §10.1.4 (`EMUL > 8`, `EMUL < 1/8`,
 /// or `vd` not aligned to `EMUL × NF`). The encoding is reserved for those

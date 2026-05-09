@@ -1492,7 +1492,9 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                 // RVV 1.0 §3.4.2: vector register operands must be aligned to
                 // their effective group size and the group must fit within
                 // v0-v31.  The per-operand group sizes come from the single
-                // source of truth: VectorOp::operand_groups().
+                // source of truth: VectorOp::operand_groups(), with vec mem
+                // ops re-sized for `nf × EMUL_data` and indexed loads also
+                // for the index vector's EMUL.
                 if trap.is_none() {
                     let g = ctrl.vec_op.operand_groups(
                         lmul,
@@ -1505,11 +1507,46 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                     let vs2 = ctrl.vs2.as_u8();
                     let vs1 = ctrl.vs1.as_u8();
 
-                    let bad = |reg: u8, grp: u8| -> bool {
+                    let is_mem = crate::core::units::vpu::mem::is_vec_load(ctrl.vec_op)
+                        || crate::core::units::vpu::mem::is_vec_store(ctrl.vec_op);
+
+                    let bad_aligned = |reg: u8, grp: u8| -> bool {
                         grp > 1 && (!reg.is_multiple_of(grp) || reg.saturating_add(grp) > 32)
                     };
+                    // Memory ops: each segment field is its own EMUL-aligned
+                    // group; only the per-field alignment is required, but all
+                    // NF × EMUL registers must fit. Non-memory ops keep the
+                    // single-group rule.
+                    let mem_misaligned = if is_mem && !vtype.vill {
+                        let total = crate::core::units::vpu::mem::vec_mem_dst_count(
+                            ctrl.vec_op,
+                            ctrl.vec_eew,
+                            vtype.vsew,
+                            vtype.vlmul,
+                            ctrl.vec_nf,
+                        );
+                        let (data_emul, idx_emul) =
+                            crate::core::units::vpu::mem::vec_mem_emul_regs(
+                                ctrl.vec_op,
+                                ctrl.vec_eew,
+                                vtype.vsew,
+                                vtype.vlmul,
+                            );
+                        let vd_misaligned = data_emul > 1 && !vd.is_multiple_of(data_emul);
+                        let vd_overflows = vd.saturating_add(total) > 32;
+                        let vs2_misaligned = idx_emul > 1
+                            && (!vs2.is_multiple_of(idx_emul)
+                                || vs2.saturating_add(idx_emul) > 32);
+                        vd_misaligned || vd_overflows || vs2_misaligned
+                    } else {
+                        false
+                    };
+                    let arith_bad = !is_mem
+                        && (bad_aligned(vd, g.vd)
+                            || bad_aligned(vs2, g.vs2)
+                            || bad_aligned(vs1, g.vs1));
 
-                    if bad(vd, g.vd) || bad(vs2, g.vs2) || bad(vs1, g.vs1) {
+                    if mem_misaligned || arith_bad {
                         ctrl = ControlSignals::default();
                         trap = Some(Trap::IllegalInstruction(inst));
                         ex_stage = Some(ExceptionStage::Decode);
