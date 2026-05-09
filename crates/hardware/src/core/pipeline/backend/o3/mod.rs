@@ -1167,10 +1167,34 @@ impl ExecutionEngine for O3Engine {
                     let vd_count = vec_dst_info.map_or(0u8, |(_, c, _)| c);
                     let vd_phys_arr = vec_dst_info.map_or([VecPhysReg::ZERO; 8], |(p, _, _)| p);
 
-                    // Build VecPrfView for reading store data and index values
+                    // Build VecPrfView with rename-time physregs for the
+                    // operands this vec mem op reads. Without these overrides,
+                    // a younger instruction that has re-renamed e.g. v1 would
+                    // cause our store to read the newer mapping's data — wrong.
+                    // Mirrors the vec_arith path's mapping construction.
                     let mut mapping = [VecPhysReg::ZERO; 32];
                     for i in 0..32u8 {
                         mapping[i as usize] = self.rename_map.get_vec(VRegIdx::new(i));
+                    }
+                    // Override vs2 (index source for indexed loads/stores).
+                    {
+                        let base = saved.ctrl.vs2.as_u8() as usize;
+                        for i in 0..saved.vec_src2_count as usize {
+                            if base + i < 32 {
+                                mapping[base + i] = saved.vs2_phys[i];
+                            }
+                        }
+                    }
+                    // Override vd: for stores it's the data source (vs3 in
+                    // rename-time terms); for loads it's the old vd content
+                    // we need for tail/mask-undisturbed merging.
+                    {
+                        let base = saved.ctrl.vd.as_u8() as usize;
+                        for i in 0..saved.vec_src3_count as usize {
+                            if base + i < 32 {
+                                mapping[base + i] = saved.vs3_phys[i];
+                            }
+                        }
                     }
                     let micro_ops = {
                         let view = VecPrfView::new(&mut self.vec_prf, mapping);
