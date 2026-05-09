@@ -390,61 +390,56 @@ fn aes_kf2(curr_key: [u32; 4], prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
 // GHASH (Zvkg) — GF(2^128) multiply with reduction polynomial x^128 + x^7 + x^2 + x + 1
 // ============================================================================
 
-/// GHASH encoding: state and operands are stored as 4 LE u32 words. The
-/// 128-bit GHASH value is **bit-reversed** within each byte vs the natural
-/// big-endian layout used by NIST GCM. Per Zvkg spec, the `vghsh` and
-/// `vgmul` instructions interpret the 128-bit register as a polynomial
-/// over GF(2^128) using the GCM convention.
-
-/// Multiply two 128-bit values in GF(2^128) using the GCM convention
-/// (bit-reflected polynomial representation; reduction polynomial
-/// x^128 + x^7 + x^2 + x + 1).
-fn gf128_mul(a: [u32; 4], b: [u32; 4]) -> [u32; 4] {
-    let a_be: u128 = (u128::from(a[3]) << 96)
-        | (u128::from(a[2]) << 64)
-        | (u128::from(a[1]) << 32)
-        | u128::from(a[0]);
-    let b_be: u128 = (u128::from(b[3]) << 96)
-        | (u128::from(b[2]) << 64)
-        | (u128::from(b[1]) << 32)
-        | u128::from(b[0]);
-
-    // Reflect bits within each byte to GCM's bit-ordering convention.
-    let a_r = reflect128(a_be);
-    let mut z: u128 = 0;
-    let mut v: u128 = reflect128(b_be);
-
-    for i in 0..128 {
-        if (a_r >> (127 - i)) & 1 == 1 {
-            z ^= v;
-        }
-        let lsb = v & 1;
-        v >>= 1;
-        if lsb == 1 {
-            v ^= 0xE100_0000_0000_0000_0000_0000_0000_0000_u128;
-        }
-    }
-    let z_final = reflect128(z);
-    [
-        z_final as u32,
-        (z_final >> 32) as u32,
-        (z_final >> 64) as u32,
-        (z_final >> 96) as u32,
-    ]
+/// Reverse bits within each byte of a u32. Matches Spike's ZVK_BREV8_32 macro.
+#[inline]
+const fn brev8_u32(mut x: u32) -> u32 {
+    x = ((x & 0x5555_5555) << 1) | ((x & 0xaaaa_aaaa) >> 1);
+    x = ((x & 0x3333_3333) << 2) | ((x & 0xcccc_cccc) >> 2);
+    x = ((x & 0x0f0f_0f0f) << 4) | ((x & 0xf0f0_f0f0) >> 4);
+    x
 }
 
-/// Reflect bits within each byte of a 128-bit value.
+/// Apply BREV8 to each lane of a [u32; 4] element group.
 #[inline]
-const fn reflect128(mut v: u128) -> u128 {
-    let mut r: u128 = 0;
-    let mut i = 0;
-    while i < 16 {
-        let byte = (v & 0xff) as u8;
-        r |= (byte.reverse_bits() as u128) << (i * 8);
-        v >>= 8;
-        i += 1;
+const fn brev8_u32x4(x: [u32; 4]) -> [u32; 4] {
+    [brev8_u32(x[0]), brev8_u32(x[1]), brev8_u32(x[2]), brev8_u32(x[3])]
+}
+
+/// `multiplier * multiplicand` in GF(2^128) using the GHASH (NIST GCM)
+/// convention: BREV8 the operands, run a left-shift carry-less multiply
+/// with reduction polynomial 0x87 (x^128 + x^7 + x^2 + x + 1), then BREV8
+/// the result. Mirrors Spike's vgmul/vghsh inner loop verbatim.
+fn gf128_mul(multiplier: [u32; 4], multiplicand: [u32; 4]) -> [u32; 4] {
+    let y = brev8_u32x4(multiplier);
+    let mut h = brev8_u32x4(multiplicand);
+    let mut z = [0u32; 4];
+
+    for bit in 0..128 {
+        let word = bit / 32;
+        let bit_in_word = bit % 32;
+        if (y[word] >> bit_in_word) & 1 == 1 {
+            for i in 0..4 {
+                z[i] ^= h[i];
+            }
+        }
+
+        let reduce = (h[3] >> 31) & 1 == 1;
+        // 128-bit left shift treating h as h[3]:h[2]:h[1]:h[0] (high → low).
+        let h_full = (u128::from(h[3]) << 96)
+            | (u128::from(h[2]) << 64)
+            | (u128::from(h[1]) << 32)
+            | u128::from(h[0]);
+        let shifted = h_full << 1;
+        h[0] = shifted as u32;
+        h[1] = (shifted >> 32) as u32;
+        h[2] = (shifted >> 64) as u32;
+        h[3] = (shifted >> 96) as u32;
+        if reduce {
+            h[0] ^= 0x87;
+        }
     }
-    r
+
+    brev8_u32x4(z)
 }
 
 // ============================================================================
@@ -968,11 +963,13 @@ pub fn execute_crypto(
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VGhsh => {
+                // Per Zvkg: vd = (vd ^ vs1) * vs2  (Y partial-hash, X cipher
+                // output, H subkey).
                 let vd = read_egs4_u32(vpr, vd_idx, base);
                 let vs2 = read_egs4_u32(vpr, vs2_idx, base);
                 let vs1 = read_egs4_u32(vpr, vs1_idx, base);
-                let xored = [vd[0] ^ vs2[0], vd[1] ^ vs2[1], vd[2] ^ vs2[2], vd[3] ^ vs2[3]];
-                let r = gf128_mul(xored, vs1);
+                let xored = [vd[0] ^ vs1[0], vd[1] ^ vs1[1], vd[2] ^ vs1[2], vd[3] ^ vs1[3]];
+                let r = gf128_mul(xored, vs2);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             _ => unreachable!("execute_crypto called with non-crypto op {:?}", op),
