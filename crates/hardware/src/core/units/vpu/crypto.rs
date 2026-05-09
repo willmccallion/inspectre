@@ -486,53 +486,23 @@ const fn sha256_maj(x: u32, y: u32, z: u32) -> u32 {
     (x & y) ^ (x & z) ^ (y & z)
 }
 
-/// vsha2ms.vv (SHA-256 message scheduling).
-/// vd = {W[i+12], W[i+11], W[i+10], W[i+9]}
-/// vs2 = {W[i+1], W[i], W[i+15], W[i+14]} ... wait per spec it's different
-///
-/// Per the RVV crypto spec §vsha2ms:
-///   vd holds {W[i+3], W[i+2], W[i+1], W[i]} (LE order) = current 4 words
-///   vs1 holds {W[i+11], W[i+10], W[i+9], W[i+8]}
-///   vs2 holds {W[i+15], W[i+14], W[i+13], W[i+12]} -- actually {W[i+15],W[i+14],W[i+9],W[i+8]}
-/// Updated: produces {W[i+19], W[i+18], W[i+17], W[i+16]}
-///
-/// The actual semantic per the spec (paraphrased from the cryptographic
-/// commentary): each output word W[j] = sigma1(W[j-2]) + W[j-7] + sigma0(W[j-15]) + W[j-16].
-/// The instruction packs four such updates per element group.
+/// vsha2ms.vv — SHA-256 message scheduling. Per Zvknha:
+///   vd  = {W3,  W2,  W1,  W0 } (vd[0]=W0, vd[3]=W3)
+///   vs2 = {W11, W10, W9,  W4 } (vs2[0]=W4, vs2[3]=W11)
+///   vs1 = {W15, W14, W13, W12} (vs1[0]=W12, vs1[3]=W15)
+/// Output replaces vd with {W19, W18, W17, W16}.
 fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
-    // From the spec (Zvknha §vsha2ms):
-    //   {W[i+ 3], W[i+ 2], W[i+ 1], W[i+ 0]} = vd
-    //   {W[i+ 7], W[i+ 6], W[i+ 5], W[i+ 4]} = vs1  (only [i+4] used here? NO — vs1 = {W[i+11], W[i+10], W[i+9], W[i+4]})
-    //   {W[i+15], W[i+14], W[i+13], W[i+12]} = vs2  (only some used)
-    // This is intricate; the canonical mapping is documented in the spec.
-
-    // Element layout (little-endian within EGS):
-    //   vd[0] = W0  vd[1] = W1  vd[2] = W2  vd[3] = W3
-    //   vs1[0]=W4   vs1[1]=W5   vs1[2]=W6   vs1[3]=W7   <-- but per spec, vs1={W11,W10,W9,W4}
-    //   vs2[0]=W12  vs2[1]=W13  vs2[2]=W14  vs2[3]=W15
-    // For vsha2ms the canonical RVV semantic per spec text (and matching
-    // OpenSSL/spike): the four input element groups are W[0..3] in vd,
-    // W[9..12] interleaved in vs1, and W[14,15,...] in vs2. The output
-    // is W[16..19] which then becomes the new vd.
-    //
-    // The cleanest formulation (from spike's vsha2ms_vv.h):
-    //   W16 = sigma1(W14) + W9 + sigma0(W1) + W0
-    //   W17 = sigma1(W15) + W10 + sigma0(W2) + W1
-    //   W18 = sigma1(W16) + W11 + sigma0(W3) + W2
-    //   W19 = sigma1(W17) + W12 + sigma0(W4) + W3
-    // where vs1 = {W4, W9, W10, W11} and vs2 = {W12, W13, W14, W15}.
     let w0 = vd[0];
     let w1 = vd[1];
     let w2 = vd[2];
     let w3 = vd[3];
-    let w4 = vs1[0];
-    let w9 = vs1[1];
-    let w10 = vs1[2];
-    let w11 = vs1[3];
-    let w12 = vs2[0];
-    // vs2[1] = w13 (unused in update equations)
-    let w14 = vs2[2];
-    let w15 = vs2[3];
+    let w4 = vs2[0];
+    let w9 = vs2[1];
+    let w10 = vs2[2];
+    let w11 = vs2[3];
+    let w12 = vs1[0];
+    let w14 = vs1[2];
+    let w15 = vs1[3];
 
     let w16 = sha256_sigma1(w14)
         .wrapping_add(w9)
@@ -553,78 +523,50 @@ fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
     [w16, w17, w18, w19]
 }
 
-/// vsha2ch.vv / vsha2cl.vv — SHA-256 compression.
-///
-/// Each instruction performs 4 rounds of SHA-256. The "ch" form uses the
-/// "current high half" of the state, "cl" uses the low half. Per spec:
-///   vd contains {a, b, e, f} for "cl" (or {c, d, g, h} for "ch")
-///   vs1 contains the message schedule + K (4 round constants combined)
-///   vs2 contains the other half of the state
-fn sha256_compress_low(
-    vd: [u32; 4],   // {f, e, b, a} -- low half (most recently updated)
-    vs2: [u32; 4],  // {h, g, d, c} -- high half (older)
-    vs1: [u32; 4],  // {W[i+3]+K[i+3], W[i+2]+K[i+2], W[i+1]+K[i+1], W[i]+K[i]}
-) -> [u32; 4] {
-    // Spike's vsha2cl_vv.h: output is new {f', e', b', a'} after 4 rounds.
-    let mut a = vd[3];
-    let mut b = vd[2];
-    let mut e = vd[1];
-    let mut f = vd[0];
-    let mut c = vs2[3];
-    let mut d = vs2[2];
-    let mut g = vs2[1];
-    let mut h = vs2[0];
-
-    for i in 0..4 {
-        let mkw = vs1[i];
-        let t1 = h
-            .wrapping_add(sha256_sum1(e))
-            .wrapping_add(sha256_ch(e, f, g))
-            .wrapping_add(mkw);
-        let t2 = sha256_sum0(a).wrapping_add(sha256_maj(a, b, c));
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
-    }
-    [f, e, b, a]
+/// One SHA-256 round step on the (a..h) state, mutating in place per FIPS-180-4.
+#[inline]
+fn sha256_round(state: &mut [u32; 8], kw: u32) {
+    let [a, b, c, d, e, f, g, h] = *state;
+    let t1 = h
+        .wrapping_add(sha256_sum1(e))
+        .wrapping_add(sha256_ch(e, f, g))
+        .wrapping_add(kw);
+    let t2 = sha256_sum0(a).wrapping_add(sha256_maj(a, b, c));
+    *state = [t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g];
 }
 
-fn sha256_compress_high(
-    vd: [u32; 4],   // {h, g, d, c} -- high half
-    vs2: [u32; 4],  // {f, e, b, a} -- low half
-    vs1: [u32; 4],  // {W[i+3]+K[i+3], W[i+2]+K[i+2], W[i+1]+K[i+1], W[i]+K[i]}
-) -> [u32; 4] {
-    let mut a = vs2[3];
-    let mut b = vs2[2];
-    let mut e = vs2[1];
-    let mut f = vs2[0];
-    let mut c = vd[3];
-    let mut d = vd[2];
-    let mut g = vd[1];
-    let mut h = vd[0];
+/// vsha2cl.vv / vsha2ch.vv share state layout per Zvknha:
+///   vd  = {c, d, g, h}     (vd[0]=h, vd[1]=g, vd[2]=d, vd[3]=c)
+///   vs2 = {a, b, e, f}     (vs2[0]=f, vs2[1]=e, vs2[2]=b, vs2[3]=a)
+///   vs1 = {kw3, kw2, kw1, kw0}
+/// .vsha2cl runs 2 compression rounds with kw0 then kw1; .vsha2ch uses
+/// kw2 then kw3. After two rounds the destination is rewritten to the
+/// updated low half {a', b', e', f'}.
+fn sha256_compress(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4], kw_indices: [usize; 2]) -> [u32; 4] {
+    let h = vd[0];
+    let g = vd[1];
+    let d = vd[2];
+    let c = vd[3];
+    let f = vs2[0];
+    let e = vs2[1];
+    let b = vs2[2];
+    let a = vs2[3];
 
-    for i in 0..4 {
-        let mkw = vs1[i];
-        let t1 = h
-            .wrapping_add(sha256_sum1(e))
-            .wrapping_add(sha256_ch(e, f, g))
-            .wrapping_add(mkw);
-        let t2 = sha256_sum0(a).wrapping_add(sha256_maj(a, b, c));
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(t1);
-        d = c;
-        c = b;
-        b = a;
-        a = t1.wrapping_add(t2);
+    let mut state = [a, b, c, d, e, f, g, h];
+    for &idx in &kw_indices {
+        sha256_round(&mut state, vs1[idx]);
     }
-    [h, g, d, c]
+    [state[5], state[4], state[1], state[0]]
+}
+
+#[inline]
+fn sha256_compress_low(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
+    sha256_compress(vd, vs2, vs1, [0, 1])
+}
+
+#[inline]
+fn sha256_compress_high(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
+    sha256_compress(vd, vs2, vs1, [2, 3])
 }
 
 // ============================================================================
