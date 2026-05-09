@@ -214,6 +214,33 @@ impl LoadQueue {
         }
     }
 
+    /// Deallocates a single LQ entry matching `(rob_tag, elem_idx)`.
+    ///
+    /// Used for vector load element micro-ops, which are released individually
+    /// at writeback (per-element wave-based reclaim). The IQ guard prevents
+    /// any older store from resolving after the vec load's issue, so once an
+    /// element passes Memory2 its LQ entry is no longer needed for ordering
+    /// checks and the slot can be reused for the next wave.
+    pub fn deallocate_elem(&mut self, rob_tag: RobTag, elem_idx: ElemIdx) {
+        if self.count == 0 {
+            return;
+        }
+        let cap = self.entries.len();
+        let mut idx = self.head;
+        for _ in 0..self.count {
+            let e = &mut self.entries[idx];
+            if e.valid && e.rob_tag == rob_tag && e.elem_idx == Some(elem_idx) {
+                e.valid = false;
+                break;
+            }
+            idx = (idx + 1) % cap;
+        }
+        while self.count > 0 && !self.entries[self.head].valid {
+            self.head = (self.head + 1) % cap;
+            self.count -= 1;
+        }
+    }
+
     /// Flushes all entries (trap / full pipeline flush).
     pub fn flush(&mut self) {
         for entry in &mut self.entries {

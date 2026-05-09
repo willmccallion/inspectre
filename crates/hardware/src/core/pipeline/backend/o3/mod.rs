@@ -136,6 +136,18 @@ pub struct VecMemMicroOp {
 }
 
 /// Tracks an in-flight vector memory instruction's completion state.
+///
+/// Vector memory ops are too wide for a fixed-size LQ/SB to hold all elements
+/// at once (e.g. e8/m8 at VLEN=128 produces 128 elements; LQ/SB defaults are
+/// 32/16). This entry implements wave-based issue: micro-ops are generated up
+/// front but only as many LQ/SB slots as are available are taken at first.
+/// The remaining micro-ops sit in `pending_micro_ops` and are pushed into the
+/// memory pipeline as LQ/SB slots free at writeback.
+///
+/// For vec stores, resolved (paddr, data, width) tuples are captured in
+/// `pending_writes` at memory2 time. The SB slot is freed at writeback. At
+/// commit, `committed` is set; the tick-level `drain_one_vec_store_write`
+/// pops one entry per cycle from `pending_writes` and writes it to memory.
 #[derive(Debug, Clone)]
 pub struct VecMemInflight {
     /// ROB tag of the parent vector memory instruction.
@@ -148,6 +160,18 @@ pub struct VecMemInflight {
     pub vd_count: u8,
     /// Whether chaining wakeup has fired (first cache-line returned).
     pub wakeup_fired: bool,
+    /// Micro-ops generated at issue but not yet pushed into the memory
+    /// pipeline (waiting for LQ/SB slots to free up).
+    pub pending_micro_ops: std::collections::VecDeque<VecMemMicroOp>,
+    /// Resolved (paddr, data, width) tuples for vec store elements,
+    /// captured at memory2 time. Drained to memory at commit.
+    pub pending_writes: Vec<(crate::common::PhysAddr, u64, crate::core::pipeline::signals::MemWidth)>,
+    /// Whether the parent vec store has committed (gates side-buffer drain).
+    pub committed: bool,
+    /// True from allocation until the entry is fully done (all micro-ops
+    /// completed and, for stores, all `pending_writes` drained). Used to gate
+    /// younger vec mem ops in the issue queue.
+    pub in_progress: bool,
 }
 
 impl O3Engine {
@@ -288,6 +312,45 @@ impl O3Engine {
             }
         }
     }
+
+    /// Wave-based vec mem op issue: pump pending element micro-ops from each
+    /// in-flight vec mem op into `vec_mem_pending`, allocating LQ/SB slots as
+    /// they free up.
+    ///
+    /// Vector ops can have far more elements than the LQ/SB has slots (e.g.
+    /// e8/m8 at VLEN=128 = 128 elements, default LQ=32, SB=16). Allocating
+    /// the whole vec op up front would deadlock at issue. Instead each vec
+    /// op stages its micro-ops in `pending_micro_ops`; this function drains
+    /// them in program order, taking a fresh LQ/SB slot per element. Per-
+    /// element slots are released at writeback (`deallocate_elem`), so each
+    /// wave completes and frees capacity for the next.
+    fn issue_vec_mem_waves(&mut self) {
+        use crate::core::pipeline::signals::MemWidth as MW;
+        // Iterate inflight entries in program order (Vec push order ==
+        // RobTag order in the absence of wraparound, which the ROB tag
+        // wrap window of u32 makes a non-issue here).
+        for inflight in &mut self.vec_mem_inflight {
+            while let Some(front) = inflight.pending_micro_ops.front() {
+                let w = match front.eew.bytes() {
+                    1 => MW::Byte, 2 => MW::Half,
+                    4 => MW::Word, 8 => MW::Double,
+                    _ => MW::Word,
+                };
+                let elem_idx = front.elem_idx;
+                let rob_tag = front.entry.rob_tag;
+                let is_store = front.is_store;
+                if is_store {
+                    if !self.store_buffer.allocate(rob_tag, w, Some(elem_idx)) {
+                        break;
+                    }
+                } else if !self.load_queue.allocate(rob_tag, w, Some(elem_idx)) {
+                    break;
+                }
+                let mop = inflight.pending_micro_ops.pop_front().unwrap();
+                self.vec_mem_pending.push_back(mop);
+            }
+        }
+    }
 }
 
 impl ExecutionEngine for O3Engine {
@@ -322,6 +385,7 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.checkpoints),
             Some(&mut self.vec_prf),
             Some(&mut self.vec_free_list),
+            Some(&mut self.vec_mem_inflight),
         );
 
         // Handle trap: flush everything
@@ -373,6 +437,21 @@ impl ExecutionEngine for O3Engine {
                             wb.load_data,
                         );
                     }
+                    // Wave-based reclaim: free this element's LQ/SB slot now.
+                    // For stores, also stash the resolved (paddr, data, width)
+                    // into the per-vec-store side buffer so it can drain to
+                    // memory at commit time.
+                    if vme.is_store {
+                        if let Some(write) = wb.vec_store_drain {
+                            let pidx = vme.parent_idx.0;
+                            if pidx < self.vec_mem_inflight.len() {
+                                self.vec_mem_inflight[pidx].pending_writes.push(write);
+                            }
+                        }
+                        self.store_buffer.deallocate_elem(wb.rob_tag, vme.elem_idx);
+                    } else {
+                        self.load_queue.deallocate_elem(wb.rob_tag, vme.elem_idx);
+                    }
                     // Decrement parent's outstanding count
                     let pidx = vme.parent_idx.0;
                     if pidx < self.vec_mem_inflight.len() {
@@ -393,9 +472,15 @@ impl ExecutionEngine for O3Engine {
                             parent.wakeup_fired = true;
                         }
 
-                        // All elements done: mark ROB complete
+                        // All elements done: mark ROB complete. For loads,
+                        // mark not in_progress (no further side-buffer drain).
+                        // For stores, in_progress stays true until the
+                        // committed pending_writes drain to memory.
                         if parent.remaining == 0 {
                             self.rob.complete(parent.rob_tag, 0);
+                            if !vme.is_store && parent.pending_micro_ops.is_empty() {
+                                parent.in_progress = false;
+                            }
                         }
                     }
                     // Do NOT pass to normal writeback — we handled it
@@ -474,6 +559,7 @@ impl ExecutionEngine for O3Engine {
             &mut self.store_buffer,
             &mut self.rob,
             Some(&mut self.load_queue),
+            Some(&self.vec_mem_inflight),
         );
 
         // Notify MDP when stores resolve — wake instructions waiting on them.
@@ -681,10 +767,12 @@ impl ExecutionEngine for O3Engine {
             }
         }
 
-        // ── 6a'. Drain vector memory micro-ops into memory pipeline ──
-        // Each cycle, push up to load_ports (loads) or store_ports (stores)
-        // vector memory micro-ops from vec_mem_pending into execute_mem1,
-        // competing with scalar memory ops for memory pipeline bandwidth.
+        // ── 6a'. Wave-based vec mem op issue → drain to memory pipeline ──
+        // First, refill vec_mem_pending from each in-flight vec mem op's
+        // pending_micro_ops queue, allocating LQ/SB slots as capacity allows.
+        // Then push from vec_mem_pending into execute_mem1, bounded by
+        // load_ports / store_ports per cycle.
+        self.issue_vec_mem_waves();
         {
             let mut loads_issued = 0usize;
             let mut stores_issued = 0usize;
@@ -720,8 +808,23 @@ impl ExecutionEngine for O3Engine {
                     }
                     vp.wakeup_fired = true;
                 }
-                // At full_complete: mark ROB entry complete, remove from pending
+                // At full_complete: mark ROB entry complete, remove from pending.
+                // Some configurations (e.g. vl=0 ops with startup_latency >
+                // body latency) reach full_complete before first_group_ready;
+                // in that case, fire the chaining wakeup *now* — otherwise
+                // the entry would be removed without ever marking the
+                // destination phys regs ready, leaving any dependent in the
+                // IQ stuck forever.
                 if now >= vp.full_complete {
+                    if !vp.wakeup_fired {
+                        for j in 0..vp.vd_count as usize {
+                            self.vec_prf.mark_ready(vp.vd_phys[j]);
+                        }
+                        for j in 0..vp.vd_count as usize {
+                            self.issue_queue.wakeup_vec_phys(vp.vd_phys[j], &self.vec_prf);
+                        }
+                        vp.wakeup_fired = true;
+                    }
                     self.rob.complete(vp.rob_tag, 0);
                     let _ = self.vec_pending.swap_remove(i);
                 } else {
@@ -1089,56 +1192,13 @@ impl ExecutionEngine for O3Engine {
                     } else {
                         use crate::core::pipeline::signals::{MemWidth as MW, VectorOp};
 
-                        // Allocate SB/LQ entries for each element micro-op.
-                        if is_store {
-                            if self.store_buffer.free_slots() < micro_ops.len() {
-                                // SB full — stall: re-dispatch to IQ
-                                let ok = self.issue_queue.dispatch(
-                                    saved_entry.unwrap(), &self.rob, cpu,
-                                    Some(&self.prf), Some(&self.vec_prf), mem_dep,
-                                );
-                                debug_assert!(ok, "re-dispatch after SB stall failed");
-                                continue;
-                            }
-                            for mop in &micro_ops {
-                                let w = match mop.eew.bytes() {
-                                    1 => MW::Byte, 2 => MW::Half,
-                                    4 => MW::Word, 8 => MW::Double,
-                                    _ => MW::Word,
-                                };
-                                let _ = self.store_buffer.allocate(
-                                    ex_result.rob_tag, w, Some(mop.elem_idx),
-                                );
-                            }
-                        } else {
-                            if self.load_queue.free_slots() < micro_ops.len() {
-                                let ok = self.issue_queue.dispatch(
-                                    saved_entry.unwrap(), &self.rob, cpu,
-                                    Some(&self.prf), Some(&self.vec_prf), mem_dep,
-                                );
-                                debug_assert!(ok, "re-dispatch after LQ stall failed");
-                                continue;
-                            }
-                            for mop in &micro_ops {
-                                let w = match mop.eew.bytes() {
-                                    1 => MW::Byte, 2 => MW::Half,
-                                    4 => MW::Word, 8 => MW::Double,
-                                    _ => MW::Word,
-                                };
-                                let _ = self.load_queue.allocate(
-                                    ex_result.rob_tag, w, Some(mop.elem_idx),
-                                );
-                            }
-                        }
-
+                        // Build all element micro-ops up front. They will be
+                        // released into the memory pipeline in waves, bounded
+                        // by current LQ/SB capacity, by issue_vec_mem_waves().
                         let parent_idx = VecMemInflightIdx(self.vec_mem_inflight.len());
-                        self.vec_mem_inflight.push(VecMemInflight {
-                            rob_tag: ex_result.rob_tag,
-                            remaining: micro_ops.len(),
-                            vd_phys: vd_phys_arr,
-                            vd_count,
-                            wakeup_fired: false,
-                        });
+                        let total = micro_ops.len();
+                        let mut all_micro_ops: std::collections::VecDeque<VecMemMicroOp> =
+                            std::collections::VecDeque::with_capacity(total);
                         for mop in micro_ops {
                             let eew_width = match mop.eew.bytes() {
                                 1 => MW::Byte, 2 => MW::Half,
@@ -1160,7 +1220,7 @@ impl ExecutionEngine for O3Engine {
                                 vd_phys: mop.vd_phys,
                                 is_store,
                             };
-                            self.vec_mem_pending.push_back(VecMemMicroOp {
+                            all_micro_ops.push_back(VecMemMicroOp {
                                 entry: ExMem1Entry {
                                     rob_tag: ex_result.rob_tag,
                                     pc: ex_result.pc,
@@ -1184,6 +1244,18 @@ impl ExecutionEngine for O3Engine {
                                 is_store,
                             });
                         }
+
+                        self.vec_mem_inflight.push(VecMemInflight {
+                            rob_tag: ex_result.rob_tag,
+                            remaining: total,
+                            vd_phys: vd_phys_arr,
+                            vd_count,
+                            wakeup_fired: false,
+                            pending_micro_ops: all_micro_ops,
+                            pending_writes: Vec::new(),
+                            committed: false,
+                            in_progress: true,
+                        });
                     }
 
                     let keep_tag = ex_result.rob_tag;
@@ -1405,6 +1477,50 @@ impl ExecutionEngine for O3Engine {
     }
 
     fn flush(&mut self, cpu: &mut Cpu) {
+        // Drain any committed vec-store side-buffer writes BEFORE clearing
+        // vec_mem_inflight. A trap-driven flush (e.g. ECALL) tears down
+        // every in-flight structure but the side buffer holds the resolved
+        // store data for committed-but-not-yet-drained vec stores; losing
+        // it would silently drop architectural writes that committed before
+        // the trap. Speculative (not-yet-committed) entries are correctly
+        // discarded with the rest of the pipeline.
+        for inflight in &mut self.vec_mem_inflight {
+            if !inflight.committed {
+                continue;
+            }
+            while !inflight.pending_writes.is_empty() {
+                let (paddr, data, width) = inflight.pending_writes.remove(0);
+                let raw = paddr.val();
+                let in_htif = cpu.htif_range.is_some_and(|(lo, hi)| raw >= lo && raw < hi);
+                let is_ram = !in_htif && raw >= cpu.ram_start && raw < cpu.ram_end;
+                if is_ram {
+                    let offset = (raw - cpu.ram_start) as usize;
+                    use crate::core::pipeline::signals::MemWidth as MW;
+                    unsafe {
+                        match width {
+                            MW::Byte => *cpu.ram_ptr.add(offset) = data as u8,
+                            MW::Half => (cpu.ram_ptr.add(offset) as *mut u16)
+                                .write_unaligned(data as u16),
+                            MW::Word => (cpu.ram_ptr.add(offset) as *mut u32)
+                                .write_unaligned(data as u32),
+                            MW::Double => (cpu.ram_ptr.add(offset) as *mut u64)
+                                .write_unaligned(data),
+                            MW::Nop => {}
+                        }
+                    }
+                } else {
+                    use crate::core::pipeline::signals::MemWidth as MW;
+                    match width {
+                        MW::Byte => cpu.bus.bus.write_u8(paddr, data as u8),
+                        MW::Half => cpu.bus.bus.write_u16(paddr, data as u16),
+                        MW::Word => cpu.bus.bus.write_u32(paddr, data as u32),
+                        MW::Double => cpu.bus.bus.write_u64(paddr, data),
+                        MW::Nop => {}
+                    }
+                }
+            }
+        }
+
         // Reclaim all phys_dst regs for every in-flight ROB entry
         for entry in self.rob.iter_all() {
             self.free_list.reclaim(entry.phys_dst);

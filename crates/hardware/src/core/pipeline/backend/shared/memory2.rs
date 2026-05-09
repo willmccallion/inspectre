@@ -10,7 +10,7 @@ use crate::core::pipeline::latches::{Mem1Mem2Entry, Mem2WbEntry};
 use crate::core::pipeline::load_queue::LoadQueue;
 use crate::core::pipeline::rob::{Rob, RobTag};
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};
-use crate::core::pipeline::store_buffer::{ForwardResult, StoreBuffer};
+use crate::core::pipeline::store_buffer::{ForwardResult, StoreBuffer, width_to_bytes};
 use crate::core::units::lsu::Lsu;
 use crate::trace_fwd;
 use crate::trace_mem;
@@ -28,6 +28,7 @@ pub fn memory2_stage(
     store_buffer: &mut StoreBuffer,
     _rob: &mut Rob,
     mut load_queue: Option<&mut LoadQueue>,
+    vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
 ) -> Option<(RobTag, u64)> {
     let mut violation: Option<(RobTag, u64)> = None;
     let mut entries = std::mem::take(input);
@@ -69,6 +70,7 @@ pub fn memory2_stage(
                 sfence_vma: mem.sfence_vma,
                 lr_sc: None,
                 vec_mem: mem.vec_mem,
+                vec_store_drain: None,
             });
             // Trap: remaining entries stay in the input latch for next cycle.
             // They will be flushed by the commit-stage trap handler, but must
@@ -85,6 +87,7 @@ pub fn memory2_stage(
         let trap: Option<Trap> = None;
         let exception_stage: Option<ExceptionStage> = None;
         let mut lr_sc: Option<LrScRecord> = None;
+        let mut vec_store_drain_for_wb: Option<(crate::common::PhysAddr, u64, MemWidth)> = None;
 
         if mem.ctrl.atomic_op != AtomicOp::None {
             // Atomic operations
@@ -178,8 +181,18 @@ pub fn memory2_stage(
                 }
             }
         } else if mem.ctrl.mem_read {
-            // Check store buffer for forwarding first
-            match store_buffer.forward_load(raw_paddr, mem.ctrl.width, mem.rob_tag) {
+            // Check store buffer for forwarding first; if SB misses, also check
+            // the per-vec-store side buffers (entries from older vec stores
+            // that have already been resolved at memory2 and freed from SB
+            // but not yet drained to memory).
+            let sb_result = store_buffer.forward_load(raw_paddr, mem.ctrl.width, mem.rob_tag);
+            let fwd = match sb_result {
+                ForwardResult::Miss => forward_from_vec_side_buffers(
+                    raw_paddr, mem.ctrl.width, mem.rob_tag, vec_inflight,
+                ),
+                other => other,
+            };
+            match fwd {
                 ForwardResult::Hit(forwarded) => {
                     // Apply sign extension for signed loads (LB, LH, LW on RV64).
                     // The store buffer returns raw masked data without sign extension.
@@ -337,6 +350,12 @@ pub fn memory2_stage(
             // Stores: resolve store buffer with paddr + data, NO memory write
             let sb_elem = mem.vec_mem.as_ref().map(|vme| vme.elem_idx);
             store_buffer.resolve(mem.rob_tag, sb_elem, mem.vaddr, raw_paddr, mem.store_data);
+            // For vector store element micro-ops, also stash the resolved
+            // (paddr, data, width) so the O3 writeback handler can copy it
+            // into the per-vec-store side buffer before freeing the SB slot.
+            if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store) {
+                vec_store_drain_for_wb = Some((raw_paddr, mem.store_data, mem.ctrl.width));
+            }
 
             // Check for memory ordering violation: did a younger load already
             // execute with stale data at this address?
@@ -406,6 +425,7 @@ pub fn memory2_stage(
             sfence_vma: mem.sfence_vma,
             lr_sc,
             vec_mem: mem.vec_mem,
+            vec_store_drain: vec_store_drain_for_wb,
         });
 
         if trap.is_some() {
@@ -415,6 +435,79 @@ pub fn memory2_stage(
     }
 
     violation
+}
+
+/// Walks the per-vec-store side buffers (`VecMemInflight::pending_writes`)
+/// looking for a forwarding match for `(paddr, width)` from a vec store
+/// older than `load_rob_tag`.
+///
+/// Vec stores release their SB slots at writeback, but their resolved data
+/// only drains to memory at commit. Between writeback and drain, that data
+/// lives in the per-instruction side buffer. Younger loads that hit the
+/// same address would otherwise read stale memory; this function provides
+/// the missing forwarding path for that window.
+fn forward_from_vec_side_buffers(
+    paddr: crate::common::PhysAddr,
+    width: MemWidth,
+    load_rob_tag: RobTag,
+    vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
+) -> ForwardResult {
+    let Some(inflight) = vec_inflight else { return ForwardResult::Miss };
+    let load_size = width_to_bytes(width);
+    let load_start = paddr.val();
+    let load_end = load_start + load_size as u64;
+
+    let mut best: Option<(RobTag, u8, u64)> = None; // (tag, store_size, hit_data)
+    let mut had_partial_overlap_from_older = false;
+
+    for entry in inflight {
+        // Only older vec stores are candidates (older than the load).
+        if !entry.rob_tag.is_older_than(load_rob_tag) {
+            continue;
+        }
+        if entry.pending_writes.is_empty() {
+            continue;
+        }
+        for &(store_paddr, store_data, store_width) in &entry.pending_writes {
+            let store_size = width_to_bytes(store_width) as u64;
+            let store_start = store_paddr.val();
+            let store_end = store_start + store_size;
+            if load_start >= store_end || load_end <= store_start {
+                continue; // no overlap
+            }
+            if store_start <= load_start && store_end >= load_end {
+                // Full cover: prefer the youngest such match.
+                let offset = (load_start - store_start) as u32;
+                let shifted = store_data >> (offset * 8);
+                let mask = if load_size >= 8 {
+                    u64::MAX
+                } else {
+                    (1u64 << (load_size * 8)) - 1
+                };
+                let hit = shifted & mask;
+                match best {
+                    None => best = Some((entry.rob_tag, store_size as u8, hit)),
+                    Some((prev_tag, _, _)) if entry.rob_tag.is_newer_than(prev_tag) => {
+                        best = Some((entry.rob_tag, store_size as u8, hit));
+                    }
+                    _ => {}
+                }
+            } else {
+                // Partial overlap from an older vec store: must stall (rare —
+                // chipsalliance tests don't mix scalar/vec at sub-element
+                // alignment, but we model the conservative case).
+                had_partial_overlap_from_older = true;
+            }
+        }
+    }
+
+    if let Some((_, _, hit)) = best {
+        ForwardResult::Hit(hit)
+    } else if had_partial_overlap_from_older {
+        ForwardResult::Stall
+    } else {
+        ForwardResult::Miss
+    }
 }
 
 #[cfg(test)]
@@ -459,7 +552,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0);
@@ -498,7 +591,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0); // Input is drained because trap is pushed
@@ -544,7 +637,7 @@ mod tests {
         }];
         let mut output = Vec::new();
 
-        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, &mut rob, None);
+        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, &mut rob, None, None);
         // LR does NOT set reservation at Memory2 — deferred to commit
         assert!(!cpu.check_reservation(PhysAddr::new(0x8000_0000)));
         // But the output carries the deferred LR record
@@ -578,7 +671,7 @@ mod tests {
             vec_mem: None,
         }];
 
-        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, &mut rob, None);
+        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, &mut rob, None, None);
         // SC optimistically returns 0 (success) — actual check deferred to commit
         assert_eq!(output[0].load_data, 0);
         assert!(matches!(output[0].lr_sc, Some(LrScRecord::Sc { paddr: PhysAddr(0x8000_0000) })));
@@ -637,6 +730,7 @@ mod tests {
             &mut store_buffer,
             &mut rob,
             Some(&mut load_queue),
+            None,
         );
 
         assert_eq!(violation, Some((RobTag(5), 0x1000))); // Older store detected overlap with younger load

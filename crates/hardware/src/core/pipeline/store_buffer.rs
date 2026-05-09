@@ -219,6 +219,34 @@ impl StoreBuffer {
         }
     }
 
+    /// Deallocates a single SB entry matching `(rob_tag, elem_idx)`.
+    ///
+    /// Used for vector store element micro-ops at writeback time: the element's
+    /// resolved (paddr, data) has already been moved into the per-vec-store
+    /// side buffer (`VecMemInflight::pending_writes`), so the SB slot can be
+    /// freed. This implements wave-based vec store issue: SB capacity bounds
+    /// the in-flight window per element, not the entire vec instruction.
+    pub fn deallocate_elem(&mut self, rob_tag: RobTag, elem_idx: ElemIdx) {
+        if self.count == 0 {
+            return;
+        }
+        let cap = self.entries.len();
+        let mut idx = self.head;
+        for _ in 0..self.count {
+            let entry = &mut self.entries[idx];
+            if entry.valid && entry.rob_tag == rob_tag && entry.elem_idx == Some(elem_idx) {
+                entry.valid = false;
+                break;
+            }
+            idx = (idx + 1) % cap;
+        }
+        // Reclaim slots from the head while they're invalid.
+        while self.count > 0 && !self.entries[self.head].valid {
+            self.head = (self.head + 1) % cap;
+            self.count -= 1;
+        }
+    }
+
     /// Attempts store-to-load forwarding.
     ///
     /// Returns `Hit(data)` if a pending store fully covers the load,

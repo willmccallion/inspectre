@@ -128,6 +128,7 @@ impl ExecutionEngine for InOrderEngine {
             None, // in-order backend: no checkpoints
             None, // in-order backend: no vec PRF
             None, // in-order backend: no vec free list
+            None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
         );
 
         // Handle trap: flush everything
@@ -159,6 +160,7 @@ impl ExecutionEngine for InOrderEngine {
             &mut self.store_buffer,
             &mut self.rob,
             None, // in-order backend: no load queue
+            None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
         );
 
         // Memory1: address translation (gated by mem1_stall)
