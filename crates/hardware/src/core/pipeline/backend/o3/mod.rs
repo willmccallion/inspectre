@@ -446,21 +446,26 @@ impl ExecutionEngine for O3Engine {
                     {
                         parent.remaining = parent.remaining.saturating_sub(1);
 
-                        // First element returned: fire chaining wakeup
-                        if !parent.wakeup_fired {
-                            for j in 0..parent.vd_count as usize {
-                                self.vec_prf.mark_ready(parent.vd_phys[j]);
-                            }
-                            for j in 0..parent.vd_count as usize {
-                                self.issue_queue
-                                    .wakeup_vec_phys(parent.vd_phys[j], &self.vec_prf);
-                            }
-                            parent.wakeup_fired = true;
-                        }
-
-                        // All elements done: mark ROB complete. The VSB owns
-                        // any further drain bookkeeping for stores.
+                        // All elements done: mark vd ready, fire chaining
+                        // wakeup, and mark ROB complete. We wake only on full
+                        // completion (not on first element) because dependents
+                        // that read this vd as a source — including the
+                        // producer's own tail/mask-undisturbed merge — do a
+                        // bulk read across all elements at execute time. A
+                        // chaining wakeup at first element would let dependents
+                        // issue before later elements are written, reading
+                        // partial data. VSB owns drain bookkeeping for stores.
                         if parent.remaining == 0 {
+                            if !parent.wakeup_fired {
+                                for j in 0..parent.vd_count as usize {
+                                    self.vec_prf.mark_ready(parent.vd_phys[j]);
+                                }
+                                for j in 0..parent.vd_count as usize {
+                                    self.issue_queue
+                                        .wakeup_vec_phys(parent.vd_phys[j], &self.vec_prf);
+                                }
+                                parent.wakeup_fired = true;
+                            }
                             self.rob.complete(parent.rob_tag, 0);
                         }
                     }
@@ -1218,7 +1223,26 @@ impl ExecutionEngine for O3Engine {
                     };
 
                     if micro_ops.is_empty() {
-                        // VL=0 or vill: complete immediately
+                        // VL=0 or vill=1: no element micro-ops to issue. Loads
+                        // still own freshly-renamed destination physregs that
+                        // dependents are waiting on; without a chaining wakeup
+                        // they would block in the IQ forever. Pre-copy the old
+                        // vd contents into the new physregs (so undisturbed
+                        // reads return architectural state), mark them ready,
+                        // then broadcast the wakeup before retiring the ROB.
+                        if !is_store
+                            && let Some((vd_phys_arr, vd_cnt, _vd_reg)) = vec_dst_info
+                        {
+                            for i in 0..vd_cnt as usize {
+                                if i < saved.vec_src3_count as usize {
+                                    self.vec_prf
+                                        .copy_reg(vd_phys_arr[i], saved.vs3_phys[i]);
+                                }
+                                self.vec_prf.mark_ready(vd_phys_arr[i]);
+                                self.issue_queue
+                                    .wakeup_vec_phys(vd_phys_arr[i], &self.vec_prf);
+                            }
+                        }
                         self.rob.complete(ex_result.rob_tag, 0);
                     } else {
                         // Build all element micro-ops up front. They will be
