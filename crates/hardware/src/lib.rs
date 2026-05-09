@@ -1,6 +1,8 @@
 //! RISC-V system simulator library.
 //!
-//! This crate implements a cycle-accurate RISC-V RV64GC simulator with the following:
+//! Cycle-accurate RV64GC + RVV 1.0 simulator core.
+//!
+//! Components:
 //! 1. **Core:** 10-stage pipeline (Fetch1/2, Decode, Rename, Issue, Execute, Mem1/2, WB, Commit),
 //!    GPR/FPR, and CSR state.
 //! 2. **Memory:** MMU, TLB, caches, prefetchers, and configurable memory controllers.

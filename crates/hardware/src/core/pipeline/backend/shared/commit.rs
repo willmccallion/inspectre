@@ -661,7 +661,7 @@ pub fn commit_stage(
     // nothing committed, fall through to the VSB so total commit-time store
     // bandwidth stays at one write per cycle.
     if !try_drain_one_store(cpu, store_buffer)
-        && let Some(vsb) = vec_store_buffer.as_deref_mut()
+        && let Some(vsb) = vec_store_buffer
     {
         let _ = vsb.drain_one_committed(cpu);
     }

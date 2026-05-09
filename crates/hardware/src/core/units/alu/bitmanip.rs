@@ -107,9 +107,7 @@ pub const fn execute(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
                 let ua = a as u32;
                 let ub = b as u32;
                 sext32(if ua > ub { ua } else { ub })
-            } else {
-                if a > b { a } else { b }
-            }
+            } else if a > b { a } else { b }
         }
         AluOp::Min => {
             if is32 {
@@ -127,9 +125,7 @@ pub const fn execute(op: AluOp, a: u64, b: u64, is32: bool) -> u64 {
                 let ua = a as u32;
                 let ub = b as u32;
                 sext32(if ua < ub { ua } else { ub })
-            } else {
-                if a < b { a } else { b }
-            }
+            } else if a < b { a } else { b }
         }
 
         AluOp::SextB => {

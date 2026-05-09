@@ -143,24 +143,24 @@ const AES_RCON: [u8; 11] = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
 #[inline]
 const fn xtime(b: u8) -> u8 {
     let high = b >> 7;
-    ((b << 1) ^ (high.wrapping_neg() & 0x1b)) as u8
+    (b << 1) ^ (high.wrapping_neg() & 0x1b)
 }
 
-/// AES SubBytes on a 16-byte state.
+/// AES `SubBytes` on a 16-byte state.
 fn sub_bytes(state: &mut [u8; 16]) {
     for b in state.iter_mut() {
         *b = AES_SBOX[*b as usize];
     }
 }
 
-/// AES InvSubBytes on a 16-byte state.
+/// AES `InvSubBytes` on a 16-byte state.
 fn inv_sub_bytes(state: &mut [u8; 16]) {
     for b in state.iter_mut() {
         *b = AES_INV_SBOX[*b as usize];
     }
 }
 
-/// AES ShiftRows: rotate row r left by r bytes (column-major state).
+/// AES `ShiftRows`: rotate row r left by r bytes (column-major state).
 fn shift_rows(state: &mut [u8; 16]) {
     // State[col*4 + row]. Row 0 unchanged. Row r rotated left by r.
     let s = *state;
@@ -171,7 +171,7 @@ fn shift_rows(state: &mut [u8; 16]) {
     }
 }
 
-/// AES InvShiftRows: rotate row r right by r bytes.
+/// AES `InvShiftRows`: rotate row r right by r bytes.
 fn inv_shift_rows(state: &mut [u8; 16]) {
     let s = *state;
     for c in 0..4 {
@@ -181,7 +181,7 @@ fn inv_shift_rows(state: &mut [u8; 16]) {
     }
 }
 
-/// AES MixColumns on a single column [s0, s1, s2, s3].
+/// AES `MixColumns` on a single column [s0, s1, s2, s3].
 #[inline]
 const fn mix_column(c: [u8; 4]) -> [u8; 4] {
     let s0 = c[0];
@@ -196,7 +196,7 @@ const fn mix_column(c: [u8; 4]) -> [u8; 4] {
     ]
 }
 
-/// AES MixColumns on full state.
+/// AES `MixColumns` on full state.
 fn mix_columns(state: &mut [u8; 16]) {
     for c in 0..4 {
         let col = [state[c * 4], state[c * 4 + 1], state[c * 4 + 2], state[c * 4 + 3]];
@@ -205,7 +205,7 @@ fn mix_columns(state: &mut [u8; 16]) {
     }
 }
 
-/// AES InvMixColumns on a single column.
+/// AES `InvMixColumns` on a single column.
 #[inline]
 const fn inv_mix_column(c: [u8; 4]) -> [u8; 4] {
     // M^-1 mult by 0x0e, 0x0b, 0x0d, 0x09 in GF(2^8).
@@ -221,7 +221,7 @@ const fn inv_mix_column(c: [u8; 4]) -> [u8; 4] {
     ]
 }
 
-/// AES InvMixColumns on full state.
+/// AES `InvMixColumns` on full state.
 fn inv_mix_columns(state: &mut [u8; 16]) {
     for c in 0..4 {
         let col = [state[c * 4], state[c * 4 + 1], state[c * 4 + 2], state[c * 4 + 3]];
@@ -284,7 +284,7 @@ fn aes_round_enc(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
     state_to_words(s)
 }
 
-/// AES final-round encryption (no MixColumns).
+/// AES final-round encryption (no `MixColumns`).
 fn aes_round_enc_final(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
     let mut s = words_to_state(state);
     sub_bytes(&mut s);
@@ -306,7 +306,7 @@ fn aes_round_dec(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
     state_to_words(s)
 }
 
-/// AES final-round decryption (no InvMixColumns).
+/// AES final-round decryption (no `InvMixColumns`).
 fn aes_round_dec_final(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
     let mut s = words_to_state(state);
     inv_shift_rows(&mut s);
@@ -317,13 +317,13 @@ fn aes_round_dec_final(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
 }
 
 /// AES round-zero: just XOR with key.
-fn aes_round_zero(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
+const fn aes_round_zero(state: [u32; 4], key: [u32; 4]) -> [u32; 4] {
     [state[0] ^ key[0], state[1] ^ key[1], state[2] ^ key[2], state[3] ^ key[3]]
 }
 
-/// SubWord: AES S-box applied to each byte of a u32.
+/// `SubWord`: AES S-box applied to each byte of a u32.
 #[inline]
-fn sub_word(w: u32) -> u32 {
+const fn sub_word(w: u32) -> u32 {
     let bytes = w.to_le_bytes();
     u32::from_le_bytes([
         AES_SBOX[bytes[0] as usize],
@@ -333,7 +333,7 @@ fn sub_word(w: u32) -> u32 {
     ])
 }
 
-/// RotWord: rotate a u32 right by 8 bits (= rotate the 4 bytes left by 1).
+/// `RotWord`: rotate a u32 right by 8 bits (= rotate the 4 bytes left by 1).
 #[inline]
 const fn rot_word(w: u32) -> u32 {
     w.rotate_right(8)
@@ -366,14 +366,14 @@ fn aes_kf1(prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
 /// from `uimm[3:0]` (uimm[4] is reserved). Out-of-range values are
 /// normalised by XOR with 0x8.
 ///
-/// Even rounds apply SubWord(RotWord) ⊕ Rcon, odd rounds just SubWord
+/// Even rounds apply SubWord(RotWord) ⊕ Rcon, odd rounds just `SubWord`
 /// (no rotate, no Rcon).
 fn aes_kf2(curr_key: [u32; 4], prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
     let mut r = rnd & 0xf;
     if !(2..=14).contains(&r) {
         r ^= 0x8;
     }
-    let temp = if r % 2 == 0 {
+    let temp = if r.is_multiple_of(2) {
         let rcon_idx = ((r / 2) as usize).min(AES_RCON.len() - 1);
         sub_word(rot_word(prev_key[3])) ^ u32::from(AES_RCON[rcon_idx])
     } else {
@@ -390,7 +390,7 @@ fn aes_kf2(curr_key: [u32; 4], prev_key: [u32; 4], rnd: u32) -> [u32; 4] {
 // GHASH (Zvkg) — GF(2^128) multiply with reduction polynomial x^128 + x^7 + x^2 + x + 1
 // ============================================================================
 
-/// Reverse bits within each byte of a u32. Matches Spike's ZVK_BREV8_32 macro.
+/// Reverse bits within each byte of a u32. Matches Spike's `ZVK_BREV8_32` macro.
 #[inline]
 const fn brev8_u32(mut x: u32) -> u32 {
     x = ((x & 0x5555_5555) << 1) | ((x & 0xaaaa_aaaa) >> 1);
@@ -491,7 +491,7 @@ const fn sha256_maj(x: u32, y: u32, z: u32) -> u32 {
 ///   vs2 = {W11, W10, W9,  W4 } (vs2[0]=W4, vs2[3]=W11)
 ///   vs1 = {W15, W14, W13, W12} (vs1[0]=W12, vs1[3]=W15)
 /// Output replaces vd with {W19, W18, W17, W16}.
-fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
+const fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
     let w0 = vd[0];
     let w1 = vd[1];
     let w2 = vd[2];
@@ -525,7 +525,7 @@ fn sha256_ms(vd: [u32; 4], vs2: [u32; 4], vs1: [u32; 4]) -> [u32; 4] {
 
 /// One SHA-256 round step on the (a..h) state, mutating in place per FIPS-180-4.
 #[inline]
-fn sha256_round(state: &mut [u32; 8], kw: u32) {
+const fn sha256_round(state: &mut [u32; 8], kw: u32) {
     let [a, b, c, d, e, f, g, h] = *state;
     let t1 = h
         .wrapping_add(sha256_sum1(e))
@@ -627,11 +627,11 @@ fn sm3_me(vs1: [u32; 8], vs2: [u32; 8]) -> [u32; 8] {
 }
 
 /// vsm3c.vi — SM3 compression. Per Zvksh:
-///   vd  = {H,G,F,E,D,C,B,A}  (state, BSWAP'd; vd[0]=A_bswap, vd[7]=H_bswap)
+///   vd  = {H,G,F,E,D,C,B,A}  (state, BSWAP'd; vd[0]=`A_bswap`, vd[7]=`H_bswap`)
 ///   vs2 = {_,_,w5,w4,_,_,w1,w0} (only positions 0,1,4,5 used)
 /// Two rounds j = 2*rnd and j+1; output rewrites vd as
 /// {G1, G2, E1, E2, C1, C2, A1, A2} (BSWAP'd).
-fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
+const fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
     let a = bswap32(vd[0]);
     let b = bswap32(vd[1]);
     let c = bswap32(vd[2]);
@@ -660,11 +660,11 @@ fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
     let tt2 = sm3_gg(e, f, g, j).wrapping_add(h).wrapping_add(ss1).wrapping_add(w0);
     let d1 = c;
     let c1 = b.rotate_left(9);
-    let _b1 = a;
+    let b1 = a;
     let a1 = tt1;
     let h1 = g;
     let g1 = f.rotate_left(19);
-    let _f1 = e;
+    let f1 = e;
     let e1 = sm3_p0(tt2);
 
     // Round j+1
@@ -675,11 +675,11 @@ fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
         .wrapping_add(sm3_t(j).rotate_left(j % 32))
         .rotate_left(7);
     let ss2 = ss1 ^ a1.rotate_left(12);
-    let tt1 = sm3_ff(a1, _b1, c1, j).wrapping_add(d1).wrapping_add(ss2).wrapping_add(x1);
-    let tt2 = sm3_gg(e1, _f1, g1, j).wrapping_add(h1).wrapping_add(ss1).wrapping_add(w1);
-    let c2 = _b1.rotate_left(9);
+    let tt1 = sm3_ff(a1, b1, c1, j).wrapping_add(d1).wrapping_add(ss2).wrapping_add(x1);
+    let tt2 = sm3_gg(e1, f1, g1, j).wrapping_add(h1).wrapping_add(ss1).wrapping_add(w1);
+    let c2 = b1.rotate_left(9);
     let a2 = tt1;
-    let g2 = _f1.rotate_left(19);
+    let g2 = f1.rotate_left(19);
     let e2 = sm3_p0(tt2);
 
     [bswap32(a2), bswap32(a1), bswap32(c2), bswap32(c1),
@@ -722,7 +722,7 @@ const SM4_CK: [u32; 32] = [
 const SM4_FK: [u32; 4] = [0xA3B1BAC6, 0x56AA3350, 0x677D9197, 0xB27022DC];
 
 #[inline]
-fn sm4_tau(a: u32) -> u32 {
+const fn sm4_tau(a: u32) -> u32 {
     let bytes = a.to_le_bytes();
     u32::from_le_bytes([
         SM4_SBOX[bytes[0] as usize],
@@ -747,7 +747,7 @@ const fn sm4_l_prime(b: u32) -> u32 {
 /// vsm4r — SM4 round function applied to 4 elements.
 ///
 /// vd = {X3, X2, X1, X0}, vs2 = {RK3, RK2, RK1, RK0}.
-/// Output: {X7, X6, X5, X4} where Xi+4 = Xi ^ T(Xi+1 ^ Xi+2 ^ Xi+3 ^ RKi).
+/// Output: {X7, X6, X5, X4} where Xi+4 = Xi ^ T(Xi+1 ^ Xi+2 ^ Xi+3 ^ `RKi`).
 fn sm4_r(vd: [u32; 4], vs2: [u32; 4]) -> [u32; 4] {
     let mut x = [vd[0], vd[1], vd[2], vd[3], 0, 0, 0, 0];
     for i in 0..4 {
@@ -855,13 +855,13 @@ pub fn execute_crypto(
             }
             VectorOp::VAesKf1 => {
                 // zimm5 = vs1 field as round number (1..10 valid).
-                let rnd = ((inst >> 15) & 0x1f) as u32;
+                let rnd = (inst >> 15) & 0x1f;
                 let prev = read_egs4_u32(vpr, vs2_idx, base);
                 let r = aes_kf1(prev, rnd);
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VAesKf2 => {
-                let rnd = ((inst >> 15) & 0x1f) as u32;
+                let rnd = (inst >> 15) & 0x1f;
                 let curr = read_egs4_u32(vpr, vd_idx, base);
                 let prev = read_egs4_u32(vpr, vs2_idx, base);
                 let r = aes_kf2(curr, prev, rnd);
@@ -895,7 +895,7 @@ pub fn execute_crypto(
                 write_egs8_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VSm3C => {
-                let rnd = ((inst >> 15) & 0x1f) as u32;
+                let rnd = (inst >> 15) & 0x1f;
                 let vd = read_egs8_u32(vpr, vd_idx, base);
                 let vs2 = read_egs8_u32(vpr, vs2_idx, base);
                 let r = sm3_c(vd, vs2, rnd);
@@ -908,7 +908,7 @@ pub fn execute_crypto(
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VSm4K => {
-                let rnd = ((inst >> 15) & 0x1f) as u32;
+                let rnd = (inst >> 15) & 0x1f;
                 let prev = read_egs4_u32(vpr, vs2_idx, base);
                 let r = sm4_k(prev, rnd);
                 write_egs4_u32(vpr, vd_idx, base, r);

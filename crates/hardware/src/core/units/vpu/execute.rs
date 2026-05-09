@@ -122,7 +122,7 @@ fn execute_vsetvl_rs2_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> u64 {
 }
 
 /// Build the common execution context from CPU state.
-fn build_ctx(cpu: &Cpu) -> VecExecCtx {
+const fn build_ctx(cpu: &Cpu) -> VecExecCtx {
     let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
     VecExecCtx {
         sew: vtype.vsew,
@@ -176,7 +176,7 @@ const fn build_operand1(id: &RenameIssueEntry) -> VecOperand {
                 // bits[19:15] (zimm6lo); other shifts use the standard 5-bit
                 // uimm in bits[19:15].
                 let imm = if matches!(id.ctrl.vec_op, VectorOp::VRor) {
-                    let lo = v_enc::uimm5(id.inst) as u64;
+                    let lo = v_enc::uimm5(id.inst);
                     let hi = ((id.inst >> 26) & 1) as u64;
                     ((hi << 5) | lo) as i64
                 } else {
@@ -205,7 +205,7 @@ const fn mark_vs_dirty(cpu: &mut Cpu) {
 /// vector instruction that depends on vtype will raise an illegal-instruction
 /// exception."
 #[inline]
-fn check_vill(inst: u32, vtype_bits: u64, elen: usize) -> Result<(), Trap> {
+const fn check_vill(inst: u32, vtype_bits: u64, elen: usize) -> Result<(), Trap> {
     let vtype = parse_vtype_with_elen(vtype_bits, elen);
     if vtype.vill {
         return Err(Trap::IllegalInstruction(inst));
@@ -372,7 +372,7 @@ pub struct VecOpResult {
 }
 
 /// Build execution context from raw CSR values (no Cpu reference needed).
-fn build_ctx_from_csrs(
+const fn build_ctx_from_csrs(
     vtype_bits: u64,
     vl: u64,
     vstart: u64,
@@ -403,7 +403,7 @@ fn build_ctx_from_csrs(
 ///
 /// This is the O3 deferred execution path. It performs the functional
 /// computation on the provided register file (typically a `VecPrfView`) and
-/// returns the side effects (fp_flags, vxsat) without modifying any CSRs.
+/// returns the side effects (`fp_flags`, vxsat) without modifying any CSRs.
 ///
 /// # Errors
 ///
@@ -412,6 +412,7 @@ fn build_ctx_from_csrs(
 /// # Panics
 ///
 /// Panics if called with vsetvl or memory vector ops (those have separate paths).
+#[allow(clippy::too_many_arguments)]
 pub fn execute_vec_op_on<V: VectorRegFile>(
     vpr: &mut V,
     vtype_bits: u64,

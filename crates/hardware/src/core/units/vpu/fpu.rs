@@ -325,7 +325,7 @@ const fn classify_f64(val: u64) -> u64 {
 /// vfrsqrt7 lookup table per RVV 1.0 §13.9. Indexed by
 /// `{exp[0], sig[MSB-1:MSB-6]}` (7 bits). `RSQRT7_TABLE[0..64]` →
 /// exp[0]=0, `RSQRT7_TABLE[64..128]` → exp[0]=1. Values copied from
-/// SoftFloat's fall_reciprocal.c so they match spike's reference exactly.
+/// `SoftFloat`'s `fall_reciprocal.c` so they match spike's reference exactly.
 #[rustfmt::skip]
 static RSQRT7_TABLE: [u8; 128] = [
     // exp[0] = 0
@@ -349,8 +349,8 @@ static RSQRT7_TABLE: [u8; 128] = [
 ];
 
 /// vfrec7 lookup table per RVV 1.0 §13.10. Indexed by `sig[MSB-1:MSB-7]`
-/// (7 bits → 128 entries). Values copied from SoftFloat's
-/// fall_reciprocal.c so they match spike's reference exactly.
+/// (7 bits → 128 entries). Values copied from `SoftFloat`'s
+/// `fall_reciprocal.c` so they match spike's reference exactly.
 #[rustfmt::skip]
 static REC7_TABLE: [u8; 128] = [
     127, 125, 123, 121, 119, 117, 116, 114,
@@ -410,7 +410,7 @@ fn vfrsqrt7_32(bits: u32) -> (u64, FpFlags) {
 
     let idx = (((exp & 1) << 6) | ((sig >> 17) & 0x3F)) as usize;
     let out_sig = (RSQRT7_TABLE[idx] as u64) << 16;
-    let out_exp = (3 * 127 + (!exp & 0xFFFF_FFFF_FFFF_FFFF)) / 2;
+    let out_exp = u64::midpoint(3 * 127, !exp);
 
     let result = (sign << 31) | ((out_exp & 0xFF) << 23) | (out_sig & 0x007F_FFFF);
     (result | 0xFFFF_FFFF_0000_0000, FpFlags::NONE)
@@ -453,7 +453,7 @@ fn vfrsqrt7_64(bits: u64) -> (u64, FpFlags) {
 
     let idx = (((exp & 1) << 6) | ((sig >> 46) & 0x3F)) as usize;
     let out_sig = (RSQRT7_TABLE[idx] as u64) << 45;
-    let out_exp = (3 * 1023 + (!exp & 0xFFFF_FFFF_FFFF_FFFF)) / 2;
+    let out_exp = u64::midpoint(3 * 1023, !exp);
 
     let result = (sign << 63) | ((out_exp & 0x7FF) << 52) | (out_sig & 0x000F_FFFF_FFFF_FFFF);
     (result, FpFlags::NONE)
@@ -501,7 +501,7 @@ fn vfrsqrt7_16(bits: u16) -> (u16, FpFlags) {
 
     // out_exp = (3*bias - 1 - exp) / 2, computed in u64 to mirror spike's
     // u64 wrap-around arithmetic for negative `exp` values.
-    let out_exp = ((3 * 15 + (!exp & 0xFFFF_FFFF)) / 2) & 0x1F;
+    let out_exp = u32::midpoint(3 * 15, !exp) & 0x1F;
 
     let result = ((sign as u32) << 15) | (out_exp << 10) | (out_sig << 3);
     (result as u16, FpFlags::NONE)
@@ -509,11 +509,11 @@ fn vfrsqrt7_16(bits: u16) -> (u16, FpFlags) {
 
 /// Compute vfrec7 for an f16 value. Returns `(f16_result_bits, flags)`.
 ///
-/// Mirrors spike's `recip7` (softfloat/fall_reciprocal.c): normalize a
+/// Mirrors spike's `recip7` (`softfloat/fall_reciprocal.c)`: normalize a
 /// subnormal input with an extra left-shift, saturate when normalization
 /// pushes exp past −1, then look up sig[s-2:s-p-1] in the 7-bit table and
-/// adjust out_sig for the two narrow subnormal-output cases (out_exp == 0
-/// or out_exp == −1 in 64-bit unsigned).
+/// adjust `out_sig` for the two narrow subnormal-output cases (`out_exp` == 0
+/// or `out_exp` == −1 in 64-bit unsigned).
 fn vfrec7_16(bits: u16, frm: RoundingMode) -> (u16, FpFlags) {
     let sign = (bits >> 15) as u32;
     let mut exp = ((bits >> 10) & 0x1F) as u64;
@@ -559,7 +559,7 @@ fn vfrec7_16(bits: u16, frm: RoundingMode) -> (u16, FpFlags) {
     let idx = ((sig >> 3) & 0x7F) as usize;
     let mut out_sig = (REC7_TABLE[idx] as u64) << 3;
     // out_exp uses spike's u64 wrap-around: `2*15 + ~exp`.
-    let mut out_exp = (30u64.wrapping_add(!exp)) & 0xFFFF_FFFF_FFFF_FFFF;
+    let mut out_exp = 30u64.wrapping_add(!exp);
 
     // Narrow subnormal-output cases: shift out_sig down by 1 (or 2 when
     // out_exp wrapped to UINT64_MAX) and OR the implicit-1 into bit s-1.
@@ -593,7 +593,7 @@ const fn vfrec7_saturate_to_max(sign: u64, frm: RoundingMode) -> bool {
 /// Mirrors spike's `recip7(_, e=8, s=23)`: normalize subnormal input with
 /// an extra left-shift, saturate when the normalized exp can't be
 /// represented (exp ∉ {0, −1}), then look up sig[s-2:s-p-1] in the 7-bit
-/// table and adjust out_sig for the two narrow subnormal-output cases.
+/// table and adjust `out_sig` for the two narrow subnormal-output cases.
 fn vfrec7_32(bits: u32, frm: RoundingMode) -> (u64, FpFlags) {
     let sign = bits as u64 >> 31;
     let mut exp = ((bits >> 23) & 0xFF) as u64;
@@ -604,7 +604,7 @@ fn vfrec7_32(bits: u32, frm: RoundingMode) -> (u64, FpFlags) {
         return (box_f32_canon(f32::NAN) & 0xFFFF_FFFF, f);
     }
     if exp == 0xFF && sig == 0 {
-        return (((sign << 31)) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE);
+        return ((sign << 31) | 0xFFFF_FFFF_0000_0000, FpFlags::NONE);
     }
     if exp == 0 && sig == 0 {
         return (((sign << 31) | 0x7F80_0000) | 0xFFFF_FFFF_0000_0000, FpFlags::DZ);
@@ -773,7 +773,7 @@ const fn is_fp_fma(op: VectorOp) -> bool {
 /// because Rust's `f32 as i32` cast is hardcoded to round-toward-zero and does
 /// not honour the host FPU's rounding mode.
 #[inline]
-fn round_f32_to_int_per_frm(a: f32, frm: RoundingMode) -> f32 {
+const fn round_f32_to_int_per_frm(a: f32, frm: RoundingMode) -> f32 {
     match frm {
         RoundingMode::Rne => a.round_ties_even(),
         RoundingMode::Rtz => a.trunc(),
@@ -784,7 +784,7 @@ fn round_f32_to_int_per_frm(a: f32, frm: RoundingMode) -> f32 {
 }
 
 #[inline]
-fn round_f64_to_int_per_frm(a: f64, frm: RoundingMode) -> f64 {
+const fn round_f64_to_int_per_frm(a: f64, frm: RoundingMode) -> f64 {
     match frm {
         RoundingMode::Rne => a.round_ties_even(),
         RoundingMode::Rtz => a.trunc(),
@@ -807,7 +807,7 @@ fn f64_to_i16_frm(a: f64, frm: RoundingMode) -> (i16, FpFlags) {
     if rounded > i16::MAX as f64 {
         return (i16::MAX, FpFlags::NV);
     }
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (rounded as i16, nx)
 }
 
@@ -823,7 +823,7 @@ fn f64_to_u16_frm(a: f64, frm: RoundingMode) -> (u16, FpFlags) {
     if rounded > u16::MAX as f64 {
         return (u16::MAX, FpFlags::NV);
     }
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (rounded as u16, nx)
 }
 
@@ -844,7 +844,7 @@ fn f32_to_i32_frm(a: f32, frm: RoundingMode) -> (i32, FpFlags) {
         return (i32::MAX, FpFlags::NV);
     }
     let result = rounded as i32;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -862,7 +862,7 @@ fn f32_to_u32_frm(a: f32, frm: RoundingMode) -> (u32, FpFlags) {
         return (u32::MAX, FpFlags::NV);
     }
     let result = rounded as u32;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -879,7 +879,7 @@ fn f64_to_i32_frm(a: f64, frm: RoundingMode) -> (i32, FpFlags) {
         return (i32::MAX, FpFlags::NV);
     }
     let result = rounded as i32;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -896,7 +896,7 @@ fn f64_to_u32_frm(a: f64, frm: RoundingMode) -> (u32, FpFlags) {
         return (u32::MAX, FpFlags::NV);
     }
     let result = rounded as u32;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -914,7 +914,7 @@ fn f64_to_i64_frm(a: f64, frm: RoundingMode) -> (i64, FpFlags) {
         return (i64::MAX, FpFlags::NV);
     }
     let result = rounded as i64;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -973,7 +973,7 @@ fn f64_to_u64_frm(a: f64, frm: RoundingMode) -> (u64, FpFlags) {
         return (u64::MAX, FpFlags::NV);
     }
     let result = rounded as u64;
-    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    let nx = if rounded == a { FpFlags::NONE } else { FpFlags::NX };
     (result, nx)
 }
 
@@ -1245,9 +1245,8 @@ fn compute_f16(op: VectorOp, vs2_bits: u64, op1_bits: u64, rm: RoundingMode) -> 
                 extra = extra | FpFlags::NV;
             } else if fb == 0.0 && fa != 0.0 && fa.is_finite() {
                 extra = extra | FpFlags::DZ;
-            } else if fb == 0.0 && fa == 0.0 {
-                extra = extra | FpFlags::NV;
-            } else if fa.is_infinite() && fb.is_infinite() {
+            } else if (fb == 0.0 && fa == 0.0) || (fa.is_infinite() && fb.is_infinite()) {
+                // 0/0 and ∞/∞ are both invalid operations.
                 extra = extra | FpFlags::NV;
             }
             round(fa / fb, extra)
@@ -1258,9 +1257,8 @@ fn compute_f16(op: VectorOp, vs2_bits: u64, op1_bits: u64, rm: RoundingMode) -> 
                 extra = extra | FpFlags::NV;
             } else if fa == 0.0 && fb != 0.0 && fb.is_finite() {
                 extra = extra | FpFlags::DZ;
-            } else if fa == 0.0 && fb == 0.0 {
-                extra = extra | FpFlags::NV;
-            } else if fb.is_infinite() && fa.is_infinite() {
+            } else if (fa == 0.0 && fb == 0.0) || (fb.is_infinite() && fa.is_infinite()) {
+                // 0/0 and ∞/∞ are both invalid operations.
                 extra = extra | FpFlags::NV;
             }
             round(fb / fa, extra)
@@ -1938,7 +1936,8 @@ fn exec_fp_widening(
                     std::hint::black_box(vs2_f) - std::hint::black_box(op1_f)
                 }
                 VectorOp::VFWMul => std::hint::black_box(vs2_f) * std::hint::black_box(op1_f),
-                VectorOp::VFWCvtFF => vs2_f, // f16→f32 conversion (just widen, exact)
+                // VFWCvtFF (f16→f32) and other widening identity paths return
+                // the input unchanged (the widen happens via the cast above).
                 _ => vs2_f,
             });
             let f = read_host_fp_flags();

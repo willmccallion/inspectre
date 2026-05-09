@@ -267,15 +267,7 @@ impl IssueQueue {
         } else {
             VecPhysReg::ZERO
         };
-        let mask_ready = if needs_mask {
-            if let Some(vprf) = vec_prf {
-                vprf.is_ready(mask_phys)
-            } else {
-                true
-            }
-        } else {
-            true
-        };
+        let mask_ready = !needs_mask || vec_prf.is_none_or(|vprf| vprf.is_ready(mask_phys));
 
         let iq_entry = IssueQueueEntry {
             entry, src1, src2, src3, vec_src1, vec_src2, vec_src3, mem_dep,

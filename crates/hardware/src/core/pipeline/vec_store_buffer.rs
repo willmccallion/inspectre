@@ -73,7 +73,7 @@ pub struct VsbLine {
 }
 
 impl VsbLine {
-    fn new(line_addr: u64) -> Self {
+    const fn new(line_addr: u64) -> Self {
         Self { line_addr, data: [0; VSB_LINE_BYTES], valid_mask: 0 }
     }
 }
@@ -96,7 +96,7 @@ pub struct VecStoreBufferEntry {
 }
 
 impl VecStoreBufferEntry {
-    fn is_drainable(&self) -> bool {
+    const fn is_drainable(&self) -> bool {
         self.valid && self.committed && self.resolved_elements == self.expected_elements
     }
 }
@@ -153,8 +153,7 @@ impl VecStoreBuffer {
     pub fn allocate(&mut self, rob_tag: RobTag, expected_elements: usize) -> bool {
         debug_assert!(
             !self.entries.iter().any(|e| e.valid && e.rob_tag == rob_tag),
-            "VSB allocate: rob_tag {:?} already present",
-            rob_tag,
+            "VSB allocate: rob_tag {rob_tag:?} already present",
         );
 
         if self.len() >= self.capacity {
@@ -201,12 +200,10 @@ impl VecStoreBuffer {
             return;
         }
 
-        let entry = match self.entries.iter_mut().find(|e| e.valid && e.rob_tag == rob_tag) {
-            Some(e) => e,
-            None => {
-                debug_assert!(false, "VSB resolve_element: no entry for {:?}", rob_tag);
-                return;
-            }
+        let Some(entry) = self.entries.iter_mut().find(|e| e.valid && e.rob_tag == rob_tag)
+        else {
+            debug_assert!(false, "VSB resolve_element: no entry for {rob_tag:?}");
+            return;
         };
 
         let mut remaining = bytes;
@@ -219,13 +216,14 @@ impl VecStoreBuffer {
             let take = remaining.min(VSB_LINE_BYTES - offset);
 
             // Find or create the line buffer for this address.
-            let line_idx = match entry.lines.iter().position(|l| l.line_addr == line_addr) {
-                Some(i) => i,
-                None => {
+            let line_idx = entry
+                .lines
+                .iter()
+                .position(|l| l.line_addr == line_addr)
+                .unwrap_or_else(|| {
                     entry.lines.push(VsbLine::new(line_addr));
                     entry.lines.len() - 1
-                }
-            };
+                });
             let line = &mut entry.lines[line_idx];
 
             for i in 0..take {
@@ -320,11 +318,10 @@ impl VecStoreBuffer {
                 continue;
             }
             for line in &entry.lines {
-                if line.line_addr == line_a || line.line_addr == line_b {
-                    if line.valid_mask != 0 {
+                if (line.line_addr == line_a || line.line_addr == line_b)
+                    && line.valid_mask != 0 {
                         return ForwardResult::Stall;
                     }
-                }
             }
             if self.forwarding == VecStoreForwarding::Off {
                 return ForwardResult::Stall;
@@ -513,11 +510,11 @@ fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
         while pos < run {
             let abs_offset = i + pos;
             let abs_addr = line.line_addr + abs_offset as u64;
-            let max_natural = if abs_addr & 7 == 0 && run - pos >= 8 {
+            let max_natural = if abs_addr.trailing_zeros() >= 3 && run - pos >= 8 {
                 8
-            } else if abs_addr & 3 == 0 && run - pos >= 4 {
+            } else if abs_addr.trailing_zeros() >= 2 && run - pos >= 4 {
                 4
-            } else if abs_addr & 1 == 0 && run - pos >= 2 {
+            } else if abs_addr.trailing_zeros() >= 1 && run - pos >= 2 {
                 2
             } else {
                 1

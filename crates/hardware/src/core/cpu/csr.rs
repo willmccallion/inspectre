@@ -14,7 +14,7 @@ impl Cpu {
     /// Returns `true` if the given CSR address corresponds to a CSR that is
     /// implemented by this hart.  Accessing a non-existent CSR must raise an
     /// illegal-instruction exception (RISC-V Privileged Spec §2.2).
-    pub fn is_valid_csr(&self, addr: CsrAddr) -> bool {
+    pub const fn is_valid_csr(&self, addr: CsrAddr) -> bool {
         let raw = addr.as_u32();
         matches!(raw,
             x if x == csr::FFLAGS.as_u32()

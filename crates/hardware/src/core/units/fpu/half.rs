@@ -64,7 +64,7 @@ pub const fn classify_f16(bits: u16) -> u64 {
 }
 
 /// Upconverts an IEEE 754 half-precision bit pattern to `f32` losslessly.
-pub fn f16_to_f32(h: u16) -> f32 {
+pub const fn f16_to_f32(h: u16) -> f32 {
     let sign = ((h >> 15) & 1) as u32;
     let exp = ((h >> 10) & 0x1F) as u32;
     let mant = (h & 0x3FF) as u32;
@@ -96,10 +96,11 @@ pub fn f16_to_f32(h: u16) -> f32 {
     f32::from_bits(bits)
 }
 
-/// Rounds a host `f64` value to an IEEE 754 half-precision bit pattern
-/// using the given RISC-V rounding mode. Returns `(bits, flags)` where
-/// `flags` carries the accrued `NX`/`UF`/`OF` flags (and `NV` for NaN
-/// inputs is the caller's responsibility).
+/// Rounds a host `f64` value to an IEEE 754 half-precision bit pattern.
+///
+/// Returns `(bits, flags)` using the given RISC-V rounding mode. `flags`
+/// carries the accrued `NX`/`UF`/`OF` flags; `NV` for NaN inputs is the
+/// caller's responsibility.
 pub fn f64_to_f16(val: f64, rm: RoundingMode) -> (u16, FpFlags) {
     let bits = val.to_bits();
     let sign_u16 = ((bits >> 63) & 1) as u16;

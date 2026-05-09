@@ -125,7 +125,7 @@ pub struct O3Engine {
 /// flowing through the Memory1 → Memory2 → Writeback pipeline.
 #[derive(Debug, Clone)]
 pub struct VecMemMicroOp {
-    /// The ExMem1Entry carrying the element's virtual address and metadata.
+    /// The `ExMem1Entry` carrying the element's virtual address and metadata.
     pub entry: ExMem1Entry,
     /// Element index within the vector register (for writeback targeting).
     pub elem_idx: crate::core::units::vpu::types::ElemIdx,
@@ -313,17 +313,10 @@ impl O3Engine {
     /// LQ slots so the wave is bounded by LQ capacity; stores write into the
     /// dedicated `vec_store_buffer` and don't touch the scalar SB.
     fn issue_vec_mem_waves(&mut self) {
-        use crate::core::pipeline::signals::MemWidth as MW;
         for inflight in &mut self.vec_mem_inflight {
             while let Some(front) = inflight.pending_micro_ops.front() {
                 if !front.is_store {
-                    let w = match front.eew.bytes() {
-                        1 => MW::Byte,
-                        2 => MW::Half,
-                        4 => MW::Word,
-                        8 => MW::Double,
-                        _ => MW::Word,
-                    };
+                    let w = mem_width_from_eew_bytes(front.eew.bytes());
                     if !self.load_queue.allocate(
                         front.entry.rob_tag,
                         w,
@@ -332,10 +325,22 @@ impl O3Engine {
                         break;
                     }
                 }
-                let mop = inflight.pending_micro_ops.pop_front().unwrap();
+                let Some(mop) = inflight.pending_micro_ops.pop_front() else { break };
                 self.vec_mem_pending.push_back(mop);
             }
         }
+    }
+}
+
+/// Convert an EEW byte count to the corresponding `MemWidth` for a vec
+/// element memory access. EEW is always 1/2/4/8 bytes for valid vec mem ops.
+const fn mem_width_from_eew_bytes(bytes: usize) -> crate::core::pipeline::signals::MemWidth {
+    use crate::core::pipeline::signals::MemWidth as MW;
+    match bytes {
+        1 => MW::Byte,
+        2 => MW::Half,
+        8 => MW::Double,
+        _ => MW::Word,
     }
 }
 
@@ -765,7 +770,7 @@ impl ExecutionEngine for O3Engine {
                     }
                     loads_issued += 1;
                 }
-                let mop = self.vec_mem_pending.pop_front().unwrap();
+                let Some(mop) = self.vec_mem_pending.pop_front() else { break };
                 self.execute_mem1.push(mop.entry);
             }
         }
@@ -1013,11 +1018,12 @@ impl ExecutionEngine for O3Engine {
                 issued_count += 1;
 
                 // ── Vector non-memory path: execute via VecPrfView ───────
-                if is_vec_non_mem && ex_result.trap.is_none() {
+                if is_vec_non_mem
+                    && ex_result.trap.is_none()
+                    && let Some(saved) = saved_entry.as_ref()
+                {
                     use crate::core::units::vpu::execute::execute_vec_op_on;
                     use crate::core::units::vpu::lane_model;
-
-                    let saved = saved_entry.as_ref().unwrap();
 
                     // Build arch→phys mapping using RENAME-TIME physical registers.
                     //
@@ -1123,16 +1129,7 @@ impl ExecutionEngine for O3Engine {
                     // For vector ops that produce scalar results (vmv.x.s, vcpop.m,
                     // vfirst.m) — they don't write vector regs, so use scalar path
                     // with vector latency for the FU occupancy.
-                    if !ex_result.ctrl.vec_reg_write {
-                        let mut scalar_result_entry = ex_result.clone();
-                        scalar_result_entry.alu = vec_result.scalar_result;
-                        self.pending_results.push(PendingResult {
-                            entry: scalar_result_entry,
-                            complete_cycle,
-                            fu_type,
-                            speculative_written: false,
-                        });
-                    } else {
+                    if ex_result.ctrl.vec_reg_write {
                         // Vector-register-writing op: push to vec_pending for
                         // chaining wakeup at first_group_ready, ROB complete at
                         // full_complete.
@@ -1146,6 +1143,15 @@ impl ExecutionEngine for O3Engine {
                             full_complete: complete_cycle,
                             wakeup_fired: false,
                         });
+                    } else {
+                        let mut scalar_result_entry = ex_result.clone();
+                        scalar_result_entry.alu = vec_result.scalar_result;
+                        self.pending_results.push(PendingResult {
+                            entry: scalar_result_entry,
+                            complete_cycle,
+                            fu_type,
+                            speculative_written: false,
+                        });
                     }
 
                     let keep_tag = ex_result.rob_tag;
@@ -1157,8 +1163,10 @@ impl ExecutionEngine for O3Engine {
                 }
 
                 // ── Vector memory path: generate micro-ops via VecPrfView ──
-                if is_vec_mem_op && ex_result.trap.is_none() {
-                    let saved = saved_entry.as_ref().unwrap();
+                if is_vec_mem_op
+                    && ex_result.trap.is_none()
+                    && let Some(saved) = saved_entry.as_ref()
+                {
                     let vec_op = ex_result.ctrl.vec_op;
                     let is_store = is_vec_store(vec_op);
                     let vd_count = vec_dst_info.map_or(0u8, |(_, c, _)| c);
@@ -1213,8 +1221,6 @@ impl ExecutionEngine for O3Engine {
                         // VL=0 or vill: complete immediately
                         self.rob.complete(ex_result.rob_tag, 0);
                     } else {
-                        use crate::core::pipeline::signals::MemWidth as MW;
-
                         // Build all element micro-ops up front. They will be
                         // released into the memory pipeline in waves by
                         // issue_vec_mem_waves; loads bound on LQ capacity,
@@ -1226,12 +1232,8 @@ impl ExecutionEngine for O3Engine {
                         let mut all_micro_ops: std::collections::VecDeque<VecMemMicroOp> =
                             std::collections::VecDeque::with_capacity(total);
                         for mop in micro_ops {
-                            let eew_width = match mop.eew.bytes() {
-                                1 => MW::Byte, 2 => MW::Half,
-                                4 => MW::Word, 8 => MW::Double,
-                                _ => MW::Word,
-                            };
-                            let mut ctrl = ex_result.ctrl.clone();
+                            let eew_width = mem_width_from_eew_bytes(mop.eew.bytes());
+                            let mut ctrl = ex_result.ctrl;
                             ctrl.mem_read = !is_store;
                             ctrl.mem_write = is_store;
                             ctrl.width = eew_width;

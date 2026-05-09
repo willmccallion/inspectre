@@ -166,7 +166,15 @@ impl FuType {
             | VSextVf8 | VRedSum | VRedAnd | VRedOr | VRedXor | VRedMinU | VRedMin | VRedMaxU
             | VRedMax | VWRedSumU | VWRedSum
             | VAndN | VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV | VRol | VRor | VWsll
-            | None => Self::VecIntAlu,
+            | None
+            // Crypto ops live on the vector integer ALU (single-cycle ROM
+            // lookups and bitwise math; no separate FU is modelled for crypto).
+            | VAesEm | VAesEf | VAesDm | VAesDf | VAesZ
+            | VAesKf1 | VAesKf2
+            | VSha2Ms | VSha2Ch | VSha2Cl
+            | VSm3Me | VSm3C
+            | VSm4R | VSm4K
+            | VGhsh | VGmul => Self::VecIntAlu,
 
             // Integer multiply: mul/mulh/macc/madd/widening mul + Zvbc carryless mul
             VMul | VMulh | VMulhu | VMulhsu | VMacc | VNMSac | VMadd | VNMSub | VWMulU | VWMul
@@ -204,14 +212,6 @@ impl FuType {
                 Self::VecPermute
             }
 
-            // Crypto ops live on the vector integer ALU (single-cycle ROM lookups
-            // and bitwise math; no separate FU is modelled for crypto).
-            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ
-            | VAesKf1 | VAesKf2
-            | VSha2Ms | VSha2Ch | VSha2Cl
-            | VSm3Me | VSm3C
-            | VSm4R | VSm4K
-            | VGhsh | VGmul => Self::VecIntAlu,
         }
     }
 }

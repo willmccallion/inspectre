@@ -228,8 +228,7 @@ impl Vlmul {
             Self::Mf8 | Self::Mf4 | Self::Mf2 => 1,
             Self::M1 => 2,
             Self::M2 => 4,
-            Self::M4 => 8,
-            Self::M8 => 8,
+            Self::M4 | Self::M8 => 8,
         }
     }
 

@@ -171,7 +171,7 @@ pub fn generate_element_addrs(
 }
 
 /// Extract the effective element width from control signals.
-fn parse_eew_from_ctrl(ctrl: &crate::core::pipeline::signals::ControlSignals) -> Sew {
+const fn parse_eew_from_ctrl(ctrl: &crate::core::pipeline::signals::ControlSignals) -> Sew {
     ctrl.vec_eew
 }
 
@@ -383,7 +383,7 @@ fn gen_whole_reg_addrs(
 ///
 /// For non-segment ops: `vd_phys[elem / elements_per_reg]`
 /// For segment ops: `vd_phys[seg * emul_regs + elem / elements_per_reg]`
-fn compute_vd_phys(
+const fn compute_vd_phys(
     vd_phys: &[VecPhysReg; 8],
     vd_count: u8,
     elem: usize,
@@ -409,6 +409,7 @@ fn compute_vd_phys(
 ///
 /// Does NOT perform any memory access.
 #[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn generate_element_addrs_vrf<V: VectorRegFile>(
     vrf: &V,
     base_addr: u64,
@@ -549,7 +550,7 @@ pub fn generate_element_addrs_vrf<V: VectorRegFile>(
     }
 }
 
-/// Check if element `i` is active under the mask using a generic VectorRegFile.
+/// Check if element `i` is active under the mask using a generic `VectorRegFile`.
 fn is_element_active_vrf<V: VectorRegFile>(vrf: &V, i: usize, vm: bool) -> bool {
     if vm { return true; }
     vrf.read_mask_bit(VRegIdx::new(0), ElemIdx::new(i))
@@ -635,9 +636,8 @@ fn exec_unit_stride_load(
         }
         for seg in 0..nf {
             let addr = base.wrapping_add(((i * nf + seg) as u64).wrapping_mul(eew_bytes));
-            let val = mem_read_element(cpu, addr, eew).map_err(|t| {
+            let val = mem_read_element(cpu, addr, eew).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
             let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
             cpu.regs.vpr_mut().write_element(dest, ElemIdx::new(i), eew, val);
@@ -726,9 +726,8 @@ fn exec_strided_load(
         let elem_base = base.wrapping_add((i as i64).wrapping_mul(stride) as u64);
         for seg in 0..nf {
             let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(eew_bytes));
-            let val = mem_read_element(cpu, addr, eew).map_err(|t| {
+            let val = mem_read_element(cpu, addr, eew).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
             let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * emul.regs());
             cpu.regs.vpr_mut().write_element(dest, ElemIdx::new(i), eew, val);
@@ -774,9 +773,8 @@ fn exec_indexed_load(
         let elem_base = base.wrapping_add(offset);
         for seg in 0..nf {
             let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(data_bytes));
-            let val = mem_read_element(cpu, addr, data_sew).map_err(|t| {
+            let val = mem_read_element(cpu, addr, data_sew).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
             let dest = VRegIdx::new(vd.as_u8() + (seg as u8) * data_emul.regs());
             cpu.regs.vpr_mut().write_element(dest, ElemIdx::new(i), data_sew, val);
@@ -804,9 +802,8 @@ fn exec_mask_load(
 
     for i in 0..num_bytes {
         let addr = base.wrapping_add(i as u64);
-        let val = mem_read_element(cpu, addr, Sew::E8).map_err(|t| {
+        let val = mem_read_element(cpu, addr, Sew::E8).inspect_err(|_t| {
             cpu.csrs.vstart = i as u64;
-            t
         })?;
         cpu.regs.vpr_mut().write_element(vd, ElemIdx::new(i), Sew::E8, val);
     }
@@ -834,9 +831,8 @@ fn exec_whole_reg_load(
 
     for i in 0..total_bytes {
         let addr = base.wrapping_add(i as u64);
-        let val = mem_read_element(cpu, addr, Sew::E8).map_err(|t| {
+        let val = mem_read_element(cpu, addr, Sew::E8).inspect_err(|_t| {
             cpu.csrs.vstart = i as u64;
-            t
         })?;
         let reg_offset = i / vlen_bytes;
         let byte_offset = i % vlen_bytes;
@@ -874,9 +870,8 @@ fn exec_unit_stride_store(
             let addr = base.wrapping_add(((i * nf + seg) as u64).wrapping_mul(eew_bytes));
             let src = VRegIdx::new(vs3.as_u8() + (seg as u8) * emul.regs());
             let val = cpu.regs.vpr().read_element(src, ElemIdx::new(i), eew);
-            mem_write_element(cpu, addr, eew, val).map_err(|t| {
+            mem_write_element(cpu, addr, eew, val).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
         }
     }
@@ -913,9 +908,8 @@ fn exec_strided_store(
             let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(eew_bytes));
             let src = VRegIdx::new(vs3.as_u8() + (seg as u8) * emul.regs());
             let val = cpu.regs.vpr().read_element(src, ElemIdx::new(i), eew);
-            mem_write_element(cpu, addr, eew, val).map_err(|t| {
+            mem_write_element(cpu, addr, eew, val).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
         }
     }
@@ -957,9 +951,8 @@ fn exec_indexed_store(
             let addr = elem_base.wrapping_add((seg as u64).wrapping_mul(data_bytes));
             let src = VRegIdx::new(vs3.as_u8() + (seg as u8) * data_emul.regs());
             let val = cpu.regs.vpr().read_element(src, ElemIdx::new(i), data_sew);
-            mem_write_element(cpu, addr, data_sew, val).map_err(|t| {
+            mem_write_element(cpu, addr, data_sew, val).inspect_err(|_t| {
                 cpu.csrs.vstart = i as u64;
-                t
             })?;
         }
     }
@@ -983,9 +976,8 @@ fn exec_mask_store(
     for i in 0..num_bytes {
         let addr = base.wrapping_add(i as u64);
         let val = cpu.regs.vpr().read_element(vs3, ElemIdx::new(i), Sew::E8);
-        mem_write_element(cpu, addr, Sew::E8, val).map_err(|t| {
+        mem_write_element(cpu, addr, Sew::E8, val).inspect_err(|_t| {
             cpu.csrs.vstart = i as u64;
-            t
         })?;
     }
 
@@ -1015,9 +1007,8 @@ fn exec_whole_reg_store(
         let byte_offset = i % vlen_bytes;
         let src = VRegIdx::new(vs3.as_u8() + reg_offset as u8);
         let val = cpu.regs.vpr().read_element(src, ElemIdx::new(byte_offset), Sew::E8);
-        mem_write_element(cpu, addr, Sew::E8, val).map_err(|t| {
+        mem_write_element(cpu, addr, Sew::E8, val).inspect_err(|_t| {
             cpu.csrs.vstart = i as u64;
-            t
         })?;
     }
 

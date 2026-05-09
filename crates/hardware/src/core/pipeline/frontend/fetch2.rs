@@ -133,20 +133,14 @@ pub fn fetch2_stage(
             }
         } else {
             let upper_va = f1.pc.wrapping_add(2);
-            let crosses_page = (f1.pc >> 12) != (upper_va >> 12);
 
-            let (upper_phys, upper_fault) = if crosses_page {
-                let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch, 2);
-                *stall_out += result.cycles;
-                (result.paddr, result.trap)
-            } else {
-                // Same page — MMU translation is the same, but PMP may
-                // differ if a fine-grained region boundary falls between
-                // the two halves of this 4-byte instruction.
-                let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch, 2);
-                *stall_out += result.cycles;
-                (result.paddr, result.trap)
-            };
+            // Always re-translate the upper halfword. Even within the same
+            // page the MMU result holds, but a fine-grained PMP region
+            // boundary can fall between the two halves of a 4-byte
+            // instruction, so we re-check and accrue the cycle cost.
+            let result = cpu.translate(VirtAddr::new(upper_va), AccessType::Fetch, 2);
+            *stall_out += result.cycles;
+            let (upper_phys, upper_fault) = (result.paddr, result.trap);
 
             if let Some(t) = upper_fault {
                 (0, InstSize::Standard, Some(t))

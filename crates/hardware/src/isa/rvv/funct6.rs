@@ -399,7 +399,7 @@ pub const VROR: u32 = 0b010100;
 /// `vrol.vv`/`vrol.vx` (Zvbb).
 pub const VROL: u32 = 0b010101;
 /// `vwsll.vv`/`vwsll.vx`/`vwsll.vi` (Zvbb). Shares funct6 0b110101 with
-/// VWADD_W (different funct3).
+/// `VWADD_W` (different funct3).
 pub const VWSLL: u32 = 0b110101;
 
 // ── Mask operations (OPMVV) ─────────────────────────────────────────────────

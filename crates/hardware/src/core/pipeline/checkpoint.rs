@@ -67,6 +67,7 @@ impl CheckpointTable {
 
     /// Allocates a checkpoint slot, saving `rename_map`, `vtype`, `vl`, `frm`, `vxrm`,
     /// and `vstart` for `branch_tag`. Returns `None` if the table is full.
+    #[allow(clippy::too_many_arguments)]
     pub fn allocate(
         &mut self,
         branch_tag: RobTag,

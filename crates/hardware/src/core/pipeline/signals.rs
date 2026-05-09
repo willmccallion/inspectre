@@ -1188,7 +1188,18 @@ impl VectorOp {
             // that is broadcast across destination groups.
             VAesEm | VAesEf | VAesDm | VAesDf | VAesZ | VSm4R
             => VecOperandGroups { vd: lmul, vs2: vs2_crypto, vs1: 0 },
-            VAesKf1 | VAesKf2 | VSm4K | VSm3C | VGmul
+
+            // Same shape as FP/bit-manip unary below: vs1 is a sub-opcode/imm,
+            // not a register reference, so its group size is 0.
+            VAesKf1 | VAesKf2 | VSm4K | VSm3C | VGmul |
+            // ── FP conversions, unary, and indexed mem (vd=LMUL, vs2=LMUL, vs1=0)
+            VFCvtXuF | VFCvtXF | VFCvtFXu | VFCvtFX |
+            VFCvtRtzXuF | VFCvtRtzXF |
+            VFSqrt | VFRsqrt7 | VFRec7 | VFClass |
+            VLoadIndexOrd | VLoadIndexUnord |
+            VStoreIndexOrd | VStoreIndexUnord |
+            // Zvbb unary bit-manip (vbrev/vbrev8/vrev8/vclz/vctz/vcpop.v)
+            VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
 
             // Reductions (standard + widening): vd and vs1 are single registers
@@ -1229,16 +1240,6 @@ impl VectorOp {
             VZextVf4 | VSextVf4 => VecOperandGroups { vd: lmul, vs2: (lmul / 4).max(1), vs1: 0 },
             VZextVf8 | VSextVf8 => VecOperandGroups { vd: lmul, vs2: (lmul / 8).max(1), vs1: 0 },
 
-            // ── FP conversions, unary, and indexed mem (vd=LMUL, vs2=LMUL, vs1=0)
-            VFCvtXuF | VFCvtXF | VFCvtFXu | VFCvtFX |
-            VFCvtRtzXuF | VFCvtRtzXF |
-            VFSqrt | VFRsqrt7 | VFRec7 | VFClass |
-            VLoadIndexOrd | VLoadIndexUnord |
-            VStoreIndexOrd | VStoreIndexUnord |
-            // Zvbb unary bit-manip (vbrev/vbrev8/vrev8/vclz/vctz/vcpop.v)
-            VBrev | VBrev8 | VRev8 | VClz | VCtz | VCpopV
-            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
-
             // ── Widening FP conversions (vd=2×LMUL, vs2=LMUL) ──────────
             VFWCvtXuF | VFWCvtXF | VFWCvtFXu | VFWCvtFX |
             VFWCvtFF | VFWCvtRtzXuF | VFWCvtRtzXF
@@ -1277,7 +1278,14 @@ impl VectorOp {
             // vid.v writes element index into vd; the vs2 field of the encoded
             // instruction is part of the opcode (must be zero per spec) and is
             // not a register operand, so the alignment check should not apply.
-            VIdV => VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 },
+            //
+            // Memory ops (vd/vs3 = LMUL group, vs2 = index vector for indexed
+            // forms; for unit/strided/fault-only-first vs2 is part of the
+            // opcode) share the same shape.
+            VIdV |
+            VLoadUnit | VLoadFF | VStoreUnit |
+            VLoadStride | VStoreStride
+            => VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 },
 
             // ── Mask logical (all operands are single mask registers) ────
             VMAndMM | VMNandMM | VMAndnMM | VMOrMM | VMNorMM | VMOrnMM |
@@ -1296,11 +1304,6 @@ impl VectorOp {
                 let regs = nf + 1;
                 VecOperandGroups { vd: regs, vs2: 0, vs1: 0 }
             }
-
-            // ── Memory ops (vd/vs3 = LMUL group, vs2 = index vector) ───
-            VLoadUnit | VLoadFF | VStoreUnit |
-            VLoadStride | VStoreStride
-            => VecOperandGroups { vd: lmul, vs2: 0, vs1: 0 },
 
         }
     }

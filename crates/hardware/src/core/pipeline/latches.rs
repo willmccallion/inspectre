@@ -268,6 +268,7 @@ pub struct RenameIssueEntry {
 
 /// Entry from Execute -> Memory1 latch.
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct ExMem1Entry {
     /// ROB tag.
     pub rob_tag: RobTag,
@@ -299,26 +300,6 @@ pub struct ExMem1Entry {
     pub vec_mem: Option<VecMemElement>,
 }
 
-impl Default for ExMem1Entry {
-    fn default() -> Self {
-        Self {
-            rob_tag: RobTag::default(),
-            pc: 0,
-            inst: 0,
-            inst_size: InstSize::default(),
-            rd: RegIdx::default(),
-            rd_phys: PhysReg::default(),
-            alu: 0,
-            store_data: 0,
-            ctrl: ControlSignals::default(),
-            trap: None,
-            exception_stage: None,
-            fp_flags: 0,
-            sfence_vma: None,
-            vec_mem: None,
-        }
-    }
-}
 
 /// Entry from Memory1 -> Memory2 latch.
 #[derive(Clone, Default, Debug)]
@@ -358,7 +339,7 @@ pub struct Mem1Mem2Entry {
     pub pte_update: Option<PteUpdate>,
     /// Deferred SFENCE.VMA operands for commit-time TLB invalidation.
     pub sfence_vma: Option<SfenceVmaInfo>,
-    /// Vector memory element metadata (flows through from ExMem1Entry).
+    /// Vector memory element metadata (flows through from `ExMem1Entry`).
     pub vec_mem: Option<VecMemElement>,
 }
 
@@ -395,6 +376,6 @@ pub struct Mem2WbEntry {
     pub sfence_vma: Option<SfenceVmaInfo>,
     /// Deferred LR/SC reservation action for commit-time application.
     pub lr_sc: Option<LrScRecord>,
-    /// Vector memory element metadata (flows through from ExMem1Entry).
+    /// Vector memory element metadata (flows through from `ExMem1Entry`).
     pub vec_mem: Option<VecMemElement>,
 }

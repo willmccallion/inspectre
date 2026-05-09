@@ -631,14 +631,16 @@ impl Fpu {
 
         let (overflow, result) = match op {
             AluOp::FCvtWS => {
-                if !(I32_MIN_F64..I32_MAX_P1_F64).contains(&rounded) {
-                    (true, if rounded > 0.0 { i32::MAX } else { i32::MIN } as i64 as u64)
-                } else {
+                if (I32_MIN_F64..I32_MAX_P1_F64).contains(&rounded) {
                     (false, rounded as i32 as i64 as u64)
+                } else {
+                    (true, if rounded > 0.0 { i32::MAX } else { i32::MIN } as i64 as u64)
                 }
             }
             AluOp::FCvtWUS => {
-                if !(0.0..U32_MAX_P1_F64).contains(&rounded) {
+                if (0.0..U32_MAX_P1_F64).contains(&rounded) {
+                    (false, rounded as u32 as i32 as i64 as u64)
+                } else {
                     (
                         true,
                         if rounded > 0.0 {
@@ -647,15 +649,13 @@ impl Fpu {
                             0
                         },
                     )
-                } else {
-                    (false, rounded as u32 as i32 as i64 as u64)
                 }
             }
             AluOp::FCvtLS => {
-                if !(I64_MIN_F64..I64_MAX_P1_F64).contains(&rounded) {
-                    (true, if rounded > 0.0 { i64::MAX } else { i64::MIN } as u64)
-                } else {
+                if (I64_MIN_F64..I64_MAX_P1_F64).contains(&rounded) {
                     (false, rounded as i64 as u64)
+                } else {
+                    (true, if rounded > 0.0 { i64::MAX } else { i64::MIN } as u64)
                 }
             }
             AluOp::FCvtLUS => {
@@ -877,7 +877,7 @@ impl Fpu {
     }
 
     /// Rounds an f64 value to an integer using the specified RISC-V rounding mode.
-    fn round_to_integer(val: f64, rm: RoundingMode) -> f64 {
+    const fn round_to_integer(val: f64, rm: RoundingMode) -> f64 {
         match rm {
             RoundingMode::Rne => {
                 // Round to nearest, ties to even — IEEE 754 default.
@@ -963,14 +963,16 @@ impl Fpu {
             // Range check the ROUNDED value
             let (overflow, result) = match op {
                 AluOp::FCvtWS => {
-                    if !(I32_MIN_F64..I32_MAX_P1_F64).contains(&rounded) {
-                        (true, if rounded > 0.0 { i32::MAX } else { i32::MIN } as i64 as u64)
-                    } else {
+                    if (I32_MIN_F64..I32_MAX_P1_F64).contains(&rounded) {
                         (false, rounded as i32 as i64 as u64)
+                    } else {
+                        (true, if rounded > 0.0 { i32::MAX } else { i32::MIN } as i64 as u64)
                     }
                 }
                 AluOp::FCvtWUS => {
-                    if !(0.0..U32_MAX_P1_F64).contains(&rounded) {
+                    if (0.0..U32_MAX_P1_F64).contains(&rounded) {
+                        (false, rounded as u32 as i32 as i64 as u64)
+                    } else {
                         (
                             true,
                             if rounded > 0.0 {
@@ -979,15 +981,13 @@ impl Fpu {
                                 0
                             },
                         )
-                    } else {
-                        (false, rounded as u32 as i32 as i64 as u64)
                     }
                 }
                 AluOp::FCvtLS => {
-                    if !(I64_MIN_F64..I64_MAX_P1_F64).contains(&rounded) {
-                        (true, if rounded > 0.0 { i64::MAX } else { i64::MIN } as u64)
-                    } else {
+                    if (I64_MIN_F64..I64_MAX_P1_F64).contains(&rounded) {
                         (false, rounded as i64 as u64)
+                    } else {
+                        (true, if rounded > 0.0 { i64::MAX } else { i64::MIN } as u64)
                     }
                 }
                 AluOp::FCvtLUS => {
