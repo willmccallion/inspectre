@@ -933,17 +933,27 @@ fn f64_to_f32_round_to_odd(a: f64) -> f32 {
     if a.is_infinite() {
         return if a.is_sign_positive() { f32::INFINITY } else { f32::NEG_INFINITY };
     }
-    let bits = a.to_bits();
-    // f32 keeps the top 23 bits of the f64 mantissa (bits 51:29). The
-    // bottom 29 bits (28:0) are dropped during narrowing — we want to
-    // detect any non-zero bit there and jam.
-    const LOST_MASK: u64 = (1u64 << 29) - 1; // bits 28:0
-    let lost = bits & LOST_MASK;
-    let truncated_bits = bits & !LOST_MASK;
-    // The truncated f64 IS exactly representable in f32 (it has at most 23
-    // mantissa bits set), so the cast is lossless.
-    let truncated_f32 = f64::from_bits(truncated_bits) as f32;
-    if lost != 0 && !truncated_f32.is_nan() && !truncated_f32.is_infinite() {
+
+    // Round-to-odd: convert with round-toward-zero, then jam the LSB to 1
+    // if the conversion was inexact (so the result is always odd when
+    // narrowing loses precision). For overflow, RTZ returns ±max-normal,
+    // which already has LSB=1, so the jam is a no-op there.
+    let abs = a.abs();
+    let f32_max = f32::from_bits(0x7F7F_FFFF);
+
+    let truncated_f32 = if abs > f32_max as f64 {
+        // Overflow: RTZ saturates to ±max-normal.
+        if a.is_sign_positive() { f32_max } else { -f32_max }
+    } else {
+        // Mask off bits beyond f32 precision; the truncated value is exact
+        // in f32 (≤ 23 mantissa bits set after masking).
+        const LOST_MASK: u64 = (1u64 << 29) - 1;
+        let truncated_bits = a.to_bits() & !LOST_MASK;
+        f64::from_bits(truncated_bits) as f32
+    };
+
+    let lost = a.to_bits() & ((1u64 << 29) - 1) != 0 || abs > f32_max as f64;
+    if lost && truncated_f32.is_finite() {
         f32::from_bits(truncated_f32.to_bits() | 1)
     } else {
         truncated_f32
@@ -2125,24 +2135,16 @@ fn exec_fp_narrowing(
                     (bits as u64, f)
                 }
                 VectorOp::VFNCvtRodFF => {
-                    // Round-to-odd: suppress double-rounding for chained narrowing
-                    let r32 = a32;
-                    if !r32.is_nan() && !r32.is_infinite() {
-                        let (bits, f) = f64_to_f16(r32 as f64, ctx.frm);
-                        let flags_no_nx = FpFlags::from_bits(f.bits() & !FpFlags::NX.bits());
-                        // Jam LSB if inexact
-                        let jammed = if (r32 as f64) != (r32 as f64)
-                            && (r32 as f64).is_finite()
-                        {
-                            bits | 1
-                        } else {
-                            bits
-                        };
-                        (jammed as u64, flags_no_nx)
-                    } else {
-                        let (bits, f) = f64_to_f16(r32 as f64, ctx.frm);
-                        (bits as u64, f)
-                    }
+                    // Round-to-odd: round toward zero into f16, then jam the
+                    // mantissa LSB to 1 if rounding was inexact (so the
+                    // result is always odd when narrowing loses precision).
+                    // Round-to-odd suppresses NX (per Zvfh).
+                    let (bits, f) = f64_to_f16(a32 as f64, RoundingMode::Rtz);
+                    let inexact = f.bits() & FpFlags::NX.bits() != 0;
+                    let finite = !a32.is_nan() && !a32.is_infinite();
+                    let jammed = if inexact && finite { bits | 1 } else { bits };
+                    let flags_no_nx = FpFlags::from_bits(f.bits() & !FpFlags::NX.bits());
+                    (jammed as u64, flags_no_nx)
                 }
                 VectorOp::VFNCvtXuF => {
                     clear_host_fp_flags();
