@@ -794,6 +794,39 @@ fn round_f64_to_int_per_frm(a: f64, frm: RoundingMode) -> f64 {
     }
 }
 
+/// FRM-aware f64 → i16 conversion with saturation. Used by f16 vfcvt.x.f
+/// (the f16 element is upcast to f64 by the caller before rounding).
+fn f64_to_i16_frm(a: f64, frm: RoundingMode) -> (i16, FpFlags) {
+    if a.is_nan() {
+        return (i16::MAX, FpFlags::NV);
+    }
+    let rounded = round_f64_to_int_per_frm(a, frm);
+    if rounded < i16::MIN as f64 {
+        return (i16::MIN, FpFlags::NV);
+    }
+    if rounded > i16::MAX as f64 {
+        return (i16::MAX, FpFlags::NV);
+    }
+    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    (rounded as i16, nx)
+}
+
+/// FRM-aware f64 → u16 conversion with saturation.
+fn f64_to_u16_frm(a: f64, frm: RoundingMode) -> (u16, FpFlags) {
+    if a.is_nan() {
+        return (u16::MAX, FpFlags::NV);
+    }
+    let rounded = round_f64_to_int_per_frm(a, frm);
+    if rounded < 0.0 {
+        return (0, FpFlags::NV);
+    }
+    if rounded > u16::MAX as f64 {
+        return (u16::MAX, FpFlags::NV);
+    }
+    let nx = if rounded != a { FpFlags::NX } else { FpFlags::NONE };
+    (rounded as u16, nx)
+}
+
 /// FRM-aware f32 → i32 conversion with saturation and IEEE flag computation.
 fn f32_to_i32_frm(a: f32, frm: RoundingMode) -> (i32, FpFlags) {
     if a.is_nan() {
@@ -1256,28 +1289,20 @@ fn compute_f16(op: VectorOp, vs2_bits: u64, op1_bits: u64, rm: RoundingMode) -> 
         VectorOp::VFSgnjx => ((ha ^ (hb & 0x8000)) as u64, FpFlags::NONE),
         VectorOp::VFClass => (classify_f16(ha), FpFlags::NONE),
         VectorOp::VFCvtXuF => {
-            clear_host_fp_flags();
-            let r = if fa.is_nan() { u16::MAX as u64 } else { fa as u16 as u64 };
-            let f = read_host_fp_flags() | if fa.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-            (r, f)
+            let (r, f) = f64_to_u16_frm(fa, rm);
+            (r as u64, f)
         }
         VectorOp::VFCvtXF => {
-            clear_host_fp_flags();
-            let r = if fa.is_nan() { i16::MAX as u64 } else { (fa as i16 as u16) as u64 };
-            let f = read_host_fp_flags() | if fa.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-            (r, f)
+            let (r, f) = f64_to_i16_frm(fa, rm);
+            (r as u16 as u64, f)
         }
         VectorOp::VFCvtRtzXuF => {
-            clear_host_fp_flags();
-            let r = if fa.is_nan() { u16::MAX as u64 } else { fa as u16 as u64 };
-            let f = read_host_fp_flags() | if fa.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-            (r, f)
+            let (r, f) = f64_to_u16_frm(fa, RoundingMode::Rtz);
+            (r as u64, f)
         }
         VectorOp::VFCvtRtzXF => {
-            clear_host_fp_flags();
-            let r = if fa.is_nan() { i16::MAX as u64 } else { (fa as i16 as u16) as u64 };
-            let f = read_host_fp_flags() | if fa.is_nan() { FpFlags::NV } else { FpFlags::NONE };
-            (r, f)
+            let (r, f) = f64_to_i16_frm(fa, RoundingMode::Rtz);
+            (r as u16 as u64, f)
         }
         VectorOp::VFCvtFXu => round(vs2_bits as u16 as f64, FpFlags::NONE),
         VectorOp::VFCvtFX => round(sign_extend(vs2_bits, Sew::E16) as i16 as f64, FpFlags::NONE),
