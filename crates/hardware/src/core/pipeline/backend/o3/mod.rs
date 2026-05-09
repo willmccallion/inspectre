@@ -1192,12 +1192,15 @@ impl ExecutionEngine for O3Engine {
                         // VL=0 or vill: complete immediately
                         self.rob.complete(ex_result.rob_tag, 0);
                     } else {
-                        use crate::core::pipeline::signals::{MemWidth as MW, VectorOp};
+                        use crate::core::pipeline::signals::MemWidth as MW;
 
                         // Build all element micro-ops up front. They will be
                         // released into the memory pipeline in waves by
                         // issue_vec_mem_waves; loads bound on LQ capacity,
                         // stores stream straight through (data lives in VSB).
+                        // Each micro-op carries the parent's vec_op intact;
+                        // memory1/memory2 distinguish vec elements from scalar
+                        // via `vec_mem.is_some()`, not by mutating ctrl.
                         let total = micro_ops.len();
                         let mut all_micro_ops: std::collections::VecDeque<VecMemMicroOp> =
                             std::collections::VecDeque::with_capacity(total);
@@ -1211,9 +1214,6 @@ impl ExecutionEngine for O3Engine {
                             ctrl.mem_read = !is_store;
                             ctrl.mem_write = is_store;
                             ctrl.width = eew_width;
-                            // Clear vec_op so Memory1/Memory2 treat this
-                            // as a normal scalar memory access.
-                            ctrl.vec_op = VectorOp::None;
 
                             let vec_elem = VecMemElement {
                                 elem_idx: mop.elem_idx,
