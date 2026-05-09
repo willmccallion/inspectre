@@ -15,16 +15,13 @@ use crate::core::pipeline::signals::ControlSignals;
 use crate::core::units::bru::Ghr;
 use crate::core::units::vpu::types::{ElemIdx, Sew, VecPhysReg};
 
-/// Index into the `O3Engine::vec_mem_inflight` tracking table.
-/// Strongly typed to prevent confusion with other indices.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct VecMemInflightIdx(pub usize);
-
 /// Metadata for a vector memory element micro-op flowing through Memory1/Memory2.
+///
+/// The parent vec mem instruction is identified by the `rob_tag` already
+/// carried on the surrounding `ExMem1Entry` / `Mem1Mem2Entry` / `Mem2WbEntry`,
+/// so no extra parent index is needed here.
 #[derive(Clone, Debug)]
 pub struct VecMemElement {
-    /// Index into O3Engine::vec_mem_inflight for the parent instruction.
-    pub parent_idx: VecMemInflightIdx,
     /// Element index within the vector register (for writeback targeting).
     pub elem_idx: ElemIdx,
     /// Effective element width for this access.

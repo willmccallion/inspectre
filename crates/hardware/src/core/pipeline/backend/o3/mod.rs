@@ -16,7 +16,7 @@ use crate::core::pipeline::checkpoint::CheckpointTable;
 use crate::core::pipeline::engine::ExecutionEngine;
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::latches::{
-    ExMem1Entry, Mem1Mem2Entry, Mem2WbEntry, RenameIssueEntry, VecMemElement, VecMemInflightIdx,
+    ExMem1Entry, Mem1Mem2Entry, Mem2WbEntry, RenameIssueEntry, VecMemElement,
 };
 use crate::core::pipeline::load_queue::LoadQueue;
 use crate::core::pipeline::prf::{PhysReg, PhysRegFile};
@@ -127,8 +127,6 @@ pub struct O3Engine {
 pub struct VecMemMicroOp {
     /// The ExMem1Entry carrying the element's virtual address and metadata.
     pub entry: ExMem1Entry,
-    /// Index into vec_mem_inflight for the parent instruction.
-    pub parent_idx: VecMemInflightIdx,
     /// Element index within the vector register (for writeback targeting).
     pub elem_idx: crate::core::units::vpu::types::ElemIdx,
     /// Effective element width for this access.
@@ -432,10 +430,16 @@ impl ExecutionEngine for O3Engine {
                     if !vme.is_store {
                         self.load_queue.deallocate_elem(wb.rob_tag, vme.elem_idx);
                     }
-                    // Decrement parent's outstanding count
-                    let pidx = vme.parent_idx.0;
-                    if pidx < self.vec_mem_inflight.len() {
-                        let parent = &mut self.vec_mem_inflight[pidx];
+                    // Look up the parent inflight entry by rob_tag and
+                    // decrement its outstanding count. Linear scan over a few
+                    // in-flight vec mem ops — same cost as the previous
+                    // index-based lookup, with no extra indirection through a
+                    // separate parent_idx field.
+                    if let Some(parent) = self
+                        .vec_mem_inflight
+                        .iter_mut()
+                        .find(|m| m.rob_tag == wb.rob_tag)
+                    {
                         parent.remaining = parent.remaining.saturating_sub(1);
 
                         // First element returned: fire chaining wakeup
@@ -444,10 +448,8 @@ impl ExecutionEngine for O3Engine {
                                 self.vec_prf.mark_ready(parent.vd_phys[j]);
                             }
                             for j in 0..parent.vd_count as usize {
-                                self.issue_queue.wakeup_vec_phys(
-                                    parent.vd_phys[j],
-                                    &self.vec_prf,
-                                );
+                                self.issue_queue
+                                    .wakeup_vec_phys(parent.vd_phys[j], &self.vec_prf);
                             }
                             parent.wakeup_fired = true;
                         }
@@ -1193,9 +1195,9 @@ impl ExecutionEngine for O3Engine {
                         use crate::core::pipeline::signals::{MemWidth as MW, VectorOp};
 
                         // Build all element micro-ops up front. They will be
-                        // released into the memory pipeline in waves, bounded
-                        // by current LQ/SB capacity, by issue_vec_mem_waves().
-                        let parent_idx = VecMemInflightIdx(self.vec_mem_inflight.len());
+                        // released into the memory pipeline in waves by
+                        // issue_vec_mem_waves; loads bound on LQ capacity,
+                        // stores stream straight through (data lives in VSB).
                         let total = micro_ops.len();
                         let mut all_micro_ops: std::collections::VecDeque<VecMemMicroOp> =
                             std::collections::VecDeque::with_capacity(total);
@@ -1214,7 +1216,6 @@ impl ExecutionEngine for O3Engine {
                             ctrl.vec_op = VectorOp::None;
 
                             let vec_elem = VecMemElement {
-                                parent_idx,
                                 elem_idx: mop.elem_idx,
                                 eew: mop.eew,
                                 vd_phys: mop.vd_phys,
@@ -1237,7 +1238,6 @@ impl ExecutionEngine for O3Engine {
                                     sfence_vma: None,
                                     vec_mem: Some(vec_elem),
                                 },
-                                parent_idx,
                                 elem_idx: mop.elem_idx,
                                 eew: mop.eew,
                                 vd_phys: mop.vd_phys,
