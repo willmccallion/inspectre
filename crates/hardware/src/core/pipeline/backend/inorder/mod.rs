@@ -128,7 +128,6 @@ impl ExecutionEngine for InOrderEngine {
             None, // in-order backend: no checkpoints
             None, // in-order backend: no vec PRF
             None, // in-order backend: no vec free list
-            None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
             None, // in-order backend: no VSB (vec stores complete in execute)
         );
 
@@ -159,9 +158,7 @@ impl ExecutionEngine for InOrderEngine {
             &mut self.mem1_mem2,
             &mut self.mem2_wb,
             &mut self.store_buffer,
-            &mut self.rob,
             None, // in-order backend: no load queue
-            None, // in-order backend: no vec_mem_inflight (vec ops are serialized in execute)
             None, // in-order backend: no VSB
         );
 

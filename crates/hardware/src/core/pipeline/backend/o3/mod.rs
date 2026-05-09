@@ -371,7 +371,6 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.checkpoints),
             Some(&mut self.vec_prf),
             Some(&mut self.vec_free_list),
-            Some(&mut self.vec_mem_inflight),
             Some(&mut self.vec_store_buffer),
         );
 
@@ -534,9 +533,7 @@ impl ExecutionEngine for O3Engine {
             &mut self.mem1_mem2,
             &mut self.mem2_wb,
             &mut self.store_buffer,
-            &mut self.rob,
             Some(&mut self.load_queue),
-            Some(&self.vec_mem_inflight),
             Some(&mut self.vec_store_buffer),
         );
 

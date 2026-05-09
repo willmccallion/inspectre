@@ -53,9 +53,6 @@ pub fn commit_stage(
     mut checkpoints: Option<&mut CheckpointTable>,
     mut vec_prf: Option<&mut VecPhysRegFile>,
     mut vec_free_list: Option<&mut FreeList<VecPhysReg>>,
-    mut vec_mem_inflight: Option<
-        &mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>,
-    >,
     mut vec_store_buffer: Option<
         &mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer,
     >,
@@ -415,7 +412,6 @@ pub fn commit_stage(
                 drain_all_committed(
                     cpu,
                     store_buffer,
-                    vec_mem_inflight.as_deref_mut(),
                     vec_store_buffer.as_deref_mut(),
                 );
             }
@@ -605,7 +601,6 @@ pub fn commit_stage(
             drain_all_committed(
                 cpu,
                 store_buffer,
-                vec_mem_inflight.as_deref_mut(),
                 vec_store_buffer.as_deref_mut(),
             );
             // FENCE.I: flush I-cache AFTER store drain so refills see new data.
@@ -634,7 +629,6 @@ pub fn commit_stage(
                 drain_all_committed(
                     cpu,
                     store_buffer,
-                    vec_mem_inflight.as_deref_mut(),
                     vec_store_buffer.as_deref_mut(),
                 );
             }
@@ -671,8 +665,6 @@ pub fn commit_stage(
     {
         let _ = vsb.drain_one_committed(cpu);
     }
-    let _ = vec_mem_inflight; // step 4 deletes the parameter
-
     trap_event
 }
 
@@ -722,7 +714,6 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
 fn drain_all_committed(
     cpu: &mut Cpu,
     store_buffer: &mut StoreBuffer,
-    _vec_mem_inflight: Option<&mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>>,
     vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) {
     while let Some(store) = store_buffer.drain_one() {
@@ -1266,7 +1257,6 @@ mod tests {
             &mut committed_rename_map,
             &mut free_list,
             1,
-            None,
             None,
             None,
             None,

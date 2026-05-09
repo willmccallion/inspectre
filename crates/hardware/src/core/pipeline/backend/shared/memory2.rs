@@ -8,7 +8,7 @@ use crate::common::error::{ExceptionStage, LrScRecord, Trap};
 use crate::core::Cpu;
 use crate::core::pipeline::latches::{Mem1Mem2Entry, Mem2WbEntry};
 use crate::core::pipeline::load_queue::LoadQueue;
-use crate::core::pipeline::rob::{Rob, RobTag};
+use crate::core::pipeline::rob::RobTag;
 use crate::core::pipeline::signals::{AtomicOp, MemWidth};
 use crate::core::pipeline::store_buffer::{ForwardResult, StoreBuffer};
 use crate::core::units::lsu::Lsu;
@@ -26,9 +26,7 @@ pub fn memory2_stage(
     input: &mut Vec<Mem1Mem2Entry>,
     output: &mut Vec<Mem2WbEntry>,
     store_buffer: &mut StoreBuffer,
-    _rob: &mut Rob,
     mut load_queue: Option<&mut LoadQueue>,
-    _vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
     mut vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) -> Option<(RobTag, u64)> {
     let mut violation: Option<(RobTag, u64)> = None;
@@ -477,7 +475,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0);
@@ -516,7 +514,7 @@ mod tests {
         let mut output = Vec::new();
 
         let violation =
-            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, &mut rob, None, None, None);
+            memory2_stage(&mut cpu, &mut input, &mut output, &mut store_buffer, None, None);
 
         assert!(violation.is_none());
         assert_eq!(input.len(), 0); // Input is drained because trap is pushed
@@ -562,7 +560,7 @@ mod tests {
         }];
         let mut output = Vec::new();
 
-        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, &mut rob, None, None, None);
+        memory2_stage(&mut cpu, &mut input_lr, &mut output, &mut store_buffer, None, None);
         // LR does NOT set reservation at Memory2 — deferred to commit
         assert!(!cpu.check_reservation(PhysAddr::new(0x8000_0000)));
         // But the output carries the deferred LR record
@@ -596,7 +594,7 @@ mod tests {
             vec_mem: None,
         }];
 
-        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, &mut rob, None, None, None);
+        memory2_stage(&mut cpu, &mut input_sc, &mut output, &mut store_buffer, None, None);
         // SC optimistically returns 0 (success) — actual check deferred to commit
         assert_eq!(output[0].load_data, 0);
         assert!(matches!(output[0].lr_sc, Some(LrScRecord::Sc { paddr: PhysAddr(0x8000_0000) })));
@@ -653,9 +651,7 @@ mod tests {
             &mut input,
             &mut output,
             &mut store_buffer,
-            &mut rob,
             Some(&mut load_queue),
-            None,
             None,
         );
 
