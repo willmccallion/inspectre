@@ -529,6 +529,25 @@ pub fn execute_vec_op_on<V: VectorRegFile>(
         });
     }
 
+    if crypto::is_crypto(vec_op) {
+        crypto::execute_crypto(
+            vec_op,
+            vpr,
+            id.ctrl.vd,
+            id.ctrl.vs2,
+            id.ctrl.vs1,
+            ctx.vstart,
+            ctx.vl,
+            id.inst,
+            id.ctrl.vec_broadcast_vs2,
+        );
+        return Ok(VecOpResult {
+            scalar_result: 0,
+            fp_flags: 0,
+            vxsat: false,
+        });
+    }
+
     // Integer arithmetic (default)
     let result = vec_execute(
         vec_op,
