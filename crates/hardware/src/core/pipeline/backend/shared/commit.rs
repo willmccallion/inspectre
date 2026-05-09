@@ -56,7 +56,7 @@ pub fn commit_stage(
     mut vec_mem_inflight: Option<
         &mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>,
     >,
-    mut _vec_store_buffer: Option<
+    mut vec_store_buffer: Option<
         &mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer,
     >,
 ) -> Option<(Trap, u64)> {
@@ -412,7 +412,12 @@ pub fn commit_stage(
             // memory before the new page tables are consulted. Drain the
             // entire store buffer so the PTW reads up-to-date PTEs.
             if csr_update.addr == csr::SATP {
-                drain_all_committed(cpu, store_buffer, vec_mem_inflight.as_deref_mut());
+                drain_all_committed(
+                    cpu,
+                    store_buffer,
+                    vec_mem_inflight.as_deref_mut(),
+                    vec_store_buffer.as_deref_mut(),
+                );
             }
             // For the O3 backend, fflags/fcsr CSR writes are applied eagerly at
             // complete time (in step 6a of tick()) to avoid races with younger
@@ -557,26 +562,14 @@ pub fn commit_stage(
             }
             store_buffer.mark_committed(entry.tag);
         } else if crate::core::units::vpu::mem::is_vec_store(entry.ctrl.vec_op) {
-            // Vector store: SB entries are released at writeback time and the
-            // resolved (paddr, data, width) tuples are buffered in the
-            // per-vec-store side buffer (`VecMemInflight::pending_writes`).
-            // Mark the side-buffer entry committed so it begins draining to
-            // memory. The legacy `mark_committed` on the SB is a no-op for
-            // vec stores (entries already gone) but cheap and harmless.
+            // Vector store: data lives in the dedicated `VecStoreBuffer`.
+            // Marking committed there gates the per-line drain that follows.
+            // The legacy `store_buffer.mark_committed` is left as a no-op for
+            // any per-element SB slots that are still allocated; step 5
+            // removes those slots entirely and this call goes with them.
             store_buffer.mark_committed(entry.tag);
-            if let Some(ref mut inflight_vec) = vec_mem_inflight {
-                for inflight in inflight_vec.iter_mut() {
-                    if inflight.in_progress && inflight.rob_tag == entry.tag {
-                        inflight.committed = true;
-                        // If all writes already drained (vl=0 case), mark done.
-                        if inflight.pending_writes.is_empty()
-                            && inflight.pending_micro_ops.is_empty()
-                        {
-                            inflight.in_progress = false;
-                        }
-                        break;
-                    }
-                }
+            if let Some(vsb) = vec_store_buffer.as_deref_mut() {
+                vsb.mark_committed(entry.tag);
             }
         }
 
@@ -609,7 +602,12 @@ pub fn commit_stage(
         // FENCE: only drain when pred.w is set (older stores must be globally
         // visible before younger succ operations proceed).
         if entry.ctrl.system_op == SystemOp::FenceI {
-            drain_all_committed(cpu, store_buffer, vec_mem_inflight.as_deref_mut());
+            drain_all_committed(
+                cpu,
+                store_buffer,
+                vec_mem_inflight.as_deref_mut(),
+                vec_store_buffer.as_deref_mut(),
+            );
             // FENCE.I: flush I-cache AFTER store drain so refills see new data.
             // The execute stage already redirected the frontend; this flush
             // ensures the I-cache doesn't hold stale lines when fetching resumes.
@@ -633,7 +631,12 @@ pub fn commit_stage(
             // - pred.r: older loads already completed by commit order
             // - Both pred.r and pred.w: full drain + flush WCB
             if pred_w || pred_r {
-                drain_all_committed(cpu, store_buffer, vec_mem_inflight.as_deref_mut());
+                drain_all_committed(
+                    cpu,
+                    store_buffer,
+                    vec_mem_inflight.as_deref_mut(),
+                    vec_store_buffer.as_deref_mut(),
+                );
             }
         }
 
@@ -661,13 +664,14 @@ pub fn commit_stage(
     cpu.stats.retire_histogram[retired_count.min(3)] += 1;
 
     // Drain one committed store to memory per cycle. If the scalar SB has
-    // nothing committed, fall through to the vec-store side buffer so total
-    // commit-time store bandwidth stays at one write per cycle.
+    // nothing committed, fall through to the VSB so total commit-time store
+    // bandwidth stays at one write per cycle.
     if !try_drain_one_store(cpu, store_buffer)
-        && let Some(ref mut inflight_vec) = vec_mem_inflight
+        && let Some(vsb) = vec_store_buffer.as_deref_mut()
     {
-        let _ = try_drain_one_vec_store_write(cpu, inflight_vec);
+        let _ = vsb.drain_one_committed(cpu);
     }
+    let _ = vec_mem_inflight; // step 4 deletes the parameter
 
     trap_event
 }
@@ -709,9 +713,9 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
     true
 }
 
-/// Drains one (paddr, data, width) tuple from the per-vec-store side buffer
-/// of the oldest committed-but-not-yet-fully-drained vec store. Returns true
-/// if a write occurred.
+/// (Dead in step 3; deleted in step 4.) Legacy per-vec-store side-buffer
+/// drain — superseded by `VecStoreBuffer::drain_one_committed`.
+#[allow(dead_code)]
 fn try_drain_one_vec_store_write(
     cpu: &mut Cpu,
     inflight_vec: &mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>,
@@ -770,7 +774,8 @@ fn try_drain_one_vec_store_write(
 fn drain_all_committed(
     cpu: &mut Cpu,
     store_buffer: &mut StoreBuffer,
-    vec_mem_inflight: Option<&mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>>,
+    _vec_mem_inflight: Option<&mut Vec<crate::core::pipeline::backend::o3::VecMemInflight>>,
+    vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) {
     while let Some(store) = store_buffer.drain_one() {
         if let StoreResolution::Committed { paddr, data } = store.resolution {
@@ -781,40 +786,9 @@ fn drain_all_committed(
             write_store_to_memory(cpu, paddr, data, store.width);
         }
     }
-    // Drain every committed vec-store side-buffer entry, in program order.
-    if let Some(inflight_vec) = vec_mem_inflight {
-        loop {
-            // Find the oldest committed entry with non-empty pending_writes.
-            let mut chosen: Option<usize> = None;
-            for (i, e) in inflight_vec.iter().enumerate() {
-                if e.committed && !e.pending_writes.is_empty() {
-                    match chosen {
-                        None => chosen = Some(i),
-                        Some(prev)
-                            if e.rob_tag.is_older_than(inflight_vec[prev].rob_tag) =>
-                        {
-                            chosen = Some(i);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            let Some(idx) = chosen else { break };
-            // Drain every pending_write in this entry.
-            while !inflight_vec[idx].pending_writes.is_empty() {
-                let (paddr, data, width) = inflight_vec[idx].pending_writes.remove(0);
-                let is_ram = paddr.val() >= cpu.ram_start && paddr.val() < cpu.ram_end;
-                if is_ram {
-                    let _latency =
-                        cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
-                }
-                write_store_to_memory(cpu, paddr, data, width);
-            }
-            let entry = &mut inflight_vec[idx];
-            if entry.pending_micro_ops.is_empty() && entry.remaining == 0 {
-                entry.in_progress = false;
-            }
-        }
+    // Drain all committed vec stores from the dedicated VSB.
+    if let Some(vsb) = vec_store_buffer {
+        vsb.drain_all_committed(cpu);
     }
     // Flush remaining WCB entries through the cache hierarchy
     flush_wcb(cpu);

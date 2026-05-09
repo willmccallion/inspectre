@@ -887,6 +887,28 @@ impl ExecutionEngine for O3Engine {
                     continue;
                 }
 
+                // Vector stores need a free Vec Store Buffer entry. Stall the
+                // op back into the IQ if the VSB is full; same shape as the
+                // memory-backpressure stall above. This is a structural
+                // hazard from the dedicated vec-store queue, parallel to the
+                // scalar SB pre-check at rename.
+                if fu_type == FuType::VecMem
+                    && is_vec_store(entry.ctrl.vec_op)
+                    && self.vec_store_buffer.free_slots() == 0
+                {
+                    cpu.stats.stalls_fu_structural += 1;
+                    let ok = self.issue_queue.dispatch(
+                        entry,
+                        &self.rob,
+                        cpu,
+                        Some(&self.prf),
+                        Some(&self.vec_prf),
+                        mem_dep,
+                    );
+                    debug_assert!(ok, "re-dispatch after VSB-full failed");
+                    continue;
+                }
+
                 // Check for structural hazard (no free FU of required type)
                 if !self.fu_pool.has_free(fu_type, now) {
                     cpu.stats.stalls_fu_structural += 1;
@@ -1255,6 +1277,13 @@ impl ExecutionEngine for O3Engine {
                                 vd_phys: mop.vd_phys,
                                 is_store,
                             });
+                        }
+
+                        if is_store {
+                            // Reserve a VSB slot for this vec store. The VSB-full
+                            // pre-check above already gated issue, so this must succeed.
+                            let ok = self.vec_store_buffer.allocate(ex_result.rob_tag, total);
+                            debug_assert!(ok, "VSB allocate failed despite pre-check");
                         }
 
                         self.vec_mem_inflight.push(VecMemInflight {

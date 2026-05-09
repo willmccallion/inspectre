@@ -28,8 +28,8 @@ pub fn memory2_stage(
     store_buffer: &mut StoreBuffer,
     _rob: &mut Rob,
     mut load_queue: Option<&mut LoadQueue>,
-    vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
-    _vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
+    _vec_inflight: Option<&[crate::core::pipeline::backend::o3::VecMemInflight]>,
+    mut vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) -> Option<(RobTag, u64)> {
     let mut violation: Option<(RobTag, u64)> = None;
     let mut entries = std::mem::take(input);
@@ -88,7 +88,10 @@ pub fn memory2_stage(
         let trap: Option<Trap> = None;
         let exception_stage: Option<ExceptionStage> = None;
         let mut lr_sc: Option<LrScRecord> = None;
-        let mut vec_store_drain_for_wb: Option<(crate::common::PhysAddr, u64, MemWidth)> = None;
+        // Vec stores route resolved data into the dedicated `VecStoreBuffer`,
+        // not the side buffer. The `vec_store_drain` field on `Mem2WbEntry`
+        // is retained for now but always `None`; step 4 deletes the field.
+        let vec_store_drain_for_wb: Option<(crate::common::PhysAddr, u64, MemWidth)> = None;
 
         if mem.ctrl.atomic_op != AtomicOp::None {
             // Atomic operations
@@ -182,15 +185,14 @@ pub fn memory2_stage(
                 }
             }
         } else if mem.ctrl.mem_read {
-            // Check store buffer for forwarding first; if SB misses, also check
-            // the per-vec-store side buffers (entries from older vec stores
-            // that have already been resolved at memory2 and freed from SB
-            // but not yet drained to memory).
+            // Check the scalar store buffer first, then the dedicated VSB for
+            // any older vec store whose elements are still in flight.
             let sb_result = store_buffer.forward_load(raw_paddr, mem.ctrl.width, mem.rob_tag);
             let fwd = match sb_result {
-                ForwardResult::Miss => forward_from_vec_side_buffers(
-                    raw_paddr, mem.ctrl.width, mem.rob_tag, vec_inflight,
-                ),
+                ForwardResult::Miss => match vec_store_buffer.as_deref() {
+                    Some(vsb) => vsb.forward_load(raw_paddr, mem.ctrl.width, mem.rob_tag),
+                    None => ForwardResult::Miss,
+                },
                 other => other,
             };
             match fwd {
@@ -348,14 +350,18 @@ pub fn memory2_stage(
                 "M2: load complete"
             );
         } else if mem.ctrl.mem_write {
-            // Stores: resolve store buffer with paddr + data, NO memory write
+            // Stores: resolve store buffer with paddr + data, NO memory write.
+            //
+            // Vector store element micro-ops route their data into the
+            // dedicated `VecStoreBuffer` instead of the side buffer. The
+            // scalar SB resolve still runs for compatibility while step 5
+            // removes per-element SB allocation entirely.
             let sb_elem = mem.vec_mem.as_ref().map(|vme| vme.elem_idx);
             store_buffer.resolve(mem.rob_tag, sb_elem, mem.vaddr, raw_paddr, mem.store_data);
-            // For vector store element micro-ops, also stash the resolved
-            // (paddr, data, width) so the O3 writeback handler can copy it
-            // into the per-vec-store side buffer before freeing the SB slot.
-            if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store) {
-                vec_store_drain_for_wb = Some((raw_paddr, mem.store_data, mem.ctrl.width));
+            if mem.vec_mem.as_ref().is_some_and(|vme| vme.is_store)
+                && let Some(vsb) = vec_store_buffer.as_deref_mut()
+            {
+                vsb.resolve_element(mem.rob_tag, raw_paddr, mem.store_data, mem.ctrl.width);
             }
 
             // Check for memory ordering violation: did a younger load already
@@ -438,15 +444,9 @@ pub fn memory2_stage(
     violation
 }
 
-/// Walks the per-vec-store side buffers (`VecMemInflight::pending_writes`)
-/// looking for a forwarding match for `(paddr, width)` from a vec store
-/// older than `load_rob_tag`.
-///
-/// Vec stores release their SB slots at writeback, but their resolved data
-/// only drains to memory at commit. Between writeback and drain, that data
-/// lives in the per-instruction side buffer. Younger loads that hit the
-/// same address would otherwise read stale memory; this function provides
-/// the missing forwarding path for that window.
+/// (Dead in step 3; deleted in step 4.) Forwards from the legacy per-vec-store
+/// side buffers — superseded by `VecStoreBuffer::forward_load`.
+#[allow(dead_code)]
 fn forward_from_vec_side_buffers(
     paddr: crate::common::PhysAddr,
     width: MemWidth,
