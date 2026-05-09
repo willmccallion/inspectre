@@ -595,80 +595,95 @@ const fn sm3_t(j: u32) -> u32 {
     if j < 16 { 0x79CC4519 } else { 0x7A879D8A }
 }
 
-/// vsm3me.vv (SM3 message expansion).
-///
-/// Computes 8 new words W[i+16..i+24] from W[i..i+16].
-/// Inputs vd holds W[i..i+8], vs1 holds W[i+8..i+16] (interleaved).
-/// Per the RVV spec:
-///   vd  = {W7, W6, W5, W4, W3, W2, W1, W0}  (8 elements, EGS=8)
-///   vs2 = {W15, W14, W13, W12, W11, W10, W9, W8}
-///   vs1 = {W23, W22, W21, W20, W19, W18, W17, W16}? Actually vs1 is unused or differently.
-///
-/// Actually the spec says vsm3me has only vs2 input besides vd; the formula
-/// produces W[i+16..i+24] from W[i..i+16]. Output replaces vd.
-fn sm3_me(vd: [u32; 8], vs2: [u32; 8]) -> [u32; 8] {
-    // W[0..8] = vd, W[8..16] = vs2; produce W[16..24].
-    // W[j] = P1(W[j-16] ^ W[j-9] ^ ROL(W[j-3], 15)) ^ ROL(W[j-13], 7) ^ W[j-6]
+/// SM3 stores its state and message words byte-swapped in the vector
+/// register relative to the algorithm's natural u32 representation. Both
+/// extraction and storage apply `swap_bytes` per word to match spike's
+/// `EXTRACT/SET_EGU32x8_WORDS_BE_BSWAP` macros.
+#[inline]
+const fn bswap32(x: u32) -> u32 {
+    x.swap_bytes()
+}
+
+/// vsm3me.vv — SM3 message expansion. Per Zvksh:
+///   vs1 = {W7..W0}  (vs1[i] holds W[i] BSWAP'd)
+///   vs2 = {W15..W8} (vs2[i] holds W[8+i] BSWAP'd)
+/// Output replaces vd with {W23..W16}.
+fn sm3_me(vs1: [u32; 8], vs2: [u32; 8]) -> [u32; 8] {
     let mut w = [0u32; 24];
-    w[0..8].copy_from_slice(&vd);
-    w[8..16].copy_from_slice(&vs2);
+    for i in 0..8 {
+        w[i] = bswap32(vs1[i]);
+        w[i + 8] = bswap32(vs2[i]);
+    }
     for j in 16..24 {
         w[j] = sm3_p1(w[j - 16] ^ w[j - 9] ^ w[j - 3].rotate_left(15))
             ^ w[j - 13].rotate_left(7)
             ^ w[j - 6];
     }
-    [w[16], w[17], w[18], w[19], w[20], w[21], w[22], w[23]]
+    let mut out = [0u32; 8];
+    for i in 0..8 {
+        out[i] = bswap32(w[16 + i]);
+    }
+    out
 }
 
-/// vsm3c.vi (SM3 compression — 2 rounds per call, with `rnd` selecting
-/// the round-pair index).
+/// vsm3c.vi — SM3 compression. Per Zvksh:
+///   vd  = {H,G,F,E,D,C,B,A}  (state, BSWAP'd; vd[0]=A_bswap, vd[7]=H_bswap)
+///   vs2 = {_,_,w5,w4,_,_,w1,w0} (only positions 0,1,4,5 used)
+/// Two rounds j = 2*rnd and j+1; output rewrites vd as
+/// {G1, G2, E1, E2, C1, C2, A1, A2} (BSWAP'd).
 fn sm3_c(vd: [u32; 8], vs2: [u32; 8], rnd: u32) -> [u32; 8] {
-    // vd = {H, G, F, E, D, C, B, A}  (state in BE-word order; vd[7]=A, vd[0]=H)
-    // vs2 = {W'5, W5, W'4, W4, W'3, W3, W'2, W2}? No — the spec lists
-    // vs2 = {W7, W6, W5, W4, W3, W2, W1, W0} of which only 4 are used.
-    //
-    // Per the spec, vsm3c performs 2 rounds (j and j+1) with round constants
-    // T_j and T_{j+1} where j = 2*rnd. Inputs:
-    //   vs2 holds W[2*rnd..2*rnd+8] (only some used per round)
-    let mut a = vd[7];
-    let mut b = vd[6];
-    let mut c = vd[5];
-    let mut d = vd[4];
-    let mut e = vd[3];
-    let mut f = vd[2];
-    let mut g = vd[1];
-    let mut h = vd[0];
+    let a = bswap32(vd[0]);
+    let b = bswap32(vd[1]);
+    let c = bswap32(vd[2]);
+    let d = bswap32(vd[3]);
+    let e = bswap32(vd[4]);
+    let f = bswap32(vd[5]);
+    let g = bswap32(vd[6]);
+    let h = bswap32(vd[7]);
 
-    let j_base = rnd * 2;
-    // Per spike's vsm3c_vi.h, the words used are vs2[0..8] indexed accordingly.
-    // The two rounds use w[2*rnd] / w[2*rnd+1] / w[2*rnd+4] / w[2*rnd+5].
-    // We map vs2 elements as if vs2[k] = W[2*rnd + k mapping].
-    //
-    // The cleanest mapping (matching spike): vs2 = {w0,w1,w2,w3,w4,w5,w6,w7}
-    // where w_k = W[2*rnd + k] (linearly indexed within the message block).
-    let w_seq = vs2;
+    let w0 = bswap32(vs2[0]);
+    let w1 = bswap32(vs2[1]);
+    let w4 = bswap32(vs2[4]);
+    let w5 = bswap32(vs2[5]);
+    let x0 = w0 ^ w4;
+    let x1 = w1 ^ w5;
 
-    for round_within in 0..2 {
-        let j = j_base + round_within;
-        let tj = sm3_t(j).rotate_left(j);
-        let ss1 = a.rotate_left(12).wrapping_add(e).wrapping_add(tj).rotate_left(7);
-        let ss2 = ss1 ^ a.rotate_left(12);
-        let w_j = w_seq[round_within as usize];
-        let w_j4 = w_seq[(round_within + 4) as usize];
-        let w_prime_j = w_j ^ w_j4;
-        let tt1 = sm3_ff(a, b, c, j).wrapping_add(d).wrapping_add(ss2).wrapping_add(w_prime_j);
-        let tt2 = sm3_gg(e, f, g, j).wrapping_add(h).wrapping_add(ss1).wrapping_add(w_j);
-        d = c;
-        c = b.rotate_left(9);
-        b = a;
-        a = tt1;
-        h = g;
-        g = f.rotate_left(19);
-        f = e;
-        e = sm3_p0(tt2);
-    }
+    // Round j = 2*rnd
+    let j = 2 * rnd;
+    let ss1 = a
+        .rotate_left(12)
+        .wrapping_add(e)
+        .wrapping_add(sm3_t(j).rotate_left(j % 32))
+        .rotate_left(7);
+    let ss2 = ss1 ^ a.rotate_left(12);
+    let tt1 = sm3_ff(a, b, c, j).wrapping_add(d).wrapping_add(ss2).wrapping_add(x0);
+    let tt2 = sm3_gg(e, f, g, j).wrapping_add(h).wrapping_add(ss1).wrapping_add(w0);
+    let d1 = c;
+    let c1 = b.rotate_left(9);
+    let _b1 = a;
+    let a1 = tt1;
+    let h1 = g;
+    let g1 = f.rotate_left(19);
+    let _f1 = e;
+    let e1 = sm3_p0(tt2);
 
-    [h, g, f, e, d, c, b, a]
+    // Round j+1
+    let j = j + 1;
+    let ss1 = a1
+        .rotate_left(12)
+        .wrapping_add(e1)
+        .wrapping_add(sm3_t(j).rotate_left(j % 32))
+        .rotate_left(7);
+    let ss2 = ss1 ^ a1.rotate_left(12);
+    let tt1 = sm3_ff(a1, _b1, c1, j).wrapping_add(d1).wrapping_add(ss2).wrapping_add(x1);
+    let tt2 = sm3_gg(e1, _f1, g1, j).wrapping_add(h1).wrapping_add(ss1).wrapping_add(w1);
+    let c2 = _b1.rotate_left(9);
+    let a2 = tt1;
+    let g2 = _f1.rotate_left(19);
+    let e2 = sm3_p0(tt2);
+
+    [bswap32(a2), bswap32(a1), bswap32(c2), bswap32(c1),
+     bswap32(e2), bswap32(e1), bswap32(g2), bswap32(g1)]
 }
 
 // ============================================================================
@@ -874,9 +889,9 @@ pub fn execute_crypto(
                 write_egs4_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VSm3Me => {
-                let vd = read_egs8_u32(vpr, vd_idx, base);
+                let vs1 = read_egs8_u32(vpr, vs1_idx, base);
                 let vs2 = read_egs8_u32(vpr, vs2_idx, base);
-                let r = sm3_me(vd, vs2);
+                let r = sm3_me(vs1, vs2);
                 write_egs8_u32(vpr, vd_idx, base, r);
             }
             VectorOp::VSm3C => {

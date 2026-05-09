@@ -1174,21 +1174,21 @@ impl VectorOp {
             VAndN | VRol | VRor | VClMul | VClMulH
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base },
 
-            // ── Vector crypto with vs1 as a real register operand (Zvknh, Zvkg)
-            // SHA-2 message scheduler / compression rounds and Zvkg vghsh all
-            // take a per-group vs1 vector input; alignment is checked normally.
-            VSha2Ms | VSha2Ch | VSha2Cl | VGhsh
+            // ── Vector crypto with vs1 as a real register operand (Zvknh,
+            //    Zvksh vsm3me, Zvkg vghsh): each takes a per-group vs1 vector
+            //    input, so alignment is checked normally.
+            VSha2Ms | VSha2Ch | VSha2Cl | VSm3Me | VGhsh
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: lmul },
 
             // ── Vector crypto where vs1 field encodes a sub-opcode or imm
-            // AES rounds, AES key schedule, SM4 rounds/keys, SM3, Zvkg vgmul
+            // AES rounds, AES key schedule, SM4 rounds/keys, SM3-C, Zvkg vgmul
             // all share OPMVV funct3 with the standard .vv encoding but the
             // vs1 field is *not* a register reference — so group size is 0.
             // .vs forms additionally take a single vs2 element group (EMUL=1)
             // that is broadcast across destination groups.
             VAesEm | VAesEf | VAesDm | VAesDf | VAesZ | VSm4R
             => VecOperandGroups { vd: lmul, vs2: vs2_crypto, vs1: 0 },
-            VAesKf1 | VAesKf2 | VSm4K | VSm3Me | VSm3C | VGmul
+            VAesKf1 | VAesKf2 | VSm4K | VSm3C | VGmul
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
 
             // Reductions (standard + widening): vd and vs1 are single registers
