@@ -48,8 +48,6 @@ impl RobTag {
     /// realistic ROB sizes).
     #[inline]
     pub const fn is_older_than(self, other: Self) -> bool {
-        // self < other in modular arithmetic: self.0 - other.0 wraps to a
-        // large positive (i.e. negative when cast to i32).
         (self.0.wrapping_sub(other.0) as i32) < 0
     }
 
@@ -243,7 +241,7 @@ impl Rob {
         let tag = RobTag(self.next_tag);
         self.next_tag = self.next_tag.wrapping_add(1);
         if self.next_tag == 0 {
-            self.next_tag = 1; // skip 0
+            self.next_tag = 1;
         }
 
         self.entries[self.tail] = RobEntry {
@@ -458,7 +456,7 @@ impl Rob {
 
         let entry = &self.entries[self.head];
         if entry.state == RobState::Issued {
-            return None; // not ready
+            return None;
         }
 
         let committed = self.entries[self.head].clone();
@@ -487,7 +485,6 @@ impl Rob {
             return;
         }
 
-        // Find the index of the entry with this tag
         let mut idx = self.head;
         let mut found = false;
         for _ in 0..self.count {
@@ -502,13 +499,9 @@ impl Rob {
             return;
         }
 
-        // Keep entries from head through idx (inclusive), remove the rest
         let keep_idx = (idx + 1) % self.entries.len();
 
-        // If nothing to remove (keep_tag is the last entry), return early.
-        // This avoids a recount bug when the ROB is full: head == tail means
-        // both "full" and "empty" in a circular buffer, and the recount loop
-        // would incorrectly produce 0.
+        // Avoid recount bug when ROB is full: head == tail means both full and empty.
         if keep_idx == self.tail {
             return;
         }
@@ -521,7 +514,6 @@ impl Rob {
         }
 
         self.tail = keep_idx;
-        // Recount
         self.count = 0;
         let mut i = self.head;
         loop {
@@ -543,7 +535,6 @@ impl Rob {
             return None;
         }
 
-        // Walk backwards from tail-1 to head
         let mut idx = if self.tail == 0 { self.entries.len() - 1 } else { self.tail - 1 };
 
         for _ in 0..self.count {
@@ -552,8 +543,7 @@ impl Rob {
                 if entry.state == RobState::Completed {
                     return entry.result;
                 }
-                // Found the register but it's not ready yet — return None
-                // to indicate a dependency (would stall or need bypass).
+                // Producer not ready — caller must stall or use bypass.
                 return None;
             }
             if idx == 0 {
@@ -617,7 +607,7 @@ impl Rob {
             }
             idx = (idx + 1) % self.entries.len();
         }
-        None // tag not found in ROB
+        None
     }
 
     /// Finds a mutable reference to the entry with the given tag.
@@ -703,15 +693,48 @@ impl Rob {
             let entry = &self.entries[idx];
             if entry.valid {
                 if entry.tag == tag {
-                    return true; // reached our entry — all older are done
+                    return true;
                 }
                 if entry.state == RobState::Issued {
-                    return false; // older entry still executing
+                    return false;
                 }
             }
             idx = (idx + 1) % self.entries.len();
         }
-        true // tag not found in ROB (shouldn't happen)
+        true
+    }
+
+    /// Returns true if any ROB entry older than `tag` is a vsetvl* still in
+    /// the `Issued` state.
+    ///
+    /// Used to gate vector-op issue: a younger vec op may not dispatch while
+    /// an older vsetvl is still executing, because the rename-time vtype
+    /// snapshot would predate the vsetvl's CSR update and the op would run
+    /// against a stale SEW/LMUL.
+    pub fn has_pending_vsetvl_before(&self, tag: RobTag) -> bool {
+        use crate::core::pipeline::signals::VectorOp;
+        if self.count == 0 {
+            return false;
+        }
+        let mut idx = self.head;
+        for _ in 0..self.count {
+            let entry = &self.entries[idx];
+            if entry.valid {
+                if entry.tag == tag {
+                    return false;
+                }
+                if entry.state == RobState::Issued
+                    && matches!(
+                        entry.ctrl.vec_op,
+                        VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl
+                    )
+                {
+                    return true;
+                }
+            }
+            idx = (idx + 1) % self.entries.len();
+        }
+        false
     }
 
     /// Returns true if all older ROB entries matching a FENCE's predecessor
@@ -722,7 +745,7 @@ impl Rob {
     /// If neither is set, the FENCE is vacuously ready.
     pub fn fence_pred_satisfied(&self, tag: RobTag, pred_r: bool, pred_w: bool) -> bool {
         if !pred_r && !pred_w {
-            return true; // no predecessor constraints
+            return true;
         }
         if self.count == 0 {
             return true;
@@ -732,13 +755,13 @@ impl Rob {
             let entry = &self.entries[idx];
             if entry.valid {
                 if entry.tag == tag {
-                    return true; // reached the FENCE — all older are satisfied
+                    return true;
                 }
                 if entry.state == RobState::Issued {
                     let dominated =
                         (pred_r && entry.ctrl.mem_read) || (pred_w && entry.ctrl.mem_write);
                     if dominated {
-                        return false; // older matching op still executing
+                        return false;
                     }
                 }
             }
@@ -762,10 +785,9 @@ impl Rob {
             let entry = &self.entries[idx];
             if entry.valid {
                 if entry.tag == tag {
-                    return false; // reached our entry — no older fence found
+                    return false;
                 }
                 if entry.ctrl.system_op == crate::core::pipeline::signals::SystemOp::Fence {
-                    // Decode FENCE pred/succ from the raw instruction
                     let succ_bits = ((entry.inst >> 20) & 0xF) as u8;
                     let succ_r = succ_bits & 0b0010 != 0;
                     let succ_w = succ_bits & 0b0001 != 0;

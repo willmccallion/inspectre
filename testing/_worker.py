@@ -70,6 +70,16 @@ def main():
     if os.environ.get("RVSIM_MISALIGNED_TRAP") == "1":
         cfg.misaligned_access_trap = True
 
+    # Vector cosim tests are built for a specific VLEN (the path is
+    # ``vlen{N}/test.elf``). The chipsalliance test ELF embeds VLEN-dependent
+    # data layout, so a config with a different VLEN (e.g. ``ref linux`` at
+    # VLEN=256) silently mismatches every vse store. Pin VLEN to the path
+    # when we can detect it.
+    import re
+    m = re.search(r"/vlen(\d+)/", elf_path)
+    if m:
+        cfg.vlen = int(m.group(1))
+
     with open(elf_path, "rb") as f:
         elf_data = f.read()
     cpu = Cpu(_config_to_dict(cfg), elf_data=elf_data)

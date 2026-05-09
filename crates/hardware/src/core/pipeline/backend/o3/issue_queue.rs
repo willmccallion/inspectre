@@ -109,7 +109,6 @@ impl VecOperandState {
         if self.ready || self.count == 0 {
             return;
         }
-        // Only re-check if this group contains the woken register
         let contains = (0..self.count as usize).any(|i| self.phys[i] == p);
         if contains {
             self.check_ready(vec_prf);
@@ -195,7 +194,6 @@ impl IssueQueue {
         }
 
         let (src1, src2, src3) = if let Some(prf) = prf {
-            // PRF path: check ready bits in the physical register file
             let s1 = resolve_operand_prf(entry.rs1, entry.ctrl.rs1_fp, entry.rs1_phys, prf, cpu);
             let s2 = resolve_operand_prf(entry.rs2, entry.ctrl.rs2_fp, entry.rs2_phys, prf, cpu);
             let s3 = if entry.ctrl.rs3_fp {
@@ -205,7 +203,6 @@ impl IssueQueue {
             };
             (s1, s2, s3)
         } else {
-            // Legacy scoreboard path: check ROB completion
             let s1 = resolve_operand_legacy(entry.rs1, entry.ctrl.rs1_fp, entry.rs1_tag, rob, cpu);
             let s2 = resolve_operand_legacy(entry.rs2, entry.ctrl.rs2_fp, entry.rs2_tag, rob, cpu);
             let s3 = if entry.ctrl.rs3_fp {
@@ -216,7 +213,6 @@ impl IssueQueue {
             (s1, s2, s3)
         };
 
-        // Initialize vector operand states (default ready if no vec sources)
         let mut vec_src1 = VecOperandState {
             phys: entry.vs1_phys,
             count: entry.vec_src1_count,
@@ -233,7 +229,6 @@ impl IssueQueue {
             ready: entry.vec_src3_count == 0,
         };
 
-        // Check initial readiness against vec PRF (sources may already be ready)
         if let Some(vprf) = vec_prf {
             vec_src1.check_ready(vprf);
             vec_src2.check_ready(vprf);
@@ -250,19 +245,6 @@ impl IssueQueue {
                     | VectorOp::Vsetvl
             );
         let mask_phys = if needs_mask {
-            // v0 physical register from the rename map (captured in entry)
-            // v0 is at VRegIdx(0) — its physical mapping is vs1_phys[0] only
-            // if vs1 == v0. We need the rename map's mapping for v0, which
-            // is not directly in the entry. Use the vec_prf identity for now:
-            // the rename stage should populate this. For now, read from the
-            // first slot of the rename map via a helper on the entry.
-            //
-            // The correct mapping is stored by rename in the entry's vs-phys
-            // arrays only if vs1/vs2/vs3 happens to be v0. We need a dedicated
-            // field. For now, we'll add it to RenameIssueEntry.
-            //
-            // TEMPORARY: use VecPhysReg::ZERO (always ready) until
-            // RenameIssueEntry is extended with mask_phys field.
             entry.mask_phys
         } else {
             VecPhysReg::ZERO
@@ -274,7 +256,6 @@ impl IssueQueue {
             mask_phys, mask_ready, needs_mask,
         };
 
-        // Find first free slot
         for slot in &mut self.slots {
             if slot.is_none() {
                 *slot = Some(iq_entry);
@@ -379,7 +360,6 @@ impl IssueQueue {
             iq.vec_src1.wakeup_check(p, vec_prf);
             iq.vec_src2.wakeup_check(p, vec_prf);
             iq.vec_src3.wakeup_check(p, vec_prf);
-            // Mask register v0 wakeup
             if iq.needs_mask && !iq.mask_ready && iq.mask_phys == p {
                 iq.mask_ready = vec_prf.is_ready(p);
             }
@@ -413,11 +393,10 @@ impl IssueQueue {
         store_ports: usize,
         prf: Option<&PhysRegFile>,
     ) -> Vec<SelectedEntry> {
-        // Collect indices of all ready entries
         let mut ready_indices: Vec<usize> = Vec::new();
         for (i, slot) in self.slots.iter().enumerate() {
             if let Some(iq) = slot {
-                // Faulted instructions don't need operands — always ready
+                // Faulted instructions don't need operands — always ready.
                 let all_ready = iq.entry.trap.is_some()
                     || (iq.src1.readiness.is_ready()
                         && iq.src2.readiness.is_ready()
@@ -426,9 +405,7 @@ impl IssueQueue {
                         && iq.vec_src2.ready
                         && iq.vec_src3.ready
                         && iq.mask_ready);
-                // PRF validation: if an operand was speculatively woken (IQ says
-                // ready) but the PRF still says not-ready, the speculative wakeup
-                // hasn't been confirmed yet — treat as not ready.
+                // Validate speculative wakeups against the PRF.
                 let prf_valid = prf.is_none_or(|prf| {
                     Self::prf_validated(&iq.src1, prf)
                         && Self::prf_validated(&iq.src2, prf)
@@ -436,7 +413,6 @@ impl IssueQueue {
                 });
                 let all_ready = all_ready && prf_valid;
                 if all_ready {
-                    // Memory dependency check (cached at dispatch time).
                     let mem_ready = match &iq.mem_dep {
                         MemDepState::None | MemDepState::Bypass | MemDepState::Resolved(_) => true,
                         MemDepState::WaitAll => {
@@ -447,20 +423,13 @@ impl IssueQueue {
                     if !mem_ready {
                         continue;
                     }
-                    // System/CSR instructions (excluding FENCE) are serializing:
-                    // wait for all older instructions to complete before issuing.
-                    // FENCE is excluded here because it has its own granular check
-                    // below that only waits for operations matching its pred bits,
-                    // rather than draining the entire pipeline.
+                    // FENCE has its own granular check below; system/CSR otherwise serialize.
                     if iq.entry.ctrl.system_op != SystemOp::None
                         && iq.entry.ctrl.system_op != SystemOp::Fence
                         && !rob.all_before_completed(iq.entry.rob_tag)
                     {
                         continue;
                     }
-                    // Vector memory ops: store ordering. SB entries are allocated
-                    // at execute time and commit-drained, so we only need to wait
-                    // for older unresolved stores + committed store drain.
                     {
                         use crate::core::units::vpu::mem::{is_vec_load, is_vec_store};
                         let vop = iq.entry.ctrl.vec_op;
@@ -471,7 +440,16 @@ impl IssueQueue {
                             continue;
                         }
                     }
-                    // FENCE: wait for older operations matching pred bits to complete.
+                    // Wait for older vsetvl: rename's vtype/vl snapshot is stale until it executes.
+                    if iq.entry.ctrl.vec_op != VectorOp::None
+                        && !matches!(
+                            iq.entry.ctrl.vec_op,
+                            VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl
+                        )
+                        && rob.has_pending_vsetvl_before(iq.entry.rob_tag)
+                    {
+                        continue;
+                    }
                     if iq.entry.ctrl.system_op == SystemOp::Fence {
                         let pred_bits = ((iq.entry.inst >> 24) & 0xF) as u8;
                         let pred_r = pred_bits & 0b0010 != 0;
@@ -480,7 +458,6 @@ impl IssueQueue {
                             continue;
                         }
                     }
-                    // Loads/stores: blocked by older in-flight FENCE with matching succ bits.
                     if (iq.entry.ctrl.mem_read || iq.entry.ctrl.mem_write)
                         && rob.has_fence_blocking(
                             iq.entry.rob_tag,
@@ -495,10 +472,8 @@ impl IssueQueue {
             }
         }
 
-        // Sort by rob_tag (oldest first = lowest tag value)
         ready_indices.sort_by_key(|&i| self.slots[i].as_ref().map_or(0, |s| s.entry.rob_tag.0));
 
-        // Take up to `width`, respecting per-type port limits
         let mut result: Vec<SelectedEntry> = Vec::with_capacity(width);
         let mut loads_issued = 0usize;
         let mut stores_issued = 0usize;
@@ -511,7 +486,7 @@ impl IssueQueue {
             let is_load = ctrl.mem_read;
             let is_store = ctrl.mem_write;
             if is_load && loads_issued >= load_ports {
-                continue; // port limit reached; entry stays in IQ
+                continue;
             }
             if is_store && stores_issued >= store_ports {
                 continue;
@@ -528,11 +503,7 @@ impl IssueQueue {
 
             let mem_dep = iq.mem_dep;
             let mut entry = iq.entry;
-            // Populate operand values from resolved state.
             if entry.trap.is_none() {
-                // Assert all operands are genuinely ready at select time.
-                // A NotReady operand would silently resolve to 0, which could
-                // cause loads/stores to wrong addresses or corrupt register values.
                 debug_assert!(
                     !matches!(iq.src1.readiness, OperandReady::NotReady),
                     "IQ select: src1 not ready for rob_tag={} pc={:#x}",
@@ -564,7 +535,7 @@ impl IssueQueue {
     fn prf_validated(src: &OperandState, prf: &PhysRegFile) -> bool {
         match src.readiness {
             OperandReady::Speculative => prf.is_ready(src.phys),
-            _ => true, // NotReady or Ready — no PRF validation needed
+            _ => true,
         }
     }
 
@@ -654,7 +625,6 @@ fn resolve_operand_prf(
     prf: &PhysRegFile,
     _cpu: &Cpu,
 ) -> OperandState {
-    // x0 is hardwired zero
     if !is_fp && reg.is_zero() {
         return OperandState::ready(PhysReg(0), None, 0);
     }
@@ -662,8 +632,6 @@ fn resolve_operand_prf(
     if prf.is_ready(phys) {
         OperandState::ready(phys, None, prf.read(phys))
     } else {
-        // Not ready yet — will be woken up by wakeup_phys
-        // For x0 (phys == PhysReg(0)), always ready
         if phys.0 == 0 {
             return OperandState::ready(PhysReg(0), None, 0);
         }
@@ -679,29 +647,24 @@ fn resolve_operand_legacy(
     rob: &Rob,
     cpu: &Cpu,
 ) -> OperandState {
-    // x0 is hardwired zero
     if !is_fp && reg.is_zero() {
         return OperandState::ready(PhysReg(0), None, 0);
     }
 
     tag.map_or_else(
         || {
-            // No in-flight producer — read from architectural register file
             let value = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
             OperandState::ready(PhysReg(0), None, value)
         },
-        |t| {
-            // Check if ROB entry has completed
-            match rob.find_entry(t) {
-                Some(entry) if entry.state == RobState::Completed => {
-                    OperandState::ready(PhysReg(0), Some(t), entry.result.unwrap_or(0))
-                }
-                Some(_) => OperandState::not_ready(PhysReg(0), Some(t)),
-                None => {
-                    // ROB entry already committed — read from register file
-                    let value = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
-                    OperandState::ready(PhysReg(0), None, value)
-                }
+        |t| match rob.find_entry(t) {
+            Some(entry) if entry.state == RobState::Completed => {
+                OperandState::ready(PhysReg(0), Some(t), entry.result.unwrap_or(0))
+            }
+            Some(_) => OperandState::not_ready(PhysReg(0), Some(t)),
+            None => {
+                // ROB entry already committed — read from register file.
+                let value = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
+                OperandState::ready(PhysReg(0), None, value)
             }
         },
     )

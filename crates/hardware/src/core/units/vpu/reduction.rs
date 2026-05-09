@@ -31,10 +31,6 @@ use crate::core::units::vpu::alu::{VecExecCtx, VecExecResult, VecOperand};
 use crate::core::units::vpu::regfile::VectorRegFile;
 use crate::core::units::vpu::types::{ElemIdx, Sew, VRegIdx, Vlmax, Vlmul};
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 /// Returns `true` if `op` is a reduction handled by this module.
 pub const fn is_reduction(op: VectorOp) -> bool {
     matches!(
@@ -93,7 +89,6 @@ pub fn vec_reduce(
     ctx: &VecExecCtx,
 ) -> VecExecResult {
     match op {
-        // Integer reductions at SEW width.
         VectorOp::VRedSum
         | VectorOp::VRedAnd
         | VectorOp::VRedOr
@@ -103,17 +98,14 @@ pub fn vec_reduce(
         | VectorOp::VRedMaxU
         | VectorOp::VRedMax => exec_int_reduction(op, vpr, vd, vs2, operand1, ctx),
 
-        // Widening integer reductions (accumulator at 2*SEW).
         VectorOp::VWRedSumU | VectorOp::VWRedSum => {
             exec_widen_int_reduction(op, vpr, vd, vs2, operand1, ctx)
         }
 
-        // FP reductions at SEW width.
         VectorOp::VFRedOSum | VectorOp::VFRedUSum | VectorOp::VFRedMax | VectorOp::VFRedMin => {
             exec_fp_reduction(op, vpr, vd, vs2, operand1, ctx)
         }
 
-        // FP widening reductions (accumulator at 2*SEW).
         VectorOp::VFWRedOSum | VectorOp::VFWRedUSum => {
             exec_fp_widen_reduction(op, vpr, vd, vs2, operand1, ctx)
         }
@@ -121,10 +113,6 @@ pub fn vec_reduce(
         _ => unreachable!("vec_reduce called with non-reduction op: {:?}", op),
     }
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 /// Sign-extend a SEW-width value stored in a `u64` to a full `i64`.
 #[inline]
@@ -183,10 +171,6 @@ fn read_initial_accum(vpr: &impl VectorRegFile, operand1: &VecOperand, sew: Sew)
     }
 }
 
-// ============================================================================
-// Integer reductions
-// ============================================================================
-
 /// Execute an integer reduction at SEW width.
 ///
 /// Folds all active elements of `vs2` into a single accumulator (initialized
@@ -203,10 +187,8 @@ fn exec_int_reduction(
     let sew = ctx.sew;
     let mask = sew.mask();
 
-    // Read initial accumulator from vs1[0].
     let mut acc = read_initial_accum(vpr, operand1, sew);
 
-    // Fold active elements from vs2.
     for i in ctx.vstart..ctx.vl {
         if !ctx.vm && !mask_active(vpr, i) {
             continue;
@@ -215,10 +197,8 @@ fn exec_int_reduction(
         acc = int_reduce_step(op, acc, elem, sew, mask);
     }
 
-    // Write result to vd[0].
     vpr.write_element(vd, ElemIdx::new(0), sew, acc & mask);
 
-    // Tail policy: elements 1..vlmax of vd follow the tail-agnostic rule.
     if ctx.vta.is_agnostic() {
         let vlmax = Vlmax::compute(vpr.vlen(), sew, Vlmul::M1).as_usize();
         for i in 1..vlmax {
@@ -268,10 +248,6 @@ fn int_reduce_step(op: VectorOp, acc: u64, elem: u64, sew: Sew, mask: u64) -> u6
     }
 }
 
-// ============================================================================
-// Widening integer reductions
-// ============================================================================
-
 /// Execute a widening integer reduction.
 ///
 /// Source elements are read at SEW and extended to 2*SEW before accumulation.
@@ -290,36 +266,25 @@ fn exec_widen_int_reduction(
     };
     let dst_mask = dst_sew.mask();
 
-    // Initial accumulator is at 2*SEW from vs1[0].
     let mut acc = read_initial_accum(vpr, operand1, dst_sew);
 
-    // Fold active source elements.
     for i in ctx.vstart..ctx.vl {
         if !ctx.vm && !mask_active(vpr, i) {
             continue;
         }
         let elem = vpr.read_element(vs2, ElemIdx::new(i), src_sew);
 
-        // Extend to 2*SEW width.
         let wide = match op {
-            VectorOp::VWRedSumU => {
-                // Zero-extend: element already fits in u64 with high bits clear.
-                elem
-            }
-            VectorOp::VWRedSum => {
-                // Sign-extend from src_sew to full 64 bits, then mask to dst_sew.
-                (sign_extend(elem, src_sew) as u64) & dst_mask
-            }
+            VectorOp::VWRedSumU => elem,
+            VectorOp::VWRedSum => (sign_extend(elem, src_sew) as u64) & dst_mask,
             _ => unreachable!(),
         };
 
         acc = acc.wrapping_add(wide) & dst_mask;
     }
 
-    // Write result to vd[0] at 2*SEW.
     vpr.write_element(vd, ElemIdx::new(0), dst_sew, acc);
 
-    // Tail policy: elements 1..vlmax of vd follow the tail-agnostic rule.
     if ctx.vta.is_agnostic() {
         let vlmax = Vlmax::compute(vpr.vlen(), dst_sew, Vlmul::M1).as_usize();
         for i in 1..vlmax {
@@ -329,10 +294,6 @@ fn exec_widen_int_reduction(
 
     VecExecResult { vxsat: false, scalar_result: None, fp_flags: FpFlags::NONE }
 }
-
-// ============================================================================
-// FP reductions
-// ============================================================================
 
 /// Execute a floating-point reduction at SEW width (32 or 64).
 ///
@@ -369,11 +330,13 @@ fn exec_fp_reduction(
             vpr.write_element(vd, ElemIdx::new(0), sew, result_bits);
             flags
         }
-        _ => unreachable!("FP reduction with SEW={:?} is not supported", sew),
+        _ => {
+            restore_host_round_mode(saved_rm);
+            return VecExecResult { vxsat: false, scalar_result: None, fp_flags: FpFlags::NONE };
+        }
     };
     restore_host_round_mode(saved_rm);
 
-    // Tail policy: elements 1..vlmax of vd follow the tail-agnostic rule.
     if ctx.vta.is_agnostic() {
         let vlmax = Vlmax::compute(vpr.vlen(), sew, Vlmul::M1).as_usize();
         for i in 1..vlmax {
@@ -557,10 +520,6 @@ fn fp_reduce_f16(
     (acc_bits as u64, flags)
 }
 
-// ============================================================================
-// FP widening reductions
-// ============================================================================
-
 /// Execute a widening FP reduction.
 ///
 /// Source elements are at SEW; accumulator and result are at 2*SEW. Per
@@ -596,7 +555,6 @@ fn exec_fp_widen_reduction(
 
     restore_host_round_mode(saved_rm);
 
-    // Tail policy: elements 1..vlmax of vd follow the tail-agnostic rule.
     if ctx.vta.is_agnostic() {
         let vlmax = Vlmax::compute(vpr.vlen(), dst_sew, Vlmul::M1).as_usize();
         for i in 1..vlmax {
@@ -669,10 +627,6 @@ fn fp_widen_reduce_f16_to_f32(
     }
     (box_f32_canon(acc), flags)
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
