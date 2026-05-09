@@ -304,40 +304,29 @@ fn exec_viota(
 ) -> VecExecResult {
     let vlmax = Vlmax::compute(vpr.vlen(), ctx.sew, ctx.vlmul).as_usize();
 
-    // Pre-compute the running sum of mask bits for positions [0, i).
-    // We accumulate as we go rather than pre-building an array, since we
-    // need the count *before* position i.
     let mut running_sum: u64 = 0;
 
     for i in 0..vlmax {
         if i < ctx.vstart {
-            // Still accumulate the mask bit for the prefix sum, even in
-            // the prestart region, because later elements need the count.
-            if vpr.read_mask_bit(vs2, ElemIdx::new(i)) {
-                running_sum += 1;
-            }
             continue;
         }
         if i >= ctx.vl {
-            // Tail region.
             if ctx.vta.is_agnostic() {
                 vpr.write_element(vd, ElemIdx::new(i), ctx.sew, ctx.sew.ones());
             }
-            // No need to keep accumulating past vl.
             continue;
         }
 
-        // The prefix sum for position i is the count of set bits in [0, i),
-        // which is `running_sum` before we incorporate bit i.
+        let active = ctx.vm || mask_active(vpr, i);
         let prefix = running_sum;
 
-        // Accumulate bit i for subsequent elements.
-        if vpr.read_mask_bit(vs2, ElemIdx::new(i)) {
+        // RVV 1.0 §15.5: only mask bits at active element positions
+        // contribute to the running sum — masked-off positions are skipped.
+        if active && vpr.read_mask_bit(vs2, ElemIdx::new(i)) {
             running_sum += 1;
         }
 
-        // Masking check.
-        if !ctx.vm && !mask_active(vpr, i) {
+        if !active {
             if ctx.vma.is_agnostic() {
                 vpr.write_element(vd, ElemIdx::new(i), ctx.sew, ctx.sew.ones());
             }
