@@ -146,7 +146,7 @@ pub(crate) fn restore_host_round_mode(mode: i32) {
 /// then fixed up on tie cases. For f32 ops where the exact result fits in
 /// f64 (add/sub/mul of two f32 operands), we can compute exactly and apply
 /// this rounding.
-fn rmm_round_f64_to_f32(exact: f64) -> f32 {
+pub(crate) fn rmm_round_f64_to_f32(exact: f64) -> f32 {
     if !exact.is_finite() {
         return exact as f32;
     }
