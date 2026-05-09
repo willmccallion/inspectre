@@ -1276,6 +1276,24 @@ impl ExecutionEngine for O3Engine {
                             wakeup_fired: false,
                         });
                     } else {
+                        // Pre-copy old vd into the freshly-renamed physregs so
+                        // tail and mask-undisturbed elements observe the
+                        // architectural prior value once writeback writes
+                        // the active elements. Without this, the new physreg
+                        // would carry whatever stale bytes the free list
+                        // happened to hand back, and dependent reads through
+                        // the new mapping would see garbage past `vl`.
+                        // Stores have no destination, so vec_src3_count == 0.
+                        if !is_store
+                            && let Some((vd_phys_arr_pre, vd_cnt_pre, _)) = vec_dst_info
+                        {
+                            for i in 0..vd_cnt_pre as usize {
+                                if i < saved.vec_src3_count as usize {
+                                    self.vec_prf
+                                        .copy_reg(vd_phys_arr_pre[i], saved.vs3_phys[i]);
+                                }
+                            }
+                        }
                         // Build all element micro-ops up front. They will be
                         // released into the memory pipeline in waves by
                         // issue_vec_mem_waves; loads bound on LQ capacity,
