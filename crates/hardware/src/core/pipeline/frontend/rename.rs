@@ -87,6 +87,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 id.ctrl.vec_lmul_is_fractional,
                 id.ctrl.vec_src_encoding,
                 id.ctrl.vec_nf,
+                id.ctrl.vec_broadcast_vs2,
             );
             let mut vs1_phys = [VecPhysReg::ZERO; 8];
             let mut vs2_phys = [VecPhysReg::ZERO; 8];

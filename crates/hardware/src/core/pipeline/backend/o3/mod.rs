@@ -812,6 +812,7 @@ impl ExecutionEngine for O3Engine {
                     entry.ctrl.vec_lmul_is_fractional,
                     entry.ctrl.vec_src_encoding,
                     entry.ctrl.vec_nf,
+                    entry.ctrl.vec_broadcast_vs2,
                 );
                 let vec_dst_info = if entry.ctrl.vec_reg_write && vec_grp.vd > 0 {
                     Some((entry.vd_phys, vec_grp.vd, entry.ctrl.vd))

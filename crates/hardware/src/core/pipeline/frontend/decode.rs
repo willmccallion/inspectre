@@ -1499,6 +1499,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
                         ctrl.vec_lmul_is_fractional,
                         ctrl.vec_src_encoding,
                         ctrl.vec_nf,
+                        ctrl.vec_broadcast_vs2,
                     );
                     let vd = ctrl.vd.as_u8();
                     let vs2 = ctrl.vs2.as_u8();

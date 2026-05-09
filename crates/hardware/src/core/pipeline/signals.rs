@@ -1126,6 +1126,7 @@ impl VectorOp {
         lmul_is_fractional: bool,
         src_enc: VecSrcEncoding,
         nf: u8,
+        broadcast_vs2: bool,
     ) -> VecOperandGroups {
         use VectorOp::*;
 
@@ -1137,6 +1138,9 @@ impl VectorOp {
         // vs1 is only a vector register for VV encoding; for VX/VI/VF it's a
         // scalar or immediate, so group size = 0.
         let vs1_base = if src_enc == VecSrcEncoding::VV { lmul } else { 0 };
+
+        // .vs-form crypto ops broadcast vs2 element group 0; vs2 EMUL is 1.
+        let vs2_crypto = if broadcast_vs2 { 1 } else { lmul };
 
         match self {
             // ── Configuration (no vector register operands) ──────────────
@@ -1167,16 +1171,25 @@ impl VectorOp {
             // Carry/borrow input ops (read v0 mask + full group operands)
             VAdc | VSbc |
             // Zvbb arithmetic (vandn/vrol/vror) and Zvbc carryless multiply
-            VAndN | VRol | VRor | VClMul | VClMulH |
-            // Vector crypto (Zvkn*/Zvks*/Zvkg) — operate on EGS=4 element groups
-            // at SEW=32; group size for renaming purposes is LMUL.
-            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ |
-            VAesKf1 | VAesKf2 |
-            VSha2Ms | VSha2Ch | VSha2Cl |
-            VSm3Me | VSm3C |
-            VSm4R | VSm4K |
-            VGhsh | VGmul
+            VAndN | VRol | VRor | VClMul | VClMulH
             => VecOperandGroups { vd: lmul, vs2: lmul, vs1: vs1_base },
+
+            // ── Vector crypto with vs1 as a real register operand (Zvknh, Zvkg)
+            // SHA-2 message scheduler / compression rounds and Zvkg vghsh all
+            // take a per-group vs1 vector input; alignment is checked normally.
+            VSha2Ms | VSha2Ch | VSha2Cl | VGhsh
+            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: lmul },
+
+            // ── Vector crypto where vs1 field encodes a sub-opcode or imm
+            // AES rounds, AES key schedule, SM4 rounds/keys, SM3, Zvkg vgmul
+            // all share OPMVV funct3 with the standard .vv encoding but the
+            // vs1 field is *not* a register reference — so group size is 0.
+            // .vs forms additionally take a single vs2 element group (EMUL=1)
+            // that is broadcast across destination groups.
+            VAesEm | VAesEf | VAesDm | VAesDf | VAesZ | VSm4R
+            => VecOperandGroups { vd: lmul, vs2: vs2_crypto, vs1: 0 },
+            VAesKf1 | VAesKf2 | VSm4K | VSm3Me | VSm3C | VGmul
+            => VecOperandGroups { vd: lmul, vs2: lmul, vs1: 0 },
 
             // Reductions (standard + widening): vd and vs1 are single registers
             // (scalar accumulator in element 0), vs2 is the full LMUL group.
