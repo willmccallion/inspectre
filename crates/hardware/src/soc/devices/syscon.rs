@@ -11,6 +11,10 @@
 //!   * `0x7777`: Reset
 //!   * `0x3333`: Failure/Panic
 
+use crate::common::LineAddr;
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{HitLevel, MemOp, MemRespData, Packet, WriteData};
 use crate::soc::devices::Device;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +33,48 @@ impl SysCon {
     pub const fn new(base_addr: u64, exit_signal: Arc<AtomicU64>) -> Self {
         Self { base_addr, exit_signal }
     }
+
+    fn act_on_command(&self, val: u32) {
+        match val {
+            0x5555 => {
+                println!("[SysCon] Poweroff signal received.");
+                self.exit_signal.store(0, Ordering::Relaxed);
+            }
+            0x7777 => {
+                println!("[SysCon] Reset signal received (Simulated as Exit).");
+                self.exit_signal.store(0, Ordering::Relaxed);
+            }
+            0x3333 => {
+                println!("[SysCon] Failure signal received.");
+                self.exit_signal.store(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Handle for SysCon {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            if offset == 0 {
+                if let MemOp::Write { data: WriteData::Small(val) } = op {
+                    self.act_on_command(val as u32);
+                }
+            }
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(0),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
+    }
 }
 
 impl Device for SysCon {
@@ -38,45 +84,5 @@ impl Device for SysCon {
 
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x1000)
-    }
-
-    fn read_u8(&mut self, _offset: u64) -> u8 {
-        0
-    }
-    fn read_u16(&mut self, _offset: u64) -> u16 {
-        0
-    }
-    fn read_u32(&mut self, _offset: u64) -> u32 {
-        0
-    }
-    fn read_u64(&mut self, _offset: u64) -> u64 {
-        0
-    }
-
-    fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    fn write_u16(&mut self, _offset: u64, _val: u16) {}
-
-    fn write_u32(&mut self, offset: u64, val: u32) {
-        if offset == 0 {
-            match val {
-                0x5555 => {
-                    println!("[SysCon] Poweroff signal received.");
-                    self.exit_signal.store(0, Ordering::Relaxed);
-                }
-                0x7777 => {
-                    println!("[SysCon] Reset signal received (Simulated as Exit).");
-                    self.exit_signal.store(0, Ordering::Relaxed);
-                }
-                0x3333 => {
-                    println!("[SysCon] Failure signal received.");
-                    self.exit_signal.store(1, Ordering::Relaxed);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn write_u64(&mut self, offset: u64, val: u64) {
-        self.write_u32(offset, val as u32);
     }
 }

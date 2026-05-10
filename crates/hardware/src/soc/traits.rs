@@ -1,65 +1,45 @@
-//! `Device` trait implemented by all bus-attached MMIO/memory components.
+//! `Device` trait implemented by all bus-attached MMIO components.
+//!
+//! Data-bearing operations (reads / writes) happen via the
+//! [`Handle`](crate::sim::handle::Handle) trait, which every device implements.
+//! `Device` itself describes the device's location on the bus, its lifecycle
+//! tick, and type-specific upcasts that the bus uses for IRQ aggregation.
 
 use crate::common::IrqId;
+use crate::sim::handle::Handle;
 use crate::soc::devices::{Clint, Plic, Uart};
-use crate::soc::memory::Memory;
 
 /// Trait for memory-mapped I/O devices attached to the system bus.
 ///
-/// Devices provide a name, address range, and read/write methods. Optional methods support
-/// ticking (e.g., timers), IRQ reporting, and type-specific access (Plic, Uart, Memory).
-pub trait Device: Send + Sync {
-    /// Returns a short name for this device (e.g., `"UART0"`, `"DRAM"`).
+/// All data accesses go through the device's [`Handle`] impl; this trait only
+/// describes layout (name + address range), per-cycle lifecycle (`tick`), and
+/// device-class upcasts the bus uses for routing IRQs and panic detection.
+pub trait Device: Handle + Send + Sync {
+    /// Returns a short name for this device (e.g., `"UART0"`, `"CLINT"`).
     fn name(&self) -> &str;
-    /// Returns (`base_address`, `size_in_bytes`) for this device's MMIO or memory region.
+    /// Returns (`base_address`, `size_in_bytes`) for this device's MMIO region.
     fn address_range(&self) -> (u64, u64);
-    /// Reads one byte at the given device-relative offset.
-    fn read_u8(&mut self, offset: u64) -> u8;
-    /// Reads two bytes (little-endian) at the given offset.
-    fn read_u16(&mut self, offset: u64) -> u16;
-    /// Reads four bytes (little-endian) at the given offset.
-    fn read_u32(&mut self, offset: u64) -> u32;
-    /// Reads eight bytes (little-endian) at the given offset.
-    fn read_u64(&mut self, offset: u64) -> u64;
-    /// Writes one byte at the given offset.
-    fn write_u8(&mut self, offset: u64, val: u8);
-    /// Writes two bytes (little-endian) at the given offset.
-    fn write_u16(&mut self, offset: u64, val: u16);
-    /// Writes four bytes (little-endian) at the given offset.
-    fn write_u32(&mut self, offset: u64, val: u32);
-    /// Writes eight bytes (little-endian) at the given offset.
-    fn write_u64(&mut self, offset: u64, val: u64);
 
-    /// Writes a contiguous byte slice at the given offset (default: byte-by-byte).
-    fn write_bytes(&mut self, offset: u64, data: &[u8]) {
-        for (i, byte) in data.iter().enumerate() {
-            self.write_u8(offset + i as u64, *byte);
-        }
-    }
-
-    /// Advances device state by one cycle; returns `true` if an IRQ was raised (e.g., timer).
+    /// Advances device state by one cycle; returns `true` if an IRQ was raised
+    /// (e.g., timer).
     fn tick(&mut self) -> bool {
         false
     }
-    /// Returns the IRQ ID for this device if it can raise interrupts (e.g., PLIC line).
+    /// Returns the IRQ ID for this device if it can raise interrupts.
     fn get_irq_id(&self) -> Option<IrqId> {
         None
     }
 
-    /// Returns a mutable reference as `Clint` if this device is the CLINT; otherwise `None`.
+    /// Returns a mutable reference as `Clint` if this device is the CLINT.
     fn as_clint_mut(&mut self) -> Option<&mut Clint> {
         None
     }
-    /// Returns a mutable reference as `Plic` if this device is the PLIC; otherwise `None`.
+    /// Returns a mutable reference as `Plic` if this device is the PLIC.
     fn as_plic_mut(&mut self) -> Option<&mut Plic> {
         None
     }
-    /// Returns a mutable reference as `Uart` if this device is a UART; otherwise `None`.
+    /// Returns a mutable reference as `Uart` if this device is a UART.
     fn as_uart_mut(&mut self) -> Option<&mut Uart> {
-        None
-    }
-    /// Returns a mutable reference as `Memory` if this device is RAM; otherwise `None`.
-    fn as_memory_mut(&mut self) -> Option<&mut Memory> {
         None
     }
 }

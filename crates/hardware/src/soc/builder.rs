@@ -9,7 +9,6 @@ use crate::config::{Config, MemoryController as MemControllerType};
 use crate::core::units::cache::CacheSim;
 use crate::soc::devices::{Clint, GoldfishRtc, Htif, Plic, SysCon, Uart, VirtioBlock};
 use crate::soc::interconnect::Bus;
-use crate::soc::memory::Memory;
 use crate::soc::memory::buffer::DramBuffer;
 use crate::soc::memory::controller::{
     DramConfig, DramController, MemoryController, SimpleController,
@@ -60,7 +59,6 @@ impl Soc {
         let ram_base = config.system.ram_base;
         let ram_size = config.memory.ram_size;
         let ram_buffer = Arc::new(DramBuffer::new(ram_size));
-        let mem = Memory::new(ram_buffer.clone(), ram_base);
 
         let uart_base = config.system.uart_base;
         let uart = Uart::new(uart_base, config.system.uart_to_stderr, config.system.uart_quiet);
@@ -85,7 +83,6 @@ impl Soc {
 
         let rtc = GoldfishRtc::new(0x101000);
 
-        bus.add_device(Box::new(mem));
         bus.add_device(Box::new(uart));
         bus.add_device(Box::new(disk));
         bus.add_device(Box::new(clint));

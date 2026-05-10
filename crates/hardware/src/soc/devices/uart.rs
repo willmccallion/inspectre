@@ -4,7 +4,10 @@
 //! Handles standard registers (RBR, THR, IER, IIR, LCR, LSR) and integrates
 //! with stdin/stdout for console I/O.
 
-use crate::common::IrqId;
+use crate::common::{IrqId, LineAddr};
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{HitLevel, MemOp, MemRespData, Packet, WriteData};
 use crate::soc::devices::Device;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -257,15 +260,8 @@ impl Uart {
     }
 }
 
-impl Device for Uart {
-    fn name(&self) -> &'static str {
-        "UART0"
-    }
-    fn address_range(&self) -> (u64, u64) {
-        (self.base_addr, 0x100)
-    }
-
-    fn read_u8(&mut self, offset: u64) -> u8 {
+impl Uart {
+    fn read_register(&mut self, offset: u64) -> u8 {
         match offset {
             REG_RBR => self.read_rbr_or_dll(),
             REG_IER => self.read_ier_or_dlm(),
@@ -278,17 +274,7 @@ impl Device for Uart {
         }
     }
 
-    fn read_u16(&mut self, offset: u64) -> u16 {
-        self.read_u8(offset) as u16
-    }
-    fn read_u32(&mut self, offset: u64) -> u32 {
-        self.read_u8(offset) as u32
-    }
-    fn read_u64(&mut self, offset: u64) -> u64 {
-        self.read_u8(offset) as u64
-    }
-
-    fn write_u8(&mut self, offset: u64, val: u8) {
+    fn write_register(&mut self, offset: u64, val: u8) {
         match offset {
             REG_THR => self.write_thr_or_dll(val),
             REG_IER => self.write_ier_or_dlm(val),
@@ -298,15 +284,43 @@ impl Device for Uart {
             _ => {}
         }
     }
+}
 
-    fn write_u16(&mut self, offset: u64, val: u16) {
-        self.write_u8(offset, val as u8);
+impl Handle for Uart {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            let value: u64 = match op {
+                MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. } => {
+                    u64::from(self.read_register(offset))
+                }
+                MemOp::Write { data: WriteData::Small(val) } => {
+                    self.write_register(offset, val as u8);
+                    0
+                }
+                MemOp::Write { .. } => 0,
+            };
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(value),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
     }
-    fn write_u32(&mut self, offset: u64, val: u32) {
-        self.write_u8(offset, val as u8);
+}
+
+impl Device for Uart {
+    fn name(&self) -> &'static str {
+        "UART0"
     }
-    fn write_u64(&mut self, offset: u64, val: u64) {
-        self.write_u8(offset, val as u8);
+    fn address_range(&self) -> (u64, u64) {
+        (self.base_addr, 0x100)
     }
 
     fn tick(&mut self) -> bool {

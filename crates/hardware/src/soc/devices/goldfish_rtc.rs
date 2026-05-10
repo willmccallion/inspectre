@@ -8,7 +8,10 @@
 //! * `0x00`: Time (Low 32 bits)
 //! * `0x04`: Time (High 32 bits)
 
-use crate::common::IrqId;
+use crate::common::{IrqId, LineAddr};
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet};
 use crate::soc::devices::Device;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,9 +29,36 @@ impl GoldfishRtc {
     }
 
     /// Retrieves the current system time in nanoseconds.
-    #[allow(clippy::unused_self)]
-    fn get_time_ns(&self) -> u64 {
+    fn get_time_ns() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
+    }
+}
+
+impl Handle for GoldfishRtc {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            let value: u64 = match op {
+                MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. } => match (offset, size) {
+                    (0x00, AccessSize::B4) => u64::from(Self::get_time_ns() as u32),
+                    (0x04, AccessSize::B4) => u64::from((Self::get_time_ns() >> 32) as u32),
+                    (0x00, AccessSize::B8) => Self::get_time_ns(),
+                    _ => 0,
+                },
+                MemOp::Write { .. } => 0,
+            };
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(value),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
     }
 }
 
@@ -40,35 +70,6 @@ impl Device for GoldfishRtc {
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 0x1000)
     }
-
-    fn read_u8(&mut self, _offset: u64) -> u8 {
-        0
-    }
-    fn read_u16(&mut self, _offset: u64) -> u16 {
-        0
-    }
-
-    fn read_u32(&mut self, offset: u64) -> u32 {
-        let time = self.get_time_ns();
-        match offset {
-            0x00 => time as u32,
-            0x04 => (time >> 32) as u32,
-            _ => 0,
-        }
-    }
-
-    fn read_u64(&mut self, offset: u64) -> u64 {
-        let time = self.get_time_ns();
-        match offset {
-            0x00 => time,
-            _ => 0,
-        }
-    }
-
-    fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    fn write_u16(&mut self, _offset: u64, _val: u16) {}
-    fn write_u32(&mut self, _offset: u64, _val: u32) {}
-    fn write_u64(&mut self, _offset: u64, _val: u64) {}
 
     fn get_irq_id(&self) -> Option<IrqId> {
         Some(IrqId::new(11))

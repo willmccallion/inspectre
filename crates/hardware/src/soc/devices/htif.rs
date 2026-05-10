@@ -8,10 +8,14 @@
 //! * Odd and not 1 — test failed; the failing test number is `value >> 1`.
 //! * `0` — ignored (tests poll-write zero before writing the real value).
 //!
-//! This device occupies a single 8-byte slot on the bus at the address of the
+//! This device occupies a single 16-byte slot on the bus at the address of the
 //! `tohost` ELF symbol. It shares the same `exit_request` atomic as SysCon so
 //! the simulation loop picks up the exit without any extra plumbing.
 
+use crate::common::LineAddr;
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{HitLevel, MemOp, MemRespData, Packet, WriteData};
 use crate::soc::devices::Device;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,6 +50,30 @@ impl Htif {
     }
 }
 
+impl Handle for Htif {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            if offset == 0 {
+                if let MemOp::Write { data: WriteData::Small(val) } = op {
+                    self.handle_tohost(val);
+                }
+            }
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(0),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
+    }
+}
+
 impl Device for Htif {
     fn name(&self) -> &'static str {
         "HTIF"
@@ -53,33 +81,5 @@ impl Device for Htif {
 
     fn address_range(&self) -> (u64, u64) {
         (self.base_addr, 16)
-    }
-
-    fn read_u8(&mut self, _offset: u64) -> u8 {
-        0
-    }
-    fn read_u16(&mut self, _offset: u64) -> u16 {
-        0
-    }
-    fn read_u32(&mut self, _offset: u64) -> u32 {
-        0
-    }
-    fn read_u64(&mut self, _offset: u64) -> u64 {
-        0
-    }
-
-    fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    fn write_u16(&mut self, _offset: u64, _val: u16) {}
-
-    fn write_u32(&mut self, offset: u64, val: u32) {
-        if offset == 0 {
-            self.handle_tohost(val as u64);
-        }
-    }
-
-    fn write_u64(&mut self, offset: u64, val: u64) {
-        if offset == 0 {
-            self.handle_tohost(val);
-        }
     }
 }

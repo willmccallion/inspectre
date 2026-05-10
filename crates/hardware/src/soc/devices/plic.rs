@@ -10,6 +10,10 @@
 //! * `0x002000`: Interrupt Enables
 //! * `0x200000`: Priority Thresholds and Claim/Complete Registers
 
+use crate::common::LineAddr;
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet, WriteData};
 use crate::soc::devices::Device;
 
 /// Base offset for PLIC priority registers (one per interrupt source).
@@ -146,15 +150,8 @@ impl Plic {
     }
 }
 
-impl Device for Plic {
-    fn name(&self) -> &'static str {
-        "PLIC"
-    }
-    fn address_range(&self) -> (u64, u64) {
-        (self.base_addr, 0x4000000)
-    }
-
-    fn read_u32(&mut self, offset: u64) -> u32 {
+impl Plic {
+    fn read_u32_reg(&mut self, offset: u64) -> u32 {
         #[allow(clippy::absurd_extreme_comparisons)]
         if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
@@ -196,7 +193,7 @@ impl Device for Plic {
         0
     }
 
-    fn write_u32(&mut self, offset: u64, val: u32) {
+    fn write_u32_reg(&mut self, offset: u64, val: u32) {
         #[allow(clippy::absurd_extreme_comparisons)]
         if (PLIC_PRIORITY_BASE..PLIC_PENDING_BASE).contains(&offset) {
             let idx = (offset - PLIC_PRIORITY_BASE) as usize / 4;
@@ -231,35 +228,63 @@ impl Device for Plic {
             }
         }
     }
+}
 
-    fn read_u8(&mut self, offset: u64) -> u8 {
-        (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u8
+impl Handle for Plic {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            let value: u64 = match (size, op) {
+                (AccessSize::B4, MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. }) => {
+                    u64::from(self.read_u32_reg(offset))
+                }
+                (AccessSize::B8, MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. }) => {
+                    u64::from(self.read_u32_reg(offset))
+                }
+                (
+                    AccessSize::B1,
+                    MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. },
+                ) => {
+                    let aligned = offset & !3;
+                    let shift = (offset & 3) * 8;
+                    u64::from((self.read_u32_reg(aligned) >> shift) as u8)
+                }
+                (AccessSize::B2, MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. }) => {
+                    let aligned = offset & !3;
+                    let shift = (offset & 3) * 8;
+                    u64::from((self.read_u32_reg(aligned) >> shift) as u16)
+                }
+                (AccessSize::B4, MemOp::Write { data: WriteData::Small(val) }) => {
+                    self.write_u32_reg(offset, val as u32);
+                    0
+                }
+                (AccessSize::B8, MemOp::Write { data: WriteData::Small(val) }) => {
+                    self.write_u32_reg(offset, val as u32);
+                    0
+                }
+                _ => 0,
+            };
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(value),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
     }
-    fn read_u16(&mut self, offset: u64) -> u16 {
-        (self.read_u32(offset & !3) >> ((offset & 3) * 8)) as u16
-    }
-    fn read_u64(&mut self, offset: u64) -> u64 {
-        self.read_u32(offset) as u64
-    }
+}
 
-    fn write_u8(&mut self, offset: u64, val: u8) {
-        let aligned = offset & !3;
-        let byte_pos = (offset & 3) * 8;
-        let old = self.read_u32(aligned);
-        let mask = !(0xFFu32 << byte_pos);
-        let new = (old & mask) | ((val as u32) << byte_pos);
-        self.write_u32(aligned, new);
+impl Device for Plic {
+    fn name(&self) -> &'static str {
+        "PLIC"
     }
-    fn write_u16(&mut self, offset: u64, val: u16) {
-        let aligned = offset & !3;
-        let byte_pos = (offset & 2) * 8;
-        let old = self.read_u32(aligned);
-        let mask = !(0xFFFFu32 << byte_pos);
-        let new = (old & mask) | ((val as u32) << byte_pos);
-        self.write_u32(aligned, new);
-    }
-    fn write_u64(&mut self, offset: u64, val: u64) {
-        self.write_u32(offset, val as u32);
+    fn address_range(&self) -> (u64, u64) {
+        (self.base_addr, 0x4000000)
     }
 
     fn tick(&mut self) -> bool {

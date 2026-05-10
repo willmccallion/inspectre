@@ -10,6 +10,10 @@
 //! * `0x4000`: MTIMECMP (Machine Time Compare)
 //! * `0xBFF8`: MTIME (Machine Time)
 
+use crate::common::LineAddr;
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet, WriteData};
 use crate::soc::devices::Device;
 
 /// Offset for the Machine Software Interrupt Pending register.
@@ -53,12 +57,99 @@ impl Clint {
             counter: 0,
         }
     }
-}
 
-impl Clint {
     /// Returns `true` if the machine software interrupt pending bit is set.
     pub const fn msip_pending(&self) -> bool {
         (self.msip & 1) != 0
+    }
+
+    fn read_register(&self, offset: u64, size: AccessSize) -> u64 {
+        match size {
+            AccessSize::B8 => match offset {
+                MSIP_OFFSET => u64::from(self.msip),
+                MTIMECMP_OFFSET => self.mtimecmp,
+                MTIME_OFFSET => self.mtime,
+                _ => 0,
+            },
+            AccessSize::B4 => match offset {
+                MSIP_OFFSET => u64::from(self.msip),
+                MTIMECMP_OFFSET => u64::from(self.mtimecmp as u32),
+                o if o == MTIMECMP_OFFSET + 4 => u64::from((self.mtimecmp >> 32) as u32),
+                MTIME_OFFSET => u64::from(self.mtime as u32),
+                o if o == MTIME_OFFSET + 4 => u64::from((self.mtime >> 32) as u32),
+                _ => 0,
+            },
+            AccessSize::B1 => {
+                let aligned = offset & !7;
+                let shift = (offset & 7) * 8;
+                let val = self.read_register(aligned, AccessSize::B8);
+                (val >> shift) & 0xFF
+            }
+            _ => 0,
+        }
+    }
+
+    fn write_register(&mut self, offset: u64, size: AccessSize, val: u64) {
+        match size {
+            AccessSize::B8 => match offset {
+                MSIP_OFFSET => self.msip = (val as u32) & 1,
+                MTIMECMP_OFFSET => self.mtimecmp = val,
+                MTIME_OFFSET => self.mtime = val,
+                _ => {}
+            },
+            AccessSize::B4 => {
+                let v32 = val as u32;
+                match offset {
+                    MSIP_OFFSET => self.msip = v32 & 1,
+                    MTIMECMP_OFFSET => {
+                        self.mtimecmp =
+                            (self.mtimecmp & 0xFFFF_FFFF_0000_0000) | u64::from(v32);
+                    }
+                    o if o == MTIMECMP_OFFSET + 4 => {
+                        self.mtimecmp = (self.mtimecmp & 0x0000_0000_FFFF_FFFF)
+                            | (u64::from(v32) << 32);
+                    }
+                    MTIME_OFFSET => {
+                        self.mtime = (self.mtime & 0xFFFF_FFFF_0000_0000) | u64::from(v32);
+                    }
+                    o if o == MTIME_OFFSET + 4 => {
+                        self.mtime =
+                            (self.mtime & 0x0000_0000_FFFF_FFFF) | (u64::from(v32) << 32);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Handle for Clint {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
+            let offset = paddr.val().saturating_sub(self.base_addr);
+            let value = match op {
+                MemOp::Read | MemOp::Fetch | MemOp::Atomic { .. } => {
+                    self.read_register(offset, size)
+                }
+                MemOp::Write { data: WriteData::Small(val) } => {
+                    self.write_register(offset, size, val);
+                    0
+                }
+                MemOp::Write { .. } => 0,
+            };
+            ctx.scheduler.schedule(
+                ctx.cycle + 1,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, 64),
+                    data: MemRespData::Small(value),
+                    hit_level: HitLevel::Mmio,
+                },
+            );
+        }
     }
 }
 
@@ -71,67 +162,8 @@ impl Device for Clint {
         (self.base_addr, 0x10000)
     }
 
-    fn read_u8(&mut self, offset: u64) -> u8 {
-        let val = self.read_u64(offset & !7);
-        let shift = (offset & 7) * 8;
-        ((val >> shift) & 0xFF) as u8
-    }
-
-    fn read_u16(&mut self, _offset: u64) -> u16 {
-        0
-    }
-
-    fn read_u32(&mut self, offset: u64) -> u32 {
-        match offset {
-            MSIP_OFFSET => self.msip,
-            MTIMECMP_OFFSET => self.mtimecmp as u32,
-            val if val == MTIMECMP_OFFSET + 4 => (self.mtimecmp >> 32) as u32,
-            MTIME_OFFSET => self.mtime as u32,
-            val if val == MTIME_OFFSET + 4 => (self.mtime >> 32) as u32,
-            _ => 0,
-        }
-    }
-
-    fn read_u64(&mut self, offset: u64) -> u64 {
-        match offset {
-            MSIP_OFFSET => self.msip as u64,
-            MTIMECMP_OFFSET => self.mtimecmp,
-            MTIME_OFFSET => self.mtime,
-            _ => 0,
-        }
-    }
-
-    fn write_u8(&mut self, _offset: u64, _val: u8) {}
-    fn write_u16(&mut self, _offset: u64, _val: u16) {}
-
-    fn write_u32(&mut self, offset: u64, val: u32) {
-        match offset {
-            MSIP_OFFSET => self.msip = val & 1,
-            MTIMECMP_OFFSET => {
-                self.mtimecmp = (self.mtimecmp & 0xFFFF_FFFF_0000_0000) | (val as u64);
-            }
-            o if o == MTIMECMP_OFFSET + 4 => {
-                self.mtimecmp = (self.mtimecmp & 0x0000_0000_FFFF_FFFF) | ((val as u64) << 32);
-            }
-            MTIME_OFFSET => self.mtime = (self.mtime & 0xFFFF_FFFF_0000_0000) | (val as u64),
-            o if o == MTIME_OFFSET + 4 => {
-                self.mtime = (self.mtime & 0x0000_0000_FFFF_FFFF) | ((val as u64) << 32);
-            }
-            _ => {}
-        }
-    }
-
-    fn write_u64(&mut self, offset: u64, val: u64) {
-        match offset {
-            MSIP_OFFSET => self.msip = (val as u32) & 1,
-            MTIMECMP_OFFSET => self.mtimecmp = val,
-            MTIME_OFFSET => self.mtime = val,
-            _ => {}
-        }
-    }
-
     /// Advances the device state by one cycle.
-    /// Returns `true` if the machine timer interrupt is pending (`mtime >= mtimecmp`).
+    /// Returns `true` if the machine timer interrupt is pending.
     fn tick(&mut self) -> bool {
         self.counter += 1;
         if self.counter >= self.divider {
