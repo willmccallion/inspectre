@@ -426,10 +426,16 @@ impl IssueQueue {
                     if !mem_ready {
                         continue;
                     }
-                    // FENCE / CboZero have their own granular checks below; system/CSR otherwise serialize.
+                    // FENCE / CBO* have their own granular checks below; system/CSR otherwise serialize.
                     if iq.entry.ctrl.system_op != SystemOp::None
                         && iq.entry.ctrl.system_op != SystemOp::Fence
-                        && iq.entry.ctrl.system_op != SystemOp::CboZero
+                        && !matches!(
+                            iq.entry.ctrl.system_op,
+                            SystemOp::CboZero
+                                | SystemOp::CboInval
+                                | SystemOp::CboClean
+                                | SystemOp::CboFlush
+                        )
                         && !rob.all_before_completed(iq.entry.rob_tag)
                     {
                         continue;

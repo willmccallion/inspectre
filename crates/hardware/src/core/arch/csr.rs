@@ -80,6 +80,38 @@ pub const SENVCFG: CsrAddr = CsrAddr::from_u32(0x10A);
 /// CBZE bit in senvcfg — enables Zicboz cbo.zero in U mode.
 pub const SENVCFG_CBZE: u64 = 1 << 7;
 
+/// CBCFE bit in menvcfg — enables Zicbom cbo.clean / cbo.flush in S/U.
+pub const MENVCFG_CBCFE: u64 = 1 << 6;
+
+/// CBCFE bit in senvcfg — enables Zicbom cbo.clean / cbo.flush in U.
+pub const SENVCFG_CBCFE: u64 = 1 << 6;
+
+/// CBIE field shift in menvcfg / senvcfg (bits 5:4).
+pub const MENVCFG_CBIE_SHIFT: u32 = 4;
+
+/// CBIE field mask (2 bits).
+pub const MENVCFG_CBIE_MASK: u64 = 0b11;
+
+/// CBIE encoding: cbo.inval is illegal in S/U.
+pub const CBIE_ILLEGAL: u64 = 0b00;
+
+/// CBIE encoding: cbo.inval is permitted but executes as cbo.flush.
+pub const CBIE_FLUSH: u64 = 0b01;
+
+/// CBIE encoding: cbo.inval performs full invalidate (may discard dirty data).
+pub const CBIE_INVAL: u64 = 0b11;
+
+/// Outcome of resolving the CBIE field at the current privilege level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CboInvalAction {
+    /// `cbo.inval` is illegal — raise an illegal-instruction trap.
+    Illegal,
+    /// Treat `cbo.inval` as `cbo.flush` (writeback then invalidate).
+    Flush,
+    /// Full invalidate; dirty data may be discarded.
+    Invalidate,
+}
+
 /// Returns true when `cbo.zero` is permitted at the current privilege level
 /// per the Zicboz spec: M-mode is always allowed, S-mode requires
 /// `menvcfg.CBZE`, U-mode additionally requires `senvcfg.CBZE`.
@@ -95,6 +127,64 @@ pub const fn cboz_allowed(
         PrivilegeMode::User => {
             (menvcfg & MENVCFG_CBZE) != 0 && (senvcfg & SENVCFG_CBZE) != 0
         }
+    }
+}
+
+/// Returns true when `cbo.clean` and `cbo.flush` are permitted at the current
+/// privilege level (gated by `menvcfg.CBCFE` in S/U; `senvcfg.CBCFE` further
+/// gates U-mode). M-mode is always allowed.
+pub const fn cbocf_allowed(
+    menvcfg: u64,
+    senvcfg: u64,
+    privilege: crate::core::arch::mode::PrivilegeMode,
+) -> bool {
+    use crate::core::arch::mode::PrivilegeMode;
+    match privilege {
+        PrivilegeMode::Machine => true,
+        PrivilegeMode::Supervisor => (menvcfg & MENVCFG_CBCFE) != 0,
+        PrivilegeMode::User => {
+            (menvcfg & MENVCFG_CBCFE) != 0 && (senvcfg & SENVCFG_CBCFE) != 0
+        }
+    }
+}
+
+/// Resolves the effective `cbo.inval` action at the current privilege level.
+///
+/// M-mode is always full invalidate. S-mode reads menvcfg.CBIE alone. U-mode
+/// takes the most-restrictive of the two CBIE fields (00 beats 01 beats 11).
+pub const fn cbo_inval_action(
+    menvcfg: u64,
+    senvcfg: u64,
+    privilege: crate::core::arch::mode::PrivilegeMode,
+) -> CboInvalAction {
+    use crate::core::arch::mode::PrivilegeMode;
+    let m_field = (menvcfg >> MENVCFG_CBIE_SHIFT) & MENVCFG_CBIE_MASK;
+    let s_field = (senvcfg >> MENVCFG_CBIE_SHIFT) & MENVCFG_CBIE_MASK;
+    let effective = match privilege {
+        PrivilegeMode::Machine => CBIE_INVAL,
+        PrivilegeMode::Supervisor => m_field,
+        PrivilegeMode::User => cbie_intersect(m_field, s_field),
+    };
+    match effective {
+        CBIE_FLUSH => CboInvalAction::Flush,
+        CBIE_INVAL => CboInvalAction::Invalidate,
+        // CBIE_ILLEGAL (0b00) and the reserved 0b10 encoding both trap.
+        _ => CboInvalAction::Illegal,
+    }
+}
+
+/// Combines two CBIE field values via the spec's most-restrictive rule:
+/// 00 dominates 01 dominates 11. The 10 encoding is reserved and treated
+/// as illegal.
+const fn cbie_intersect(a: u64, b: u64) -> u64 {
+    if a == CBIE_ILLEGAL || b == CBIE_ILLEGAL {
+        CBIE_ILLEGAL
+    } else if a == CBIE_FLUSH || b == CBIE_FLUSH {
+        CBIE_FLUSH
+    } else if a == CBIE_INVAL && b == CBIE_INVAL {
+        CBIE_INVAL
+    } else {
+        CBIE_ILLEGAL
     }
 }
 
@@ -710,6 +800,8 @@ impl Csrs {
             x if x == MINSTRET.as_u32() => self.minstret = val,
             x if x == MCOUNTEREN.as_u32() => self.mcounteren = val,
             x if x == SCOUNTEREN.as_u32() => self.scounteren = val,
+            x if x == MENVCFG.as_u32() => self.menvcfg = val,
+            x if x == SENVCFG.as_u32() => self.senvcfg = val,
             x if x == VSTART.as_u32() => self.vstart = val,
             x if x == VXSAT.as_u32() => self.vxsat = val & 0x1,
             x if x == VXRM.as_u32() => self.vxrm = val & 0x3,

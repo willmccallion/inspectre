@@ -161,6 +161,46 @@ fn clean_eviction_no_penalty() {
     assert_eq!(penalty, 0, "Evicting clean line should have 0 penalty");
 }
 
+/// `clean_line` clears the dirty bit but keeps the line valid: the next
+/// access still hits, and a subsequent eviction takes no writeback penalty.
+#[test]
+fn clean_line_clears_dirty_keeps_valid() {
+    let mut cache = CacheSim::new(&test_config());
+
+    // Write to install a dirty line.
+    cache.access(0x1000, true, NEXT_LEVEL_LATENCY);
+    assert!(cache.contains(0x1000));
+
+    // Clean it: dirty bit goes away, line stays.
+    let cleaned = cache.clean_line(0x1000);
+    assert!(cleaned);
+    assert!(cache.contains(0x1000));
+
+    // Subsequent eviction takes no writeback penalty (line is clean now).
+    cache.access(0x1080, false, NEXT_LEVEL_LATENCY); // same set, way 1
+    let (_, penalty) = cache.access(0x2000, false, NEXT_LEVEL_LATENCY); // evict 0x1000
+    assert_eq!(penalty, 0, "cleaned line must not pay writeback penalty");
+}
+
+/// `clean_line` on an absent line is a no-op that returns false.
+#[test]
+fn clean_line_absent_returns_false() {
+    let mut cache = CacheSim::new(&test_config());
+    assert!(!cache.clean_line(0xDEADBEEF));
+}
+
+/// `invalidate_line` drops a line outright; subsequent accesses miss.
+#[test]
+fn invalidate_line_drops_existing_line() {
+    let mut cache = CacheSim::new(&test_config());
+    cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
+    assert!(cache.contains(0x1000));
+
+    let invalidated = cache.invalidate_line(0x1000);
+    assert!(invalidated);
+    assert!(!cache.contains(0x1000));
+}
+
 /// After flushing, previously cached dirty lines become misses.
 #[test]
 fn flush_invalidates_dirty_lines() {

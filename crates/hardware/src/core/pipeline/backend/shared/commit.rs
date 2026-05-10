@@ -169,9 +169,14 @@ pub fn commit_stage(
         if head.ctrl.system_op == SystemOp::SfenceVma && store_buffer.has_committed_stores() {
             break;
         }
-        // CBO.ZERO is a 64-byte store; drain prior committed stores first so
-        // memory ordering against earlier writes matches a normal store.
-        if head.ctrl.system_op == SystemOp::CboZero && store_buffer.has_committed_stores() {
+        // CBO ops (Zicboz / Zicbom) drain prior committed stores first so
+        // memory ordering against earlier writes matches a normal store and
+        // any stale PTE in the SB has settled before we re-translate.
+        if matches!(
+            head.ctrl.system_op,
+            SystemOp::CboZero | SystemOp::CboInval | SystemOp::CboClean | SystemOp::CboFlush
+        ) && store_buffer.has_committed_stores()
+        {
             break;
         }
 
@@ -501,10 +506,19 @@ pub fn commit_stage(
             break;
         }
 
-        // CBO.ZERO: SB is empty (stall above). entry.result holds the
-        // resolved block paddr from execute; write CBOZ_BLOCK_SIZE zero bytes.
-        if entry.ctrl.system_op == SystemOp::CboZero {
-            cboz_commit(cpu, entry.result.unwrap_or(0));
+        // CBO ops (Zicboz / Zicbom): SB is empty (stall above). entry.result
+        // holds rs1 from execute. Resolve the gate + translation here so a
+        // fault routes through the standard commit-time trap path and any
+        // freshly-committed PTE writes are visible to the walk.
+        if matches!(
+            entry.ctrl.system_op,
+            SystemOp::CboZero | SystemOp::CboInval | SystemOp::CboClean | SystemOp::CboFlush
+        ) {
+            let rs1 = entry.result.unwrap_or(0);
+            if let Some(trap) = commit_cbo(cpu, entry.ctrl.system_op, rs1, entry.inst) {
+                cpu.trap(&trap, entry.pc);
+                break;
+            }
         }
 
         cpu.regs.write(RegIdx::new(0), 0);
@@ -598,9 +612,69 @@ fn flush_wcb(cpu: &mut Cpu) {
 }
 
 /// Writes a store's data to the correct memory target (RAM fast-path or bus).
+/// Resolves and applies a CBO instruction at commit. Returns `Some(trap)` if
+/// the instruction must trap; `None` if it completed successfully. Caller
+/// must have drained the store buffer first so prior committed stores are
+/// visible to the page-table walk and observable by other agents before
+/// this op's side effect.
+fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> {
+    use crate::common::{AccessType, VirtAddr};
+    use crate::core::arch::csr::{
+        CboInvalAction, cbo_inval_action, cbocf_allowed, cboz_allowed,
+    };
+    use crate::isa::zicboz::CBOZ_BLOCK_SIZE;
+
+    let (effective_op, access) = match op {
+        SystemOp::CboZero => {
+            if !cboz_allowed(cpu.csrs.menvcfg, cpu.csrs.senvcfg, cpu.privilege) {
+                return Some(Trap::IllegalInstruction(inst));
+            }
+            (SystemOp::CboZero, AccessType::Write)
+        }
+        SystemOp::CboInval => match cbo_inval_action(
+            cpu.csrs.menvcfg,
+            cpu.csrs.senvcfg,
+            cpu.privilege,
+        ) {
+            CboInvalAction::Illegal => return Some(Trap::IllegalInstruction(inst)),
+            CboInvalAction::Flush => (SystemOp::CboFlush, AccessType::Read),
+            CboInvalAction::Invalidate => (SystemOp::CboInval, AccessType::Write),
+        },
+        SystemOp::CboClean | SystemOp::CboFlush => {
+            if !cbocf_allowed(cpu.csrs.menvcfg, cpu.csrs.senvcfg, cpu.privilege) {
+                return Some(Trap::IllegalInstruction(inst));
+            }
+            (op, AccessType::Read)
+        }
+        _ => return None,
+    };
+
+    let aligned_va = rs1 & !(CBOZ_BLOCK_SIZE - 1);
+    let result = cpu.translate(VirtAddr::new(aligned_va), access, CBOZ_BLOCK_SIZE);
+    if let Some(trap) = result.trap {
+        return Some(trap);
+    }
+    let paddr = result.paddr.val();
+
+    match effective_op {
+        SystemOp::CboZero => cboz_write(cpu, paddr),
+        // cbo.flush is "writeback then invalidate"; in this simulator stores
+        // are already at RAM by commit, so the writeback is a no-op and we
+        // share cbo.inval's drop-the-line implementation.
+        SystemOp::CboInval | SystemOp::CboFlush => {
+            let _ = cpu.l1_d_cache.invalidate_line(paddr);
+        }
+        SystemOp::CboClean => {
+            let _ = cpu.l1_d_cache.clean_line(paddr);
+        }
+        _ => {}
+    }
+    None
+}
+
 /// Writes `CBOZ_BLOCK_SIZE` bytes of zeros at `block_paddr` as a sequence of
 /// 8-byte stores. Caller must drain the store buffer first.
-fn cboz_commit(cpu: &mut Cpu, block_paddr: u64) {
+fn cboz_write(cpu: &mut Cpu, block_paddr: u64) {
     use crate::common::PhysAddr;
     use crate::isa::zicboz::CBOZ_BLOCK_SIZE;
     const CHUNK: u64 = 8;

@@ -1,20 +1,44 @@
-//! End-to-end tests for the Zicboz `cbo.zero` instruction.
+//! End-to-end tests for the Zicboz / Zicbom CBO instructions.
 
 use crate::common::harness::TestContext;
 use rvsim_core::common::PhysAddr;
 use rvsim_core::config::Config;
 use rvsim_core::isa::rv64i::{funct3 as i_f3, opcodes as i_op};
-use rvsim_core::isa::zicboz::{CBO_ZERO_IMM, CBOZ_BLOCK_SIZE};
+use rvsim_core::isa::zicboz::{
+    CBO_CLEAN_IMM, CBO_FLUSH_IMM, CBO_INVAL_IMM, CBO_ZERO_IMM, CBOZ_BLOCK_SIZE,
+};
 
 const RAM_BASE: u64 = 0x8000_0000;
 const RAM_SIZE: usize = 0x4000;
 const NOP: u32 = 0x0000_0013;
+/// `jal x0, 0` — branch-to-self, used as the "park here" tail of test
+/// programs so PC doesn't run off into uninitialized memory and trap.
+const JAL_SELF: u32 = 0x0000_006F;
 const X10: u32 = 10;
 
-/// Encode `cbo.zero rs1` (Zicboz). I-type with imm=`CBO_ZERO_IMM`, rd=x0,
-/// funct3=CBO, opcode=MISC-MEM.
+/// Encode a CBO instruction. I-type with the variant-specific 12-bit imm,
+/// rd=x0, funct3=CBO, opcode=MISC-MEM.
+fn cbo(imm: i64, rs1: u32) -> u32 {
+    ((imm as u32 & 0xFFF) << 20)
+        | ((rs1 & 0x1F) << 15)
+        | (i_f3::CBO << 12)
+        | i_op::OP_MISC_MEM
+}
+
 fn cbo_zero(rs1: u32) -> u32 {
-    ((CBO_ZERO_IMM as u32) << 20) | ((rs1 & 0x1F) << 15) | (i_f3::CBO << 12) | i_op::OP_MISC_MEM
+    cbo(CBO_ZERO_IMM, rs1)
+}
+
+fn cbo_inval(rs1: u32) -> u32 {
+    cbo(CBO_INVAL_IMM, rs1)
+}
+
+fn cbo_clean(rs1: u32) -> u32 {
+    cbo(CBO_CLEAN_IMM, rs1)
+}
+
+fn cbo_flush(rs1: u32) -> u32 {
+    cbo(CBO_FLUSH_IMM, rs1)
 }
 
 fn fill_pattern(ctx: &mut TestContext, base: u64, len: u64) {
@@ -28,18 +52,35 @@ fn read_u64(ctx: &mut TestContext, addr: u64) -> u64 {
     ctx.cpu_mut().bus.bus.read_u64(PhysAddr::new(addr))
 }
 
-/// Run `cbo.zero x10; NOP*N` after seeding x10 with `addr_in_x10`.
-fn run_cbo_zero(ctx: &mut TestContext, addr_in_x10: u64) {
-    let program: Vec<u32> = std::iter::once(cbo_zero(X10))
-        .chain(std::iter::repeat_n(NOP, 64))
-        .collect();
-    for (i, inst) in program.iter().enumerate() {
-        let addr = RAM_BASE + (i as u64) * 4;
-        ctx.cpu_mut().bus.bus.write_u32(PhysAddr::new(addr), *inst);
+/// Run `<inst> x10; jal x0, 0` after seeding x10 with `addr_in_x10`.
+///
+/// `mtvec` is pointed at the jal-self so a trap from the CBO op parks
+/// at the self-loop instead of fetching from PC=0. PC reaches the loop
+/// either through fall-through or trap redirection, so `mcause` only
+/// reflects the CBO op (no secondary fault from running off the program).
+fn run_cbo(ctx: &mut TestContext, inst: u32, addr_in_x10: u64) {
+    let park_offset = 4u64;
+    ctx.cpu_mut().bus.bus.write_u32(PhysAddr::new(RAM_BASE), inst);
+    ctx.cpu_mut()
+        .bus
+        .bus
+        .write_u32(PhysAddr::new(RAM_BASE + park_offset), JAL_SELF);
+    // A few NOPs after the jal so any in-flight speculative fetch has
+    // valid bytes to decode before the redirect lands.
+    for i in 2..16 {
+        ctx.cpu_mut()
+            .bus
+            .bus
+            .write_u32(PhysAddr::new(RAM_BASE + i * 4), NOP);
     }
     ctx.set_reg(X10 as usize, addr_in_x10);
     ctx.cpu_mut().pc = RAM_BASE;
+    ctx.cpu_mut().csrs.mtvec = RAM_BASE + park_offset;
     ctx.run(128);
+}
+
+fn run_cbo_zero(ctx: &mut TestContext, addr_in_x10: u64) {
+    run_cbo(ctx, cbo_zero(X10), addr_in_x10);
 }
 
 /// 64-byte aligned address: cbo.zero zeros exactly that block, leaving the
@@ -116,29 +157,61 @@ fn cbo_zero_in_machine_mode_ignores_menvcfg_cbze() {
     }
 }
 
-/// Trap path: in U-mode with menvcfg.CBZE=0, cbo.zero must NOT zero the block.
-#[test]
-fn cbo_zero_traps_in_user_mode_when_cbze_clear() {
-    use rvsim_core::core::arch::mode::PrivilegeMode;
+// U-mode CBO trap-kind assertions live in the gate-helper unit tests under
+// `tests/unit/core/arch/csr/cbo_gates.rs`. End-to-end verification through
+// the U-mode fetch path requires PMP setup (otherwise a fetch
+// access-fault fires before the CBO instruction even reaches execute),
+// and that's larger plumbing than this polish commit.
 
+// A "U-mode with both CBZE bits set succeeds" test isn't included here:
+// without PMP entries configured, U-mode store always denies regardless
+// of CBZE. The riscv-tests / chipsalliance suites cover the success path
+// end-to-end via real M-mode firmware that programs PMP first.
+
+// ── Zicbom (cbo.inval / cbo.clean / cbo.flush) ──────────────────────────────
+
+/// In M-mode, all three Zicbom ops succeed (CBCFE/CBIE not consulted).
+/// We can't directly observe the cache from a black-box test, but we can
+/// confirm no trap fired and that RAM still holds the original pattern
+/// (cbo.inval/flush don't corrupt RAM in this simulator because all
+/// stores are committed to RAM at retire time).
+#[test]
+fn cbo_inval_in_machine_mode_does_not_trap() {
     let data_addr = RAM_BASE + 0x1000;
     let mut ctx = TestContext::new_with_config(&Config::default()).with_memory(RAM_SIZE, RAM_BASE);
     fill_pattern(&mut ctx, data_addr, CBOZ_BLOCK_SIZE);
-    let baseline: Vec<u64> = (0..CBOZ_BLOCK_SIZE)
-        .step_by(8)
-        .map(|off| read_u64(&mut ctx, data_addr + off))
-        .collect();
 
-    ctx.cpu_mut().privilege = PrivilegeMode::User;
-    // Defaults: menvcfg.CBZE = 0, senvcfg.CBZE = 0 → trap.
+    run_cbo(&mut ctx, cbo_inval(X10), data_addr);
 
-    run_cbo_zero(&mut ctx, data_addr);
-
-    for (i, off) in (0..CBOZ_BLOCK_SIZE).step_by(8).enumerate() {
-        assert_eq!(
-            read_u64(&mut ctx, data_addr + off),
-            baseline[i],
-            "block must NOT be zeroed when CBZE is clear in U-mode (off=+{off})"
-        );
-    }
+    assert_eq!(ctx.cpu().csrs.mcause, 0);
+    // Pattern survives because RAM is the source of truth in this simulator.
+    let expected = 0xDEAD_BEEF_CAFE_F00Du64;
+    assert_eq!(read_u64(&mut ctx, data_addr), expected);
 }
+
+#[test]
+fn cbo_clean_in_machine_mode_does_not_trap() {
+    let data_addr = RAM_BASE + 0x1000;
+    let mut ctx = TestContext::new_with_config(&Config::default()).with_memory(RAM_SIZE, RAM_BASE);
+    fill_pattern(&mut ctx, data_addr, CBOZ_BLOCK_SIZE);
+
+    run_cbo(&mut ctx, cbo_clean(X10), data_addr);
+
+    assert_eq!(ctx.cpu().csrs.mcause, 0);
+}
+
+#[test]
+fn cbo_flush_in_machine_mode_does_not_trap() {
+    let data_addr = RAM_BASE + 0x1000;
+    let mut ctx = TestContext::new_with_config(&Config::default()).with_memory(RAM_SIZE, RAM_BASE);
+    fill_pattern(&mut ctx, data_addr, CBOZ_BLOCK_SIZE);
+
+    run_cbo(&mut ctx, cbo_flush(X10), data_addr);
+
+    assert_eq!(ctx.cpu().csrs.mcause, 0);
+}
+
+// L1D-state-observation tests for cbo.inval / cbo.clean / cbo.flush live
+// in the cache unit tests, where we can drive `CacheSim` directly without
+// the harness's cache-bypass routing (TestContext sets `cache_base =
+// u64::MAX` so loads skip the cache entirely).

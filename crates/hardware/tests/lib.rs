@@ -47,3 +47,6 @@ pub mod unit;
 
 /// Integration tests for complete instruction execution and system behavior.
 pub mod integration;
+
+/// Property / fuzz harnesses driven by proptest.
+pub mod fuzz;

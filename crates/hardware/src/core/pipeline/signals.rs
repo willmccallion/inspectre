@@ -413,6 +413,15 @@ pub enum SystemOp {
     /// `CBO.ZERO` (Zicboz) — zero a cache-block-aligned region at rs1.
     CboZero,
 
+    /// `CBO.INVAL` (Zicbom) — invalidate the L1D line at rs1.
+    CboInval,
+
+    /// `CBO.CLEAN` (Zicbom) — writeback the L1D line at rs1, keep it valid.
+    CboClean,
+
+    /// `CBO.FLUSH` (Zicbom) — writeback then invalidate the L1D line at rs1.
+    CboFlush,
+
     /// Generic system instruction (CSR, ECALL) not covered by a specific variant.
     System,
 }

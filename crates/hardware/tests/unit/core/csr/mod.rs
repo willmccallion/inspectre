@@ -27,3 +27,6 @@ pub mod trap_setup;
 /// This module verifies the CPU-level CSR operations including side effects
 /// like TLB flushes, interrupt inhibition, and MSTATUS/SSTATUS synchronization.
 pub mod cpu_csr_operations;
+
+/// Unit tests for the Zicboz / Zicbom CSR gate helpers.
+pub mod cbo_gates;

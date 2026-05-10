@@ -432,6 +432,26 @@ impl CacheSim {
         self.install_line_tracked(addr, is_write, next_level_latency)
     }
 
+    /// Writes back the cache line at `addr` if dirty and clears the dirty
+    /// bit, keeping the line valid. Used by Zicbom `cbo.clean`. Returns true
+    /// if the line was present.
+    pub fn clean_line(&mut self, addr: u64) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let set_index = ((addr as usize) / self.line_bytes) % self.num_sets;
+        let tag = addr / (self.line_bytes * self.num_sets) as u64;
+        let base_idx = set_index * self.ways;
+        for i in 0..self.ways {
+            let idx = base_idx + i;
+            if self.lines[idx].valid && self.lines[idx].tag == tag {
+                self.lines[idx].dirty = false;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Invalidates the cache line containing the specified address.
     ///
     /// Used by the inclusive cache policy to back-invalidate L1 when L2 evicts a line.

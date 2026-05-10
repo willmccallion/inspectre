@@ -622,13 +622,15 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             i_funct3::FENCE => c.system_op = SystemOp::Fence,
             i_funct3::FENCE_I => c.system_op = SystemOp::FenceI,
             i_funct3::CBO => {
-                // Zicboz: cbo.zero has imm[11:0]=CBO_ZERO_IMM and rd=x0. Other
-                // CBO encodings (cbo.inval/clean/flush from Zicbom) are not
-                // implemented and trap as illegal.
-                if d.imm == zicboz::CBO_ZERO_IMM && d.rd.is_zero() {
-                    c.system_op = SystemOp::CboZero;
-                } else {
+                if !d.rd.is_zero() {
                     return Err(Trap::IllegalInstruction(inst));
+                }
+                match d.imm {
+                    zicboz::CBO_ZERO_IMM => c.system_op = SystemOp::CboZero,
+                    zicboz::CBO_INVAL_IMM => c.system_op = SystemOp::CboInval,
+                    zicboz::CBO_CLEAN_IMM => c.system_op = SystemOp::CboClean,
+                    zicboz::CBO_FLUSH_IMM => c.system_op = SystemOp::CboFlush,
+                    _ => return Err(Trap::IllegalInstruction(inst)),
                 }
             }
             _ => return Err(Trap::IllegalInstruction(inst)),
