@@ -102,7 +102,11 @@ examples: software
 
 linux:
 	@printf "$(GREEN)Building Linux kernel and rootfs…$(RESET)\n"
+ifeq ($(RVSIM_FHS_ACTIVE),)
+	nix run .\#fhs -- -c '$(MAKE) -C software linux'
+else
 	$(MAKE) -C software linux
+endif
 
 # Install Python bindings in editable/dev mode via maturin
 python:

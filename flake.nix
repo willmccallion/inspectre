@@ -15,7 +15,40 @@
         # native build and fails with "cannot run C compiled programs".
         riscvGcc = pkgs.pkgsCross.riscv64-embedded.buildPackages.gcc;
         riscvBinutils = pkgs.pkgsCross.riscv64-embedded.buildPackages.binutils;
+
+        # Buildroot insists on /usr/bin/file (libtool legacy); on NixOS
+        # there is no /usr/bin, so building Linux requires a FHS-shaped
+        # filesystem.  buildFHSEnv composes one via bubblewrap.  The
+        # `linux` Makefile target re-execs through this shell when not
+        # already inside it (sentinel: RVSIM_FHS_ACTIVE=1).
+        fhsEnv = pkgs.buildFHSEnv {
+          name = "rvsim-fhs";
+          targetPkgs = pkgs: with pkgs; [
+            bash coreutils findutils gnused gawk gnugrep gnutar gzip bzip2 xz
+            which patch diffutils
+            gnumake gcc binutils pkg-config
+            file bc cpio unzip rsync perl wget ncurses
+            flex bison elfutils openssl
+            python3 git curl
+          ];
+          runScript = "bash";
+          profile = ''
+            export RVSIM_FHS_ACTIVE=1
+            # Activate the project's .venv if it exists so the rvsim Python
+            # bindings (installed via maturin develop) are importable from
+            # inside the FHS env. The venv's python is a /nix/store symlink
+            # which bwrap exposes natively.
+            if [ -f "$PWD/.venv/bin/activate" ]; then
+              # shellcheck disable=SC1091
+              . "$PWD/.venv/bin/activate"
+            fi
+          '';
+        };
       in {
+        packages = {
+          fhs = fhsEnv;
+        };
+
         devShells.default = pkgs.mkShell {
           name = "rvsim";
 
