@@ -8,6 +8,11 @@
 //!
 //! Constructed with a [`HartId`] that the `mhartid` CSR reports.
 
+pub mod csr;
+pub mod lifecycle;
+pub mod reservation;
+pub mod trap;
+
 use crate::common::{HartId, PhysAddr, RegisterFile};
 use crate::core::arch::csr::Csrs;
 use crate::core::arch::mode::PrivilegeMode;

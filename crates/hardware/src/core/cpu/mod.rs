@@ -77,35 +77,22 @@ unsafe impl Send for Cpu {}
 unsafe impl Sync for Cpu {}
 
 impl Cpu {
-    /// Cache line size for reservation granularity (64 bytes)
-    const RESERVATION_GRANULE: u64 = 64;
-
-    /// Aligns an address to the reservation granule (cache line boundary)
-    #[inline]
-    const fn align_reservation_address(addr: PhysAddr) -> PhysAddr {
-        PhysAddr(addr.0 & !(Self::RESERVATION_GRANULE - 1))
-    }
-
-    /// Sets a load reservation at the given address (cache-line aligned)
+    /// Sets a load reservation at the given address (cache-line aligned).
     #[inline]
     pub(crate) const fn set_reservation(&mut self, addr: PhysAddr) {
-        self.hart.load_reservation = Some(Self::align_reservation_address(addr));
+        self.hart.set_reservation(addr);
     }
 
-    /// Checks if a reservation exists for the given address
+    /// Returns `true` when a reservation covers `addr` (same cache line).
     #[inline]
     pub(crate) const fn check_reservation(&self, addr: PhysAddr) -> bool {
-        if let Some(reserved_addr) = self.hart.load_reservation {
-            reserved_addr.0 == Self::align_reservation_address(addr).0
-        } else {
-            false
-        }
+        self.hart.check_reservation(addr)
     }
 
-    /// Clears the load reservation
+    /// Clears the load reservation.
     #[inline]
     pub(crate) const fn clear_reservation(&mut self) {
-        self.hart.load_reservation = None;
+        self.hart.clear_reservation();
     }
 
     /// Creates a new CPU instance with the specified `SoC` and configuration.
@@ -271,9 +258,9 @@ impl Cpu {
     }
 
     /// Dumps the current CPU state (PC and registers) to stdout.
+    #[inline]
     pub fn dump_state(&self) {
-        println!("PC = {:#018x}", self.hart.pc);
-        self.hart.regs.dump();
+        self.hart.dump_state();
     }
 }
 
