@@ -38,7 +38,7 @@ pub fn rename_stage<E: ExecutionEngine>(
     for id in entries {
         if budget == 0 {
             if input.is_empty() {
-                cpu.stats.stalls_dispatch += 1;
+                cpu.soc.stats.stalls_dispatch += 1;
             }
             input.push(id);
             continue;
@@ -51,7 +51,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 && engine.checkpoint_count() > 0
                 && engine.checkpoint_table().is_full()
             {
-                cpu.stats.stalls_checkpoint += 1;
+                cpu.soc.stats.stalls_checkpoint += 1;
                 // Set budget=0 so remaining iterations also push back to input.
                 budget = 0;
                 input.push(id);
@@ -276,7 +276,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 vec_frm: cpu.hart.csrs.frm,
             };
 
-            trace_rename!(cpu.trace;
+            trace_rename!(cpu.soc.config.general.trace_instructions;
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.rob_tag.0,
                 rd         = entry.rd.as_usize(),
@@ -368,7 +368,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 vec_frm: cpu.hart.csrs.frm,
             };
 
-            trace_rename!(cpu.trace;
+            trace_rename!(cpu.soc.config.general.trace_instructions;
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.rob_tag.0,
                 rd         = entry.rd.as_usize(),

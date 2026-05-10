@@ -41,7 +41,7 @@ pub fn memory2_stage(
 
     while let Some(mem) = iter.next() {
         if let Some(ref trap) = mem.trap {
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "M2",
                 pc      = %crate::trace::Hex(mem.pc),
@@ -190,7 +190,7 @@ pub fn memory2_stage(
                         }
                     }
 
-                    trace_fwd!(cpu.trace;
+                    trace_fwd!(cpu.soc.config.general.trace_instructions;
                         event           = "forward",
                         load_pc         = %crate::trace::Hex(mem.pc),
                         load_tag        = mem.rob_tag.0,
@@ -200,7 +200,7 @@ pub fn memory2_stage(
                         forwarded_val   = %crate::trace::Hex(ld),
                         "M2: store-to-load forwarding HIT"
                     );
-                    trace_mem!(cpu.trace;
+                    trace_mem!(cpu.soc.config.general.trace_instructions;
                         stage       = "M2",
                         rob_tag     = mem.rob_tag.0,
                         pc          = %crate::trace::Hex(mem.pc),
@@ -213,7 +213,7 @@ pub fn memory2_stage(
                     );
                 }
                 ForwardResult::Stall => {
-                    trace_fwd!(cpu.trace;
+                    trace_fwd!(cpu.soc.config.general.trace_instructions;
                         event           = "stall",
                         load_pc         = %crate::trace::Hex(mem.pc),
                         load_tag        = mem.rob_tag.0,
@@ -227,7 +227,7 @@ pub fn memory2_stage(
                     return violation;
                 }
                 ForwardResult::Miss => {
-                    trace_fwd!(cpu.trace;
+                    trace_fwd!(cpu.soc.config.general.trace_instructions;
                         event   = "miss",
                         load_pc = %crate::trace::Hex(mem.pc),
                         load_tag = mem.rob_tag.0,
@@ -302,7 +302,7 @@ pub fn memory2_stage(
                 lq.fill_data(mem.rob_tag, lq_elem, ld);
             }
 
-            trace_mem!(cpu.trace;
+            trace_mem!(cpu.soc.config.general.trace_instructions;
                 stage     = "M2",
                 rob_tag   = mem.rob_tag.0,
                 pc        = %crate::trace::Hex(mem.pc),
@@ -328,7 +328,7 @@ pub fn memory2_stage(
                 && let Some(violating_tag) =
                     lq.check_ordering_violation(raw_paddr, mem.ctrl.width, mem.rob_tag)
             {
-                trace_fwd!(cpu.trace;
+                trace_fwd!(cpu.soc.config.general.trace_instructions;
                     event             = "violation",
                     store_pc          = %crate::trace::Hex(mem.pc),
                     store_tag         = mem.rob_tag.0,
@@ -346,7 +346,7 @@ pub fn memory2_stage(
                 }
             }
 
-            trace_mem!(cpu.trace;
+            trace_mem!(cpu.soc.config.general.trace_instructions;
                 stage      = "M2",
                 rob_tag    = mem.rob_tag.0,
                 pc         = %crate::trace::Hex(mem.pc),
@@ -359,7 +359,7 @@ pub fn memory2_stage(
                 "M2: store resolved into store buffer (write deferred to commit)"
             );
         } else {
-            trace_mem!(cpu.trace;
+            trace_mem!(cpu.soc.config.general.trace_instructions;
                 stage   = "M2",
                 rob_tag = mem.rob_tag.0,
                 pc      = %crate::trace::Hex(mem.pc),

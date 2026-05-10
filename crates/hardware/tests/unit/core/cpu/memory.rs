@@ -171,7 +171,7 @@ fn test_memory_access_with_different_access_types() {
 #[test]
 fn test_cache_stats_updated() {
     let mut cpu = create_test_cpu();
-    let initial_hits = cpu.stats.icache_hits;
+    let initial_hits = cpu.soc.stats.icache_hits;
 
     cpu.simulate_memory_access(
         rvsim_core::common::PhysAddr::new(0x8000_0000u64),
@@ -179,7 +179,7 @@ fn test_cache_stats_updated() {
     );
 
     // Stats might be updated (at least verify they're accessible)
-    assert!(cpu.stats.icache_hits >= initial_hits);
+    assert!(cpu.soc.stats.icache_hits >= initial_hits);
 }
 
 #[test]
@@ -187,16 +187,16 @@ fn test_l1_icache_enabled_hit_tracking() {
     let mut cpu = create_test_cpu();
     cpu.core.l1_i_cache.enabled = true;
 
-    let initial_hits = cpu.stats.icache_hits;
-    let initial_misses = cpu.stats.icache_misses;
+    let initial_hits = cpu.soc.stats.icache_hits;
+    let initial_misses = cpu.soc.stats.icache_misses;
 
     // Access the same address twice - first should miss, second should hit
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
     cpu.simulate_memory_access(paddr, AccessType::Fetch);
-    let after_first = cpu.stats.icache_misses;
+    let after_first = cpu.soc.stats.icache_misses;
 
     cpu.simulate_memory_access(paddr, AccessType::Fetch);
-    let after_second = cpu.stats.icache_hits;
+    let after_second = cpu.soc.stats.icache_hits;
 
     // At least one access should have been tracked
     assert!(after_first > initial_misses || after_second > initial_hits);
@@ -207,16 +207,16 @@ fn test_l1_dcache_enabled_hit_tracking() {
     let mut cpu = create_test_cpu();
     cpu.core.l1_d_cache.enabled = true;
 
-    let initial_hits = cpu.stats.dcache_hits;
-    let initial_misses = cpu.stats.dcache_misses;
+    let initial_hits = cpu.soc.stats.dcache_hits;
+    let initial_misses = cpu.soc.stats.dcache_misses;
 
     // Access the same address twice - first should miss, second should hit
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
     cpu.simulate_memory_access(paddr, AccessType::Read);
-    let after_first = cpu.stats.dcache_misses;
+    let after_first = cpu.soc.stats.dcache_misses;
 
     cpu.simulate_memory_access(paddr, AccessType::Read);
-    let after_second = cpu.stats.dcache_hits;
+    let after_second = cpu.soc.stats.dcache_hits;
 
     // At least one access should have been tracked
     assert!(after_first > initial_misses || after_second > initial_hits);
@@ -228,14 +228,14 @@ fn test_l2_cache_enabled() {
     cpu.core.l1_d_cache.enabled = false;
     cpu.core.l2_cache.enabled = true;
 
-    let initial_l2_hits = cpu.stats.l2_hits;
-    let initial_l2_misses = cpu.stats.l2_misses;
+    let initial_l2_hits = cpu.soc.stats.l2_hits;
+    let initial_l2_misses = cpu.soc.stats.l2_misses;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
     cpu.simulate_memory_access(paddr, AccessType::Read);
 
     // L2 stats should be updated
-    assert!(cpu.stats.l2_hits > initial_l2_hits || cpu.stats.l2_misses > initial_l2_misses);
+    assert!(cpu.soc.stats.l2_hits > initial_l2_hits || cpu.soc.stats.l2_misses > initial_l2_misses);
 }
 
 #[test]
@@ -245,14 +245,14 @@ fn test_l3_cache_enabled() {
     cpu.core.l2_cache.enabled = false;
     cpu.soc.l3_cache.enabled = true;
 
-    let initial_l3_hits = cpu.stats.l3_hits;
-    let initial_l3_misses = cpu.stats.l3_misses;
+    let initial_l3_hits = cpu.soc.stats.l3_hits;
+    let initial_l3_misses = cpu.soc.stats.l3_misses;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
     cpu.simulate_memory_access(paddr, AccessType::Read);
 
     // L3 stats should be updated
-    assert!(cpu.stats.l3_hits > initial_l3_hits || cpu.stats.l3_misses > initial_l3_misses);
+    assert!(cpu.soc.stats.l3_hits > initial_l3_hits || cpu.soc.stats.l3_misses > initial_l3_misses);
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn test_cache_write_access_tracking() {
     }
 
     // Verify cache is tracking write accesses
-    assert!(cpu.stats.dcache_hits > 0 || cpu.stats.dcache_misses > 0);
+    assert!(cpu.soc.stats.dcache_hits > 0 || cpu.soc.stats.dcache_misses > 0);
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn test_cache_hierarchy_miss_propagation() {
     cpu.simulate_memory_access(paddr, AccessType::Read);
 
     // At least L1 should have recorded a miss
-    assert!(cpu.stats.dcache_misses > 0);
+    assert!(cpu.soc.stats.dcache_misses > 0);
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn test_different_addresses_different_cache_lines() {
     }
 
     // Verify cache is tracking different accesses
-    assert!(cpu.stats.dcache_misses > 0);
+    assert!(cpu.soc.stats.dcache_misses > 0);
 }
 
 #[test]
@@ -372,13 +372,13 @@ fn test_instruction_and_data_caches_independent() {
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
-    let initial_icache_stats = cpu.stats.icache_hits + cpu.stats.icache_misses;
-    let initial_dcache_stats = cpu.stats.dcache_hits + cpu.stats.dcache_misses;
+    let initial_icache_stats = cpu.soc.stats.icache_hits + cpu.soc.stats.icache_misses;
+    let initial_dcache_stats = cpu.soc.stats.dcache_hits + cpu.soc.stats.dcache_misses;
 
     // Access as instruction
     cpu.simulate_memory_access(paddr, AccessType::Fetch);
-    let after_fetch_icache = cpu.stats.icache_hits + cpu.stats.icache_misses;
-    let after_fetch_dcache = cpu.stats.dcache_hits + cpu.stats.dcache_misses;
+    let after_fetch_icache = cpu.soc.stats.icache_hits + cpu.soc.stats.icache_misses;
+    let after_fetch_dcache = cpu.soc.stats.dcache_hits + cpu.soc.stats.dcache_misses;
 
     // Instruction cache should be updated, data cache should not
     assert!(after_fetch_icache > initial_icache_stats);
@@ -386,7 +386,7 @@ fn test_instruction_and_data_caches_independent() {
 
     // Access as data
     cpu.simulate_memory_access(paddr, AccessType::Read);
-    let after_read_dcache = cpu.stats.dcache_hits + cpu.stats.dcache_misses;
+    let after_read_dcache = cpu.soc.stats.dcache_hits + cpu.soc.stats.dcache_misses;
 
     // Data cache should now be updated
     assert!(after_read_dcache > after_fetch_dcache);
@@ -433,14 +433,14 @@ fn test_cache_disabled_no_stats_update() {
     cpu.core.l2_cache.enabled = false;
     cpu.soc.l3_cache.enabled = false;
 
-    let initial_icache_hits = cpu.stats.icache_hits;
-    let initial_dcache_hits = cpu.stats.dcache_hits;
+    let initial_icache_hits = cpu.soc.stats.icache_hits;
+    let initial_dcache_hits = cpu.soc.stats.dcache_hits;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
     cpu.simulate_memory_access(paddr, AccessType::Fetch);
     cpu.simulate_memory_access(paddr, AccessType::Read);
 
     // When caches are disabled, cache stats should not increase
-    assert_eq!(cpu.stats.icache_hits, initial_icache_hits);
-    assert_eq!(cpu.stats.dcache_hits, initial_dcache_hits);
+    assert_eq!(cpu.soc.stats.icache_hits, initial_icache_hits);
+    assert_eq!(cpu.soc.stats.dcache_hits, initial_dcache_hits);
 }

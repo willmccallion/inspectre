@@ -479,6 +479,9 @@ pub struct Config {
     pub cache: CacheHierarchyConfig,
     /// Pipeline and branch predictor configuration
     pub pipeline: PipelineConfig,
+    /// ISA capability flags (vector ELEN/Zvfh, future Zvk*/H/Sstc/...).
+    #[serde(default)]
+    pub isa: crate::isa::config::IsaConfig,
 }
 
 /// General simulation settings and options.
@@ -1111,18 +1114,6 @@ pub struct PipelineConfig {
     #[serde(default = "PipelineConfig::default_vlen")]
     pub vlen: usize,
 
-    /// Maximum element width in bits (ELEN). Must be 32 or 64.
-    /// ELEN=32 corresponds to Zve32x/Zve32f profiles. Default: 64.
-    #[serde(default = "PipelineConfig::default_elen")]
-    pub elen: usize,
-
-    /// Enable Zvfh (half-precision vector FP) extension. Default: true —
-    /// the project ships a Zvfh implementation, so the simulated CPU
-    /// advertises support by default. Set false to model a non-Zvfh CPU
-    /// (e.g., for testing illegal-instruction trap behavior).
-    #[serde(default = "PipelineConfig::default_zvfh")]
-    pub zvfh: bool,
-
     /// Number of vector execution lanes. Defaults to vlen/64 (min 1).
     #[serde(default)]
     pub num_vec_lanes: Option<usize>,
@@ -1217,11 +1208,6 @@ impl PipelineConfig {
         128
     }
 
-    /// Returns the default ELEN (64 for standard RV64V).
-    const fn default_elen() -> usize {
-        64
-    }
-
     /// Returns the default vector PRF size.
     const fn default_prf_vpr_size() -> usize {
         64
@@ -1235,11 +1221,6 @@ impl PipelineConfig {
     /// Returns the default Vector Store Buffer size.
     const fn default_vec_store_buffer_size() -> usize {
         defaults::VEC_STORE_BUFFER_SIZE
-    }
-
-    /// Returns the default Zvfh setting (the simulator ships a Zvfh impl).
-    const fn default_zvfh() -> bool {
-        true
     }
 }
 
@@ -1271,8 +1252,6 @@ impl Default for PipelineConfig {
             mem_dep_predictor: MemDepPredictor::default(),
             store_set: StoreSetConfig::default(),
             vlen: 128,
-            elen: 64,
-            zvfh: true,
             num_vec_lanes: None,
             prf_vpr_size: 64,
             vec_chaining: true,

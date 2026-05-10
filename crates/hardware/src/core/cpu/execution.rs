@@ -21,14 +21,13 @@ impl Cpu {
     ///
     /// Returns [`SimError::KernelPanic`] when the bus panic sentinel fires.
     pub fn pre_tick(&mut self) -> Result<bool, SimError> {
-        if let Some(code) = self.soc.check_exit() {
-            self.exit_code = Some(code);
+        if self.soc.check_exit().is_some() {
             return Ok(true);
         }
 
         if self.soc.check_kernel_panic() {
-            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.stats.cycles);
-            if self.stats.cycles.saturating_sub(detected_at) >= 10_000 {
+            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.soc.stats.cycles);
+            if self.soc.stats.cycles.saturating_sub(detected_at) >= 10_000 {
                 return Err(SimError::KernelPanic { cycle: detected_at });
             }
         }
@@ -56,13 +55,13 @@ impl Cpu {
                 };
 
                 if inst == WFI_INSTRUCTION {
-                    trace_trap!(self.trace;
+                    trace_trap!(self.soc.config.general.trace_instructions;
                         event = "wfi-wait",
                         pc    = %crate::trace::Hex(self.hart.pc),
                         "CPU stuck in WFI — waiting for interrupt"
                     );
                 } else {
-                    trace_trap!(self.trace;
+                    trace_trap!(self.soc.config.general.trace_instructions;
                         event = "potential-hang",
                         pc    = %crate::trace::Hex(self.hart.pc),
                         inst  = inst,
@@ -111,7 +110,7 @@ impl Cpu {
         // OpenSBI injects STIP via `csrw mip`), leave STIP entirely under
         // software control so that M-mode timer handlers work correctly.
         if (self.hart.csrs.menvcfg & csr::MENVCFG_STCE) != 0 {
-            let mtime = self.stats.cycles / self.clint_divider;
+            let mtime = self.soc.stats.cycles / self.soc.config.system.clint_divider;
             if mtime >= self.hart.csrs.stimecmp {
                 mip |= csr::MIP_STIP;
             } else {
@@ -121,7 +120,7 @@ impl Cpu {
 
         self.hart.csrs.mip = mip;
 
-        self.stats.cycles += 1;
+        self.soc.stats.cycles += 1;
         self.track_mode_cycles();
 
         Ok(false)
@@ -131,9 +130,9 @@ impl Cpu {
     pub fn post_tick(&mut self, prev_priv: PrivilegeMode) {
         self.hart.regs.write(abi::REG_ZERO, 0);
 
-        if self.trace {
+        if self.soc.config.general.trace_instructions {
             if self.hart.privilege != prev_priv {
-                trace_trap!(self.trace;
+                trace_trap!(self.soc.config.general.trace_instructions;
                     event      = "mode-switch",
                     from_mode  = prev_priv.name(),
                     to_mode    = self.hart.privilege.name(),
@@ -142,10 +141,10 @@ impl Cpu {
                 );
             }
 
-            if self.stats.cycles.is_multiple_of(STATUS_UPDATE_INTERVAL) {
+            if self.soc.stats.cycles.is_multiple_of(STATUS_UPDATE_INTERVAL) {
                 ::tracing::debug!(
                     target: "rvsim::cpu",
-                    cycles = self.stats.cycles,
+                    cycles = self.soc.stats.cycles,
                     pc     = %crate::trace::Hex(self.hart.pc),
                     mode   = self.hart.privilege.name(),
                     "CPU status"
@@ -157,9 +156,9 @@ impl Cpu {
     /// Tracks cycles spent in each privilege mode for statistics.
     const fn track_mode_cycles(&mut self) {
         match self.hart.privilege {
-            PrivilegeMode::User => self.stats.cycles_user += 1,
-            PrivilegeMode::Supervisor => self.stats.cycles_kernel += 1,
-            PrivilegeMode::Machine => self.stats.cycles_machine += 1,
+            PrivilegeMode::User => self.soc.stats.cycles_user += 1,
+            PrivilegeMode::Supervisor => self.soc.stats.cycles_kernel += 1,
+            PrivilegeMode::Machine => self.soc.stats.cycles_machine += 1,
         }
     }
 }
@@ -177,15 +176,15 @@ mod tests {
 
         cpu.hart.privilege = PrivilegeMode::User;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.stats.cycles_user, 1);
+        assert_eq!(cpu.soc.stats.cycles_user, 1);
 
         cpu.hart.privilege = PrivilegeMode::Supervisor;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.stats.cycles_kernel, 1);
+        assert_eq!(cpu.soc.stats.cycles_kernel, 1);
 
         cpu.hart.privilege = PrivilegeMode::Machine;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.stats.cycles_machine, 1);
+        assert_eq!(cpu.soc.stats.cycles_machine, 1);
     }
 
     #[test]

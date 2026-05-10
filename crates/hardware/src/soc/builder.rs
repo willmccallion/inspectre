@@ -14,19 +14,28 @@ use crate::soc::memory::buffer::DramBuffer;
 use crate::soc::memory::controller::{
     DramConfig, DramController, MemoryController, SimpleController,
 };
+use crate::stats::SimStats;
 use std::fs;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The simulated System-on-Chip.
 ///
-/// Owns the IO interconnect, memory controller, shared last-level cache, and
-/// the exit-request flag shared with devices like `SysCon` and `Htif`. Also
-/// carries the master cycle counter that every subsystem reads from for
-/// time-correlated state (e.g. CLINT computes `mtime = cycle / divider`).
+/// Owns the simulator [`Config`] (single source of truth for ISA capability
+/// flags, system parameters, and pipeline knobs), the IO interconnect, the
+/// memory controller, the shared last-level cache, and the exit-request
+/// flag shared with devices like `SysCon` and `Htif`. Also carries the
+/// master cycle counter that every subsystem reads from for time-correlated
+/// state (e.g. CLINT computes `mtime = cycle / divider`).
 ///
 /// Cores and coherence are added in later phases of the multi-core migration.
 pub struct Soc {
+    /// Simulator configuration. Single source of truth for ISA capability
+    /// flags (vector ELEN/Zvfh, future Zvk*), pipeline knobs (width, ROB
+    /// size, …), system parameters (RAM base, CLINT divider, …), and cache
+    /// hierarchy parameters. Components read these via `soc.config.*`
+    /// rather than caching duplicates as their own fields.
+    pub config: Config,
     /// Master clock; every subsystem reads from this.
     pub cycle: u64,
     /// IO interconnect; routes accesses to RAM and MMIO devices.
@@ -35,6 +44,14 @@ pub struct Soc {
     pub mem_controller: Box<dyn MemoryController + Send + Sync>,
     /// Shared L3 cache (last-level cache; future shared LLC for multi-core).
     pub l3_cache: CacheSim,
+    /// Performance counters and other observability stats for the
+    /// simulated machine.
+    pub stats: SimStats,
+    /// Optional buffered writer for the commit log (enabled by the
+    /// `commit-log` feature). IO-side observability; lives here because the
+    /// commit stage writes to it.
+    #[cfg(feature = "commit-log")]
+    pub commit_log: Option<std::io::BufWriter<std::fs::File>>,
     /// Atomic exit code: when not `u64::MAX`, simulation should stop and use this as exit code.
     pub exit_request: Arc<AtomicU64>,
 }
@@ -45,8 +62,26 @@ impl std::fmt::Debug for Soc {
             .field("cycle", &self.cycle)
             .field("bus", &self.bus)
             .field("l3_cache", &self.l3_cache)
+            .field("stats", &self.stats)
             .field("exit_request", &self.exit_request)
             .finish_non_exhaustive()
+    }
+}
+
+impl Soc {
+    /// Atomically takes the exit code if simulation has been signalled to
+    /// exit. Returns `None` if no exit is pending. Clears the exit-request
+    /// slot on read so a subsequent call returns `None` until a device
+    /// signals again.
+    pub fn take_exit(&self) -> Option<u64> {
+        let val = self.exit_request.swap(u64::MAX, Ordering::Relaxed);
+        if val == u64::MAX { None } else { Some(val) }
+    }
+
+    /// Signals an exit with the given code. Equivalent to a device writing
+    /// the code into the shared exit-request slot.
+    pub fn signal_exit(&self, code: u64) {
+        self.exit_request.store(code, Ordering::Relaxed);
     }
 }
 
@@ -116,7 +151,17 @@ impl Soc {
 
         let l3_cache = CacheSim::new(&config.cache.l3);
 
-        Self { cycle: 0, bus, mem_controller, l3_cache, exit_request }
+        Self {
+            config: config.clone(),
+            cycle: 0,
+            bus,
+            mem_controller,
+            l3_cache,
+            stats: SimStats::default(),
+            #[cfg(feature = "commit-log")]
+            commit_log: None,
+            exit_request,
+        }
     }
 
     /// Loads a binary into memory at the given physical address.

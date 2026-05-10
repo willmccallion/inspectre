@@ -294,7 +294,7 @@ impl ExecutionEngine for O3Engine {
         // Squash recovery: ROB read ports are busy with reclaim / rename rebuild.
         if self.squash_stall_remaining > 0 {
             self.squash_stall_remaining -= 1;
-            cpu.stats.stalls_squash += 1;
+            cpu.soc.stats.stalls_squash += 1;
         }
 
         let pc_before_commit = cpu.hart.pc;
@@ -412,12 +412,12 @@ impl ExecutionEngine for O3Engine {
                     0,
                 );
 
-                if cpu.core.inclusion_policy == crate::config::InclusionPolicy::Exclusive
+                if cpu.soc.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
                     && cpu.core.l2_cache.enabled
                     && let Some(ev) = evicted
                 {
                     let _ = cpu.core.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
-                    cpu.stats.exclusive_l1_to_l2_swaps += 1;
+                    cpu.soc.stats.exclusive_l1_to_l2_swaps += 1;
                 }
 
                 for waiter in mshr_entry.waiters {
@@ -455,9 +455,9 @@ impl ExecutionEngine for O3Engine {
             // keep_tag must be a tag actually in the ROB; synthetic `tag-1` could be a use-after-free.
             let keep_tag = self.rob.prev_tag_of(violating_tag);
 
-            cpu.stats.mem_ordering_violations += 1;
-            cpu.stats.pipeline_flushes += 1;
-            cpu.stats.stalls_control += 1;
+            cpu.soc.stats.mem_ordering_violations += 1;
+            cpu.soc.stats.pipeline_flushes += 1;
+            cpu.soc.stats.stalls_control += 1;
 
             if let Some(keep_tag) = keep_tag {
                 for entry in self.rob.iter_after(keep_tag) {
@@ -467,7 +467,7 @@ impl ExecutionEngine for O3Engine {
                     }
                 }
                 let squashed = self.rob.iter_after(keep_tag).count();
-                cpu.stats.misprediction_penalty += squashed as u64;
+                cpu.soc.stats.misprediction_penalty += squashed as u64;
 
                 self.issue_queue.flush_after(keep_tag);
                 self.rob.flush_after(keep_tag);
@@ -488,7 +488,7 @@ impl ExecutionEngine for O3Engine {
                 // The violating load is not a branch, so checkpoint rebuild always applies.
                 let surviving = self.rob.len();
                 self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
-                cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
+                cpu.soc.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
             } else {
                 // Violating load is at ROB head (or older entry committed): full flush.
                 for entry in self.rob.iter_all() {
@@ -498,7 +498,7 @@ impl ExecutionEngine for O3Engine {
                     }
                 }
                 let squashed = self.rob.len();
-                cpu.stats.misprediction_penalty += squashed as u64;
+                cpu.soc.stats.misprediction_penalty += squashed as u64;
 
                 self.issue_queue.flush();
                 self.rob.flush_all();
@@ -542,7 +542,7 @@ impl ExecutionEngine for O3Engine {
             });
 
         if mem1_busy {
-            cpu.stats.stalls_mem += 1;
+            cpu.soc.stats.stalls_mem += 1;
         } else {
             let cancelled = memory1::memory1_stage(
                 cpu,
@@ -560,7 +560,7 @@ impl ExecutionEngine for O3Engine {
         let mem_backpressured = !self.execute_mem1.is_empty();
 
         if mem_backpressured {
-            cpu.stats.stalls_backpressure += 1;
+            cpu.soc.stats.stalls_backpressure += 1;
         }
 
         {
@@ -571,7 +571,7 @@ impl ExecutionEngine for O3Engine {
                     let entry = pr.entry;
                     let fu_type = pr.fu_type;
 
-                    cpu.stats.fu_utilization[fu_type as usize] += 1;
+                    cpu.soc.stats.fu_utilization[fu_type as usize] += 1;
 
                     if entry.ctrl.mem_read
                         || entry.ctrl.mem_write
@@ -700,7 +700,7 @@ impl ExecutionEngine for O3Engine {
                     && is_vec_store(entry.ctrl.vec_op)
                     && self.vec_store_buffer.free_slots() == 0
                 {
-                    cpu.stats.stalls_fu_structural += 1;
+                    cpu.soc.stats.stalls_fu_structural += 1;
                     let ok = self.issue_queue.dispatch(
                         entry,
                         &self.rob,
@@ -714,7 +714,7 @@ impl ExecutionEngine for O3Engine {
                 }
 
                 if !self.fu_pool.has_free(fu_type, now) {
-                    cpu.stats.stalls_fu_structural += 1;
+                    cpu.soc.stats.stalls_fu_structural += 1;
                     stalled_fu = true;
                     let ok = self.issue_queue.dispatch(
                         entry,
@@ -878,8 +878,8 @@ impl ExecutionEngine for O3Engine {
                             saved.vec_vstart,
                             saved.vec_vxrm,
                             saved.vec_frm,
-                            cpu.core.elen,
-                            cpu.core.zvfh,
+                            cpu.soc.config.isa.vector.elen,
+                            cpu.soc.config.isa.vector.zvfh,
                             saved,
                         )
                     };
@@ -1133,22 +1133,22 @@ impl ExecutionEngine for O3Engine {
             }
 
             if issued_count == 0 && !stalled_fu && !self.issue_queue.is_empty() {
-                cpu.stats.stalls_data += 1;
+                cpu.soc.stats.stalls_data += 1;
             }
         }
 
         if let Some(keep_tag) = flush_keep_tag {
-            cpu.stats.stalls_control += 1;
-            cpu.stats.pipeline_flushes += 1;
+            cpu.soc.stats.stalls_control += 1;
+            cpu.soc.stats.pipeline_flushes += 1;
 
             if let Some(entry) = self.rob.find_entry(keep_tag) {
                 if matches!(entry.ctrl.control_flow, ControlFlow::Branch | ControlFlow::Jump) {
-                    cpu.stats.flushes_branch += 1;
+                    cpu.soc.stats.flushes_branch += 1;
                 } else {
-                    cpu.stats.flushes_system += 1;
+                    cpu.soc.stats.flushes_system += 1;
                 }
             } else {
-                cpu.stats.flushes_system += 1;
+                cpu.soc.stats.flushes_system += 1;
             }
 
             rename_output.clear();
@@ -1159,7 +1159,7 @@ impl ExecutionEngine for O3Engine {
             let squashed: usize;
             if keep_in_rob {
                 squashed = self.rob.iter_after(keep_tag).count();
-                cpu.stats.misprediction_penalty += squashed as u64;
+                cpu.soc.stats.misprediction_penalty += squashed as u64;
                 for entry in self.rob.iter_after(keep_tag) {
                     self.free_list.reclaim(entry.phys_dst);
                     for i in 0..entry.vec_dst_count as usize {
@@ -1182,7 +1182,7 @@ impl ExecutionEngine for O3Engine {
                     }
                 }
                 squashed = self.rob.len();
-                cpu.stats.misprediction_penalty += squashed as u64;
+                cpu.soc.stats.misprediction_penalty += squashed as u64;
                 self.issue_queue.flush();
                 self.rob.flush_all();
                 self.store_buffer.flush_speculative();
@@ -1212,13 +1212,13 @@ impl ExecutionEngine for O3Engine {
                 } else {
                     self.rebuild_rename_map();
                     self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
-                    cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
+                    cpu.soc.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
                 }
                 self.checkpoints.flush_after(keep_tag);
             } else {
                 self.rebuild_rename_map();
                 self.squash_stall_remaining = self.compute_squash_stall(squashed, surviving);
-                cpu.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
+                cpu.soc.stats.stalls_rename_rebuild += surviving.div_ceil(self.width.max(1)) as u64;
             }
             self.scoreboard.rebuild_from_rob(&self.rob);
         }
@@ -1242,10 +1242,10 @@ impl ExecutionEngine for O3Engine {
         }
 
         let mdp_stats = self.mdp.stats();
-        cpu.stats.mdp_predictions_bypass = mdp_stats.predictions_bypass;
-        cpu.stats.mdp_predictions_wait_all = mdp_stats.predictions_wait_all;
-        cpu.stats.mdp_predictions_wait_for = mdp_stats.predictions_wait_for;
-        cpu.stats.mdp_violations = mdp_stats.violations;
+        cpu.soc.stats.mdp_predictions_bypass = mdp_stats.predictions_bypass;
+        cpu.soc.stats.mdp_predictions_wait_all = mdp_stats.predictions_wait_all;
+        cpu.soc.stats.mdp_predictions_wait_for = mdp_stats.predictions_wait_for;
+        cpu.soc.stats.mdp_violations = mdp_stats.violations;
     }
 
     fn can_accept(&self) -> usize {
@@ -1369,6 +1369,10 @@ impl ExecutionEngine for O3Engine {
     }
 
     fn has_prf(&self) -> bool {
+        true
+    }
+
+    fn has_register_renaming(&self) -> bool {
         true
     }
 

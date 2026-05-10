@@ -81,15 +81,15 @@ impl PyCpu {
 
     /// Runs for up to `limit` cycles, checking Python signals every 10000 cycles.
     fn run_inner(&mut self, py: Python<'_>, limit: Option<u64>) -> PyResult<Option<u64>> {
-        let start = self.inner.cpu.stats.cycles;
+        let start = self.inner.cpu.soc.stats.cycles;
         loop {
             if let Some(max) = limit
-                && self.inner.cpu.stats.cycles.saturating_sub(start) >= max
+                && self.inner.cpu.soc.stats.cycles.saturating_sub(start) >= max
             {
                 let _ = std::io::stdout().flush();
                 return Ok(None);
             }
-            if self.inner.cpu.stats.cycles.is_multiple_of(10_000) {
+            if self.inner.cpu.soc.stats.cycles.is_multiple_of(10_000) {
                 py.check_signals()?;
                 let _ = std::io::stdout().flush();
             }
@@ -140,7 +140,7 @@ impl PyCpu {
                 return Ok(Some(code));
             }
 
-            let s = &self.inner.cpu.stats;
+            let s = &self.inner.cpu.soc.stats;
             eprint!(
                 "\r\x1b[36m[rvsim]\x1b[0m  {:>14} cycles  {:>14} insns",
                 fmt_commas(s.cycles),
@@ -238,18 +238,18 @@ impl PyCpu {
     /// Whether instruction tracing is enabled (read/write).
     #[getter]
     const fn trace(&self) -> bool {
-        self.inner.cpu.trace
+        self.inner.cpu.soc.config.general.trace_instructions
     }
 
     #[setter]
     const fn set_trace(&mut self, value: bool) {
-        self.inner.cpu.trace = value;
+        self.inner.cpu.soc.config.general.trace_instructions = value;
     }
 
     /// Performance statistics as a dict (read-only).
     #[getter]
     fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let s = PyStats::from(self.inner.cpu.stats.clone());
+        let s = PyStats::from(self.inner.cpu.soc.stats.clone());
         Ok(s.to_dict(py)?.into_bound(py).into_any().unbind())
     }
 
@@ -343,7 +343,7 @@ impl PyCpu {
                     pc,
                     raw: inst,
                     asm,
-                    cycles: self.inner.cpu.stats.cycles,
+                    cycles: self.inner.cpu.soc.stats.cycles,
                 }));
             }
         }
@@ -374,7 +374,7 @@ impl PyCpu {
         };
 
         if let Some(sections) = stats_sections {
-            let s = PyStats::from(self.inner.cpu.stats.clone());
+            let s = PyStats::from(self.inner.cpu.soc.stats.clone());
             if sections.is_empty() {
                 s.print();
             } else {
@@ -418,7 +418,7 @@ impl PyCpu {
             let exit = self.run_for_cycles(py, chunk)?;
             cycles_run += chunk;
 
-            let s = PyStats::from(self.inner.cpu.stats.clone());
+            let s = PyStats::from(self.inner.cpu.soc.stats.clone());
             snapshots.push(s.to_dict(py)?.into_bound(py).into_any().unbind());
 
             if exit.is_some() {
@@ -565,7 +565,7 @@ impl PyCpu {
     /// This performs a shallow clone of the latch vectors — it has no effect on
     /// simulation correctness or timing.
     fn pipeline_snapshot(&self) -> PyPipelineSnapshot {
-        let width = self.inner.cpu.core.pipeline_width;
+        let width = self.inner.cpu.soc.config.pipeline.width;
         PyPipelineSnapshot::new(self.inner.pipeline.snapshot(width))
     }
 
@@ -584,7 +584,7 @@ impl PyCpu {
         let _ = header.insert("pc".into(), serde_json::Value::from(cpu.hart.pc));
         let _ = header.insert("privilege".into(), serde_json::Value::from(cpu.hart.privilege.to_u8()));
         let _ = header.insert("direct_mode".into(), serde_json::Value::from(cpu.direct_mode));
-        let _ = header.insert("trace".into(), serde_json::Value::from(cpu.trace));
+        let _ = header.insert("trace".into(), serde_json::Value::from(cpu.soc.config.general.trace_instructions));
         let _ = header.insert("wfi_waiting".into(), serde_json::Value::from(cpu.hart.wfi_waiting));
         let _ = header.insert("wfi_pc".into(), serde_json::Value::from(cpu.hart.wfi_pc));
         let _ = header.insert("ram_start".into(), serde_json::Value::from(cpu.ram_start));
@@ -683,7 +683,7 @@ impl PyCpu {
         cpu.hart.pc = header["pc"].as_u64().unwrap_or(0);
         cpu.hart.privilege = PrivilegeMode::from_u8(header["privilege"].as_u64().unwrap_or(3) as u8);
         cpu.direct_mode = header["direct_mode"].as_bool().unwrap_or(false);
-        cpu.trace = header["trace"].as_bool().unwrap_or(false);
+        cpu.soc.config.general.trace_instructions = header["trace"].as_bool().unwrap_or(false);
         cpu.hart.wfi_waiting = header["wfi_waiting"].as_bool().unwrap_or(false);
         cpu.hart.wfi_pc = header["wfi_pc"].as_u64().unwrap_or(0);
 

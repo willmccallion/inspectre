@@ -31,27 +31,27 @@ impl Cpu {
                 let val_a0 = self.hart.regs.read(abi::REG_A0);
 
                 if val_a7 == sys_ops::SYS_EXIT {
-                    self.exit_code = Some(val_a0);
+                    self.soc.signal_exit(val_a0);
                     return;
                 } else if val_a0 == sys_ops::SYS_EXIT {
                     let val_a1 = self.hart.regs.read(abi::REG_A1);
-                    self.exit_code = Some(val_a1);
+                    self.soc.signal_exit(val_a1);
                     return;
                 }
 
                 eprintln!(
                     "\n[!] Unhandled ecall in direct mode: a7={val_a7} a0={val_a0} at PC {epc:#x}"
                 );
-                self.exit_code = Some(1);
+                self.soc.signal_exit(1);
                 return;
             }
 
             if matches!(cause, Trap::IllegalInstruction(0)) {
-                self.exit_code = Some(0);
+                self.soc.signal_exit(0);
                 return;
             }
             eprintln!("\n[!] Fatal trap in direct mode: {cause:?} at PC {epc:#x}");
-            self.exit_code = Some(1);
+            self.soc.signal_exit(1);
             return;
         }
 
@@ -65,7 +65,7 @@ impl Cpu {
         );
 
         if !is_timer && !is_ecall {
-            trace_trap!(self.trace;
+            trace_trap!(self.soc.config.general.trace_instructions;
                 event      = "taken",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?cause,
@@ -186,7 +186,7 @@ impl Cpu {
             self.hart.pc = target_pc;
         }
 
-        self.stats.traps_taken += 1;
+        self.soc.stats.traps_taken += 1;
     }
 
     /// Executes the `MRET` instruction (Return from Machine Mode).
@@ -258,7 +258,7 @@ mod tests {
         cpu.hart.regs.write(abi::REG_A0, 42);
 
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x1000);
-        assert_eq!(cpu.exit_code, Some(42));
+        assert_eq!(cpu.soc.check_exit(), Some(42));
     }
 
     #[test]
@@ -269,7 +269,7 @@ mod tests {
         let mut cpu = Cpu::new(soc, &config);
 
         cpu.trap(&Trap::IllegalInstruction(0), 0x1000);
-        assert_eq!(cpu.exit_code, Some(0));
+        assert_eq!(cpu.soc.check_exit(), Some(0));
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
         cpu.hart.csrs.mtvec = 0x8000_1000;
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
 
-        assert!(cpu.exit_code.is_none(), "should not be fatal when mtvec is set");
+        assert!(cpu.soc.check_exit().is_none(), "should not be fatal when mtvec is set");
         assert_eq!(cpu.hart.csrs.mepc, 0x400);
         assert_eq!(cpu.hart.csrs.mcause, 3);
         assert_eq!(cpu.hart.csrs.mtval, 0x400);
@@ -297,7 +297,7 @@ mod tests {
         let mut cpu = Cpu::new(soc, &config);
 
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
-        assert_eq!(cpu.exit_code, Some(1));
+        assert_eq!(cpu.soc.check_exit(), Some(1));
     }
 
     #[test]
@@ -310,7 +310,7 @@ mod tests {
         cpu.hart.csrs.mtvec = 0x8000_2000;
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x500);
 
-        assert!(cpu.exit_code.is_none());
+        assert!(cpu.soc.check_exit().is_none());
         assert_eq!(cpu.hart.csrs.mepc, 0x500);
         assert_eq!(cpu.hart.pc, 0x8000_2000);
     }

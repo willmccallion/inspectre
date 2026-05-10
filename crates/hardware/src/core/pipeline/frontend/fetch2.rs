@@ -51,7 +51,7 @@ pub fn fetch2_stage(
     // simulate_memory_access installs lines on miss, so a single probe is enough.
     let mut icache_penalty: u64 = 0;
     if cpu.core.l1_i_cache.enabled {
-        let line_mask = !(cpu.core.i_cache_line_bytes as u64 - 1);
+        let line_mask = !(cpu.core.l1_i_cache.line_bytes() as u64 - 1);
         let mut last_line: u64 = u64::MAX;
 
         for f1 in input.iter() {
@@ -81,7 +81,7 @@ pub fn fetch2_stage(
 
     for f1 in entries {
         if let Some(ref trap) = f1.trap {
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "F2",
                 pc      = %crate::trace::Hex(f1.pc),
@@ -152,7 +152,7 @@ pub fn fetch2_stage(
         };
 
         if let Some(t) = inst_trap {
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event   = "decode-trap",
                 stage   = "F2",
                 pc      = %crate::trace::Hex(f1.pc),
@@ -173,7 +173,7 @@ pub fn fetch2_stage(
             break;
         }
 
-        trace_fetch!(cpu.trace;
+        trace_fetch!(cpu.soc.config.general.trace_instructions;
             pc          = %crate::trace::Hex(f1.pc),
             inst        = inst,
             inst_size   = step.as_u64(),

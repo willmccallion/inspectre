@@ -60,7 +60,12 @@ impl<E: ExecutionEngine> Frontend<E> {
 
         // Gate decode on rename draining to avoid O(n²) regrowth of decode_rename.
         if self.decode_rename.is_empty() {
-            decode::decode_stage(cpu, &mut self.fetch2_decode, &mut self.decode_rename);
+            decode::decode_stage(
+                cpu,
+                &mut self.fetch2_decode,
+                &mut self.decode_rename,
+                engine.has_register_renaming(),
+            );
         }
 
         if self.fetch2_stall > 0 {

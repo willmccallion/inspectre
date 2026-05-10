@@ -1,6 +1,6 @@
 //! Tracing macros for every pipeline subsystem.
 //!
-//! Each macro takes a runtime guard (`cpu.trace`) as a coarse on/off switch,
+//! Each macro takes a runtime guard (`cpu.soc.config.general.trace_instructions`) as a coarse on/off switch,
 //! then delegates to the `tracing` crate. The `tracing` subscriber uses a
 //! static `AtomicBool` per callsite — when no subscriber is listening the
 //! check is a single relaxed load, branch-predicted-not-taken after warmup,
@@ -153,7 +153,7 @@ macro_rules! trace_fwd {
 ///
 /// # Example
 /// ```ignore
-/// trace_execute!(cpu.trace; pc = %crate::trace::Hex(entry.pc), result = %crate::trace::Hex(alu_out), "EX");
+/// trace_execute!(cpu.soc.config.general.trace_instructions; pc = %crate::trace::Hex(entry.pc), result = %crate::trace::Hex(alu_out), "EX");
 /// ```
 #[derive(Debug)]
 pub struct Hex(pub u64);

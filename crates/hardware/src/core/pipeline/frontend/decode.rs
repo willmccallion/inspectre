@@ -1367,9 +1367,14 @@ const fn decode_vec_store(inst: u32, funct3: u32, c: &mut ControlSignals) -> Res
 ///
 /// Consumes Fetch2->Decode entries (`IfIdEntry`) and produces
 /// Decode->Rename entries (`IdExEntry`).
-pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<IdExEntry>) {
+pub fn decode_stage(
+    cpu: &mut Cpu,
+    input: &mut Vec<IfIdEntry>,
+    output: &mut Vec<IdExEntry>,
+    has_register_renaming: bool,
+) {
     let mut consumed_count = 0;
-    let mut bundle_writes: Vec<(RegIdx, bool)> = Vec::with_capacity(cpu.core.pipeline_width);
+    let mut bundle_writes: Vec<(RegIdx, bool)> = Vec::with_capacity(cpu.soc.config.pipeline.width);
 
     for if_entry in input.iter() {
         if let Some(trap) = &if_entry.trap {
@@ -1467,7 +1472,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
 
         // O3 rename resolves RAW hazards via PRF, so this check applies only in-order.
         let rs3_idx = inst.rs3();
-        if !cpu.core.has_register_renaming {
+        if !has_register_renaming {
             let hazard = ((!d.rs1.is_zero() || ctrl.rs1_fp)
                 && bundle_writes.contains(&(d.rs1, ctrl.rs1_fp)))
                 || ((!d.rs2.is_zero() || ctrl.rs2_fp)

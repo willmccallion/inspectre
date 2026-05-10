@@ -70,7 +70,7 @@ pub fn commit_stage(
         let interrupt = check_interrupts(cpu);
         if let Some(interrupt_trap) = interrupt {
             cpu.hart.wfi_waiting = false;
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event      = "interrupt",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?interrupt_trap,
@@ -90,15 +90,15 @@ pub fn commit_stage(
                 cpu.hart.pc = cpu.hart.wfi_pc;
                 cpu.redirect_pending = true;
             } else {
-                cpu.stats.cycles_wfi += 1;
+                cpu.soc.stats.cycles_wfi += 1;
             }
-            cpu.stats.retire_histogram[0] += 1;
+            cpu.soc.stats.retire_histogram[0] += 1;
             return trap_event;
         }
     }
 
     if trap_event.is_some() {
-        cpu.stats.retire_histogram[0] += 1;
+        cpu.soc.stats.retire_histogram[0] += 1;
         return trap_event;
     }
 
@@ -125,7 +125,7 @@ pub fn commit_stage(
                 && let Some(ref the_trap) = entry.trap
             {
                 #[cfg(feature = "commit-log")]
-                if let Some(ref mut log) = cpu.commit_log {
+                if let Some(ref mut log) = cpu.soc.commit_log {
                     use crate::common::Trap;
                     use std::io::Write;
                     // Spike skips fetch-stage page/access faults (no valid bits).
@@ -140,7 +140,7 @@ pub fn commit_stage(
                             writeln!(log, "core   0: 0x{:016x} (0x{:08x})", entry.pc, entry.inst);
                     }
                 }
-                trace_trap!(cpu.trace;
+                trace_trap!(cpu.soc.config.general.trace_instructions;
                     event     = "sync-exception",
                     pc        = %crate::trace::Hex(entry.pc),
                     rob_tag   = entry.tag.0,
@@ -194,7 +194,7 @@ pub fn commit_stage(
             _ => entry.pc.wrapping_add(entry.inst_size.as_u64()),
         };
 
-        trace_commit!(cpu.trace;
+        trace_commit!(cpu.soc.config.general.trace_instructions;
             rob_tag    = entry.tag.0,
             pc         = %crate::trace::Hex(entry.pc),
             rd         = entry.rd.as_usize(),
@@ -212,7 +212,7 @@ pub fn commit_stage(
         // Defer commit log write until after the register write so rd value is available.
         #[cfg(feature = "commit-log")]
         let commit_log_entry: Option<(u64, u32, bool, usize, u64)> = {
-            if cpu.commit_log.is_some() {
+            if cpu.soc.commit_log.is_some() {
                 let has_rd =
                     (entry.ctrl.reg_write && !entry.rd.is_zero()) || entry.ctrl.fp_reg_write;
                 Some((entry.pc, entry.inst, has_rd, entry.rd.as_usize(), entry.result.unwrap_or(0)))
@@ -227,7 +227,7 @@ pub fn commit_stage(
         }
 
         if entry.inst != 0 && entry.inst != 0x13 {
-            cpu.stats.instructions_retired += 1;
+            cpu.soc.stats.instructions_retired += 1;
             update_instruction_stats(cpu, &entry);
         }
 
@@ -238,7 +238,7 @@ pub fn commit_stage(
                 entry.bp_target,
                 &entry.bp_ghr_snapshot,
             );
-            trace_branch!(cpu.trace;
+            trace_branch!(cpu.soc.config.general.trace_instructions;
                 event         = "update",
                 pc            = %crate::trace::Hex(entry.bp_pc),
                 rob_tag       = entry.tag.0,
@@ -248,9 +248,9 @@ pub fn commit_stage(
                 "CM: branch predictor updated at commit"
             );
             if entry.bp_outcome.mispredicted {
-                cpu.stats.committed_branch_mispredictions += 1;
+                cpu.soc.stats.committed_branch_mispredictions += 1;
             } else {
-                cpu.stats.committed_branch_predictions += 1;
+                cpu.soc.stats.committed_branch_predictions += 1;
             }
         }
 
@@ -270,7 +270,7 @@ pub fn commit_stage(
             committed_rename_map.set(entry.rd, true, entry.phys_dst);
             cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
-            trace_commit!(cpu.trace;
+            trace_commit!(cpu.soc.config.general.trace_instructions;
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
                 reg      = entry.rd.as_usize(),
@@ -287,7 +287,7 @@ pub fn commit_stage(
                 free_list.reclaim(entry.old_phys_dst);
             }
             committed_rename_map.set(entry.rd, false, entry.phys_dst);
-            trace_commit!(cpu.trace;
+            trace_commit!(cpu.soc.config.general.trace_instructions;
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
                 reg      = entry.rd.as_usize(),
@@ -322,7 +322,7 @@ pub fn commit_stage(
 
         #[cfg(feature = "commit-log")]
         if let Some((pc, inst, has_rd, rd, val)) = commit_log_entry
-            && let Some(ref mut log) = cpu.commit_log
+            && let Some(ref mut log) = cpu.soc.commit_log
         {
             use std::io::Write;
             if has_rd {
@@ -356,7 +356,7 @@ pub fn commit_stage(
             if !csr_update.applied {
                 cpu.csr_write(csr_update.addr, csr_update.new_val);
             }
-            trace_csr!(cpu.trace;
+            trace_csr!(cpu.soc.config.general.trace_instructions;
                 op       = if csr_update.applied { "write-eager" } else { "write-deferred" },
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
@@ -377,7 +377,7 @@ pub fn commit_stage(
         if entry.ctrl.system_op == SystemOp::Mret {
             cpu.do_mret();
             cpu.hart.committed_next_pc = cpu.hart.pc;
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event      = "return",
                 insn       = "MRET",
                 pc         = %crate::trace::Hex(entry.pc),
@@ -392,7 +392,7 @@ pub fn commit_stage(
         if entry.ctrl.system_op == SystemOp::Sret {
             cpu.do_sret();
             cpu.hart.committed_next_pc = cpu.hart.pc;
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event      = "return",
                 insn       = "SRET",
                 pc         = %crate::trace::Hex(entry.pc),
@@ -525,9 +525,9 @@ pub fn commit_stage(
     }
 
     if retired_count == 0 && rob_empty_at_start {
-        cpu.stats.cycles_rob_empty += 1;
+        cpu.soc.stats.cycles_rob_empty += 1;
     }
-    cpu.stats.retire_histogram[retired_count.min(3)] += 1;
+    cpu.soc.stats.retire_histogram[retired_count.min(3)] += 1;
 
     // One drain per cycle: fall through to VSB if scalar SB has nothing committed.
     if !try_drain_one_store(cpu, store_buffer)
@@ -554,18 +554,18 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
     if !cpu.core.wcb.is_disabled() && is_ram {
         let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
-            cpu.stats.wcb_coalesces += 1;
+            cpu.soc.stats.wcb_coalesces += 1;
         }
         if let Some(drain) = evicted {
             let addr = crate::common::PhysAddr::new(drain.line_addr);
             let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
-            cpu.stats.wcb_drains += 1;
+            cpu.soc.stats.wcb_drains += 1;
         }
     } else if is_ram {
         let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
     }
     write_store_to_memory(cpu, paddr, data, store.width);
-    trace_commit!(cpu.trace;
+    trace_commit!(cpu.soc.config.general.trace_instructions;
         paddr      = %crate::trace::Hex(paddr.val()),
         data       = %crate::trace::Hex(data),
         width      = ?store.width,
@@ -607,7 +607,7 @@ fn flush_wcb(cpu: &mut Cpu) {
     for drain in drains {
         let addr = crate::common::PhysAddr::new(drain.line_addr);
         let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
-        cpu.stats.wcb_drains += 1;
+        cpu.soc.stats.wcb_drains += 1;
     }
 }
 
@@ -777,20 +777,20 @@ const fn update_instruction_stats(cpu: &mut Cpu, entry: &crate::core::pipeline::
 
     if entry.ctrl.mem_read {
         if entry.ctrl.fp_reg_write {
-            cpu.stats.inst_fp_load += 1;
+            cpu.soc.stats.inst_fp_load += 1;
         } else {
-            cpu.stats.inst_load += 1;
+            cpu.soc.stats.inst_load += 1;
         }
     } else if entry.ctrl.mem_write {
         if entry.ctrl.rs2_fp {
-            cpu.stats.inst_fp_store += 1;
+            cpu.soc.stats.inst_fp_store += 1;
         } else {
-            cpu.stats.inst_store += 1;
+            cpu.soc.stats.inst_store += 1;
         }
     } else if matches!(entry.ctrl.control_flow, ControlFlow::Branch | ControlFlow::Jump) {
-        cpu.stats.inst_branch += 1;
+        cpu.soc.stats.inst_branch += 1;
     } else if !matches!(entry.ctrl.system_op, SystemOp::None) {
-        cpu.stats.inst_system += 1;
+        cpu.soc.stats.inst_system += 1;
     } else {
         match entry.ctrl.alu {
             AluOp::FAdd
@@ -820,12 +820,12 @@ const fn update_instruction_stats(cpu: &mut Cpu, entry: &crate::core::pipeline::
             | AluOp::FCvtDH
             | AluOp::FCvtHD
             | AluOp::FMvToX
-            | AluOp::FMvToF => cpu.stats.inst_fp_arith += 1,
-            AluOp::FDiv | AluOp::FSqrt => cpu.stats.inst_fp_div_sqrt += 1,
+            | AluOp::FMvToF => cpu.soc.stats.inst_fp_arith += 1,
+            AluOp::FDiv | AluOp::FSqrt => cpu.soc.stats.inst_fp_div_sqrt += 1,
             AluOp::FMAdd | AluOp::FMSub | AluOp::FNMAdd | AluOp::FNMSub => {
-                cpu.stats.inst_fp_fma += 1;
+                cpu.soc.stats.inst_fp_fma += 1;
             }
-            _ => cpu.stats.inst_alu += 1,
+            _ => cpu.soc.stats.inst_alu += 1,
         }
     }
 }
@@ -840,13 +840,13 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VLoadWholeReg
         | VectorOp::VLoadStride
         | VectorOp::VLoadIndexOrd
-        | VectorOp::VLoadIndexUnord => cpu.stats.inst_vec_load += 1,
+        | VectorOp::VLoadIndexUnord => cpu.soc.stats.inst_vec_load += 1,
         VectorOp::VStoreUnit
         | VectorOp::VStoreMask
         | VectorOp::VStoreWholeReg
         | VectorOp::VStoreStride
         | VectorOp::VStoreIndexOrd
-        | VectorOp::VStoreIndexUnord => cpu.stats.inst_vec_store += 1,
+        | VectorOp::VStoreIndexUnord => cpu.soc.stats.inst_vec_store += 1,
         VectorOp::VAdd
         | VectorOp::VSub
         | VectorOp::VRsub
@@ -930,7 +930,7 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VRedMaxU
         | VectorOp::VRedMax
         | VectorOp::VWRedSumU
-        | VectorOp::VWRedSum => cpu.stats.inst_vec_int += 1,
+        | VectorOp::VWRedSum => cpu.soc.stats.inst_vec_int += 1,
         VectorOp::VFAdd
         | VectorOp::VFSub
         | VectorOp::VFRSub
@@ -1000,7 +1000,7 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VFRedMax
         | VectorOp::VFRedMin
         | VectorOp::VFWRedOSum
-        | VectorOp::VFWRedUSum => cpu.stats.inst_vec_fp += 1,
+        | VectorOp::VFWRedUSum => cpu.soc.stats.inst_vec_fp += 1,
         VectorOp::Vsetvli
         | VectorOp::Vsetivli
         | VectorOp::Vsetvl
@@ -1059,7 +1059,7 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
         | VectorOp::VSm4R
         | VectorOp::VSm4K
         | VectorOp::VGhsh
-        | VectorOp::VGmul => cpu.stats.inst_vec_misc += 1,
+        | VectorOp::VGmul => cpu.soc.stats.inst_vec_misc += 1,
     }
 }
 

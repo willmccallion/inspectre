@@ -23,12 +23,12 @@ fn test_tick_returns_ok() {
 #[test]
 fn test_tick_increments_cycles() {
     let mut sim = create_test_sim();
-    let initial_cycles = sim.cpu.stats.cycles;
+    let initial_cycles = sim.cpu.soc.stats.cycles;
 
     sim.tick().unwrap();
 
     // Cycles should increase
-    assert!(sim.cpu.stats.cycles >= initial_cycles);
+    assert!(sim.cpu.soc.stats.cycles >= initial_cycles);
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_multiple_ticks() {
 #[test]
 fn test_exit_code_none_initially() {
     let sim = create_test_sim();
-    assert_eq!(sim.cpu.exit_code, None);
+    assert_eq!(sim.cpu.soc.check_exit(), None);
 }
 
 #[test]
@@ -97,12 +97,12 @@ fn test_bus_interaction_tick() {
 #[test]
 fn test_stats_updated() {
     let mut sim = create_test_sim();
-    let initial_instructions = sim.cpu.stats.instructions_retired;
+    let initial_instructions = sim.cpu.soc.stats.instructions_retired;
 
     sim.tick().unwrap();
 
     // Stats should be updated or remain the same (can't execute if no valid instruction)
-    assert!(sim.cpu.stats.instructions_retired >= initial_instructions);
+    assert!(sim.cpu.soc.stats.instructions_retired >= initial_instructions);
 }
 
 #[test]

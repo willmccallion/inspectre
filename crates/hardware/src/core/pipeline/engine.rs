@@ -96,6 +96,13 @@ pub trait ExecutionEngine {
         false
     }
 
+    /// Returns true if this backend resolves intra-bundle RAW hazards via
+    /// register renaming, so decode can skip the bundle-write hazard check.
+    /// Default `false` (in-order); O3 overrides.
+    fn has_register_renaming(&self) -> bool {
+        false
+    }
+
     /// Access the checkpoint table (O3 only).
     fn checkpoint_table(&self) -> &CheckpointTable {
         panic!("checkpoint_table only available for O3 backend")
@@ -154,7 +161,7 @@ impl<E: ExecutionEngine> Pipeline<E> {
             self.rename_output.clear();
         }
 
-        if cpu.exit_code.is_none() && !cpu.hart.wfi_waiting {
+        if cpu.soc.check_exit().is_none() && !cpu.hart.wfi_waiting {
             self.frontend.tick(cpu, &mut self.engine, &mut self.rename_output);
         }
     }

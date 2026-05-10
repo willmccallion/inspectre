@@ -372,7 +372,7 @@ fn test_csr_time_counter() {
     // TIME should be cycles divided by clint_divider
     let time = cpu.csr_read(csr::TIME);
     let cycles = cpu.csr_read(csr::CYCLE);
-    assert_eq!(time, cycles / cpu.clint_divider);
+    assert_eq!(time, cycles / cpu.soc.config.system.clint_divider);
 }
 
 #[test]

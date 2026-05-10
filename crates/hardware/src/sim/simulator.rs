@@ -72,7 +72,7 @@ impl Simulator {
     }
 
     /// Retrieves the exit code if the simulation has finished.
-    pub const fn take_exit(&mut self) -> Option<u64> {
+    pub fn take_exit(&self) -> Option<u64> {
         self.cpu.take_exit()
     }
 }

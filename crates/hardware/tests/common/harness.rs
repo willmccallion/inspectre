@@ -7,6 +7,7 @@ use rvsim_core::config::CacheConfig;
 use rvsim_core::core::units::cache::CacheSim;
 use rvsim_core::soc::Soc;
 use rvsim_core::soc::interconnect::Bus;
+use rvsim_core::stats::SimStats;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -34,10 +35,14 @@ impl TestContext {
         let bus = Bus::new(8, 0);
 
         let soc = Soc {
+            config: config.clone(),
             cycle: 0,
             bus,
             mem_controller: Box::new(MockMemoryController::new(1)),
             l3_cache: CacheSim::new(&CacheConfig::default()),
+            stats: SimStats::default(),
+            #[cfg(feature = "commit-log")]
+            commit_log: None,
             exit_request: Arc::new(AtomicU64::new(u64::MAX)),
         };
 
@@ -45,7 +50,7 @@ impl TestContext {
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
         // every access through multi-cycle DRAM, starving the pipeline.
-        sim.cpu.cache_base = u64::MAX;
+        sim.cpu.soc.config.system.ram_base = u64::MAX;
 
         Self { sim }
     }
@@ -93,7 +98,7 @@ impl TestContext {
                 eprintln!("CPU tick error: {}", e);
                 break;
             }
-            if self.sim.cpu.exit_code.is_some() {
+            if self.sim.cpu.soc.check_exit().is_some() {
                 break;
             }
         }

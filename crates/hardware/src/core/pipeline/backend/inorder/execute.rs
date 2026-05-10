@@ -50,7 +50,7 @@ pub fn execute_inorder(
         }
 
         if let Some(trap) = id.trap.clone() {
-            trace_trap!(cpu.trace;
+            trace_trap!(cpu.soc.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "EX",
                 pc      = %crate::trace::Hex(id.pc),
@@ -79,7 +79,7 @@ pub fn execute_inorder(
             continue;
         }
 
-        trace_execute!(cpu.trace;
+        trace_execute!(cpu.soc.config.general.trace_instructions;
             rob_tag  = id.rob_tag.0,
             pc       = %crate::trace::Hex(id.pc),
             inst     = %crate::trace::Hex32(id.inst),
@@ -778,12 +778,12 @@ pub fn execute_inorder(
                 cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
                 cpu.core.branch_predictor.speculate(id.pc, taken);
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-                cpu.stats.speculative_branch_mispredictions += 1;
+                cpu.soc.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_next_pc;
                 cpu.redirect_pending = true;
                 flush_remaining = true;
             } else {
-                cpu.stats.speculative_branch_predictions += 1;
+                cpu.soc.stats.speculative_branch_predictions += 1;
             }
         }
 
@@ -818,12 +818,12 @@ pub fn execute_inorder(
             if mispredicted {
                 cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-                cpu.stats.speculative_branch_mispredictions += 1;
+                cpu.soc.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_target;
                 cpu.redirect_pending = true;
                 flush_remaining = true;
             } else {
-                cpu.stats.speculative_branch_predictions += 1;
+                cpu.soc.stats.speculative_branch_predictions += 1;
             }
 
             // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.

@@ -16,6 +16,9 @@
 /// Application Binary Interface (ABI) register name mappings.
 pub mod abi;
 
+/// ISA capability configuration (`IsaConfig`, `VectorIsa`, future families).
+pub mod config;
+
 /// Instruction decoding logic for all RISC-V instruction formats.
 pub mod decode;
 

@@ -25,7 +25,6 @@ use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::core::{Core, Hart};
 use crate::soc::Soc;
-use crate::stats::SimStats;
 
 /// CPU architectural state: registers, caches, MMU, bus, and statistics.
 ///
@@ -40,22 +39,14 @@ pub struct Cpu {
     /// branch predictor, prefetch filter, write-combining buffer).
     pub core: Core,
 
-    /// System-on-Chip: bus, memory controller, shared L3, devices, exit signal.
+    /// System-on-Chip: config, bus, memory controller, shared L3, stats,
+    /// devices, exit signal.
     pub soc: Soc,
-    /// Base address of RAM — addresses at or above this go through the
-    /// cache hierarchy for latency simulation; addresses below are MMIO.
-    pub cache_base: u64,
 
-    /// Enable instruction tracing.
-    pub trace: bool,
-    /// Exit code if simulation finished.
-    pub exit_code: Option<u64>,
-    /// Performance statistics.
-    pub stats: SimStats,
-    /// Direct mode (no translation, flat memory).
+    /// Direct mode (no translation, flat memory). Initialised from
+    /// `config.general.direct_mode` and runtime-mutable (the ELF loader
+    /// writes it after init).
     pub direct_mode: bool,
-    /// CLINT time divider.
-    pub clint_divider: u64,
     /// Raw pointer to the start of simulated RAM.
     ///
     /// # Safety
@@ -78,10 +69,6 @@ pub struct Cpu {
     /// rather than relying solely on `cpu.hart.pc != pc_before` which can miss
     /// redirects when the target happens to equal the current fetch PC.
     pub redirect_pending: bool,
-
-    /// Optional buffered writer for the commit log (enabled by the `commit-log` feature).
-    #[cfg(feature = "commit-log")]
-    pub commit_log: Option<std::io::BufWriter<std::fs::File>>,
 }
 
 /// Maximum number of (pc, inst) entries kept for invalid-PC debug trace.
@@ -227,20 +214,13 @@ impl Cpu {
         Self {
             hart,
             core: Core::new(CoreId::new(0), config),
-            trace: config.general.trace_instructions,
             soc,
-            exit_code: None,
             direct_mode,
-            cache_base: config.system.ram_base,
-            stats: SimStats::default(),
-            clint_divider: config.system.clint_divider,
             ram_ptr,
             ram_start,
             ram_end,
             htif_range: None,
             redirect_pending: false,
-            #[cfg(feature = "commit-log")]
-            commit_log: None,
         }
     }
 
@@ -260,13 +240,13 @@ impl Cpu {
             path: path.to_owned(),
             source,
         })?;
-        self.commit_log = Some(BufWriter::with_capacity(1 << 20, file));
+        self.soc.commit_log = Some(BufWriter::with_capacity(1 << 20, file));
         Ok(())
     }
 
     /// Retrieves the exit code if the simulation has finished.
-    pub const fn take_exit(&mut self) -> Option<u64> {
-        self.exit_code.take()
+    pub fn take_exit(&self) -> Option<u64> {
+        self.soc.take_exit()
     }
 
     /// Dumps the current CPU state (PC and registers) to stdout.
@@ -309,10 +289,10 @@ mod tests {
     fn test_cpu_take_exit() {
         let config = Config::default();
         let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let cpu = Cpu::new(soc, &config);
 
         assert_eq!(cpu.take_exit(), None);
-        cpu.exit_code = Some(42);
+        cpu.soc.signal_exit(42);
         assert_eq!(cpu.take_exit(), Some(42));
         assert_eq!(cpu.take_exit(), None);
     }
