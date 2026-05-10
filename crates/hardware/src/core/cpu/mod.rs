@@ -71,12 +71,6 @@ pub struct Cpu {
     /// `config.general.direct_mode` and runtime-mutable (the ELF loader
     /// writes it after init).
     pub direct_mode: bool,
-
-    /// Set by the backend when a PC redirect occurs (branch misprediction,
-    /// trap, FENCE.I, etc.). The pipeline uses this to flush the frontend,
-    /// rather than relying solely on `cpu.hart.pc != pc_before` which can miss
-    /// redirects when the target happens to equal the current fetch PC.
-    pub redirect_pending: bool,
 }
 
 unsafe impl Send for Cpu {}
@@ -226,7 +220,6 @@ impl Cpu {
             exit_signal,
             exit_code: None,
             direct_mode,
-            redirect_pending: false,
         }
     }
 

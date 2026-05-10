@@ -54,6 +54,7 @@ pub fn commit_stage(
     mut vec_prf: Option<&mut VecPhysRegFile>,
     mut vec_free_list: Option<&mut FreeList<VecPhysReg>>,
     mut vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
+    redirect_pending: &mut bool,
 ) -> Option<(Trap, u64)> {
     let mut trap_event: Option<(Trap, u64)> = None;
 
@@ -88,7 +89,7 @@ pub fn commit_stage(
             if (pending & enabled) != 0 {
                 cpu.hart.wfi_waiting = false;
                 cpu.hart.pc = cpu.hart.wfi_pc;
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
             } else {
                 cpu.stats.cycles_wfi += 1;
             }
@@ -371,7 +372,7 @@ pub fn commit_stage(
             // SATP redirect: post-execute fetches used old tables; reset cpu.hart.pc to next inst.
             if csr_update.addr == csr::SATP {
                 cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
             }
             break;
         }
@@ -414,7 +415,7 @@ pub fn commit_stage(
             } else {
                 // Nothing enabled or pending — treat as NOP to avoid OpenSBI early-boot deadlock.
                 cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
             }
             cpu.hart.committed_next_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             break;
@@ -440,7 +441,7 @@ pub fn commit_stage(
                             }
                         }
                         cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
-                        cpu.redirect_pending = true;
+                        *redirect_pending = true;
                         break;
                     }
                 }
@@ -486,7 +487,7 @@ pub fn commit_stage(
             // I-cache flush after drain so refills see new data; force a fresh redirect.
             let _ = cpu.core.l1_i_cache.invalidate_all();
             cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             // FENCE.I serializes: break so younger insts fetched pre-drain don't retire here.
             break;
         } else if entry.ctrl.system_op == SystemOp::Fence {
@@ -504,7 +505,7 @@ pub fn commit_stage(
             sfence_vma_commit(cpu, &info);
             cpu.clear_reservation();
             cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             break;
         }
 
@@ -1175,6 +1176,7 @@ mod tests {
             .unwrap();
         rob.complete(tag, 42);
 
+        let mut redirect = false;
         let trap = commit_stage(
             &mut cpu,
             &mut rob,
@@ -1189,6 +1191,7 @@ mod tests {
             None,
             None,
             None,
+            &mut redirect,
         );
         assert!(trap.is_none());
         assert_eq!(cpu.hart.regs.read(RegIdx::new(1)), 42);

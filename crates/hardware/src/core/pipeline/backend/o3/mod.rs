@@ -286,7 +286,12 @@ const fn mem_width_from_eew_bytes(bytes: usize) -> crate::core::pipeline::signal
 }
 
 impl ExecutionEngine for O3Engine {
-    fn tick(&mut self, cpu: &mut Cpu, rename_output: &mut Vec<RenameIssueEntry>) {
+    fn tick(
+        &mut self,
+        cpu: &mut Cpu,
+        rename_output: &mut Vec<RenameIssueEntry>,
+        redirect_pending: &mut bool,
+    ) {
         self.cycle += 1;
         self.mdp.tick();
         let now = self.cycle;
@@ -313,6 +318,7 @@ impl ExecutionEngine for O3Engine {
             Some(&mut self.vec_prf),
             Some(&mut self.vec_free_list),
             Some(&mut self.vec_store_buffer),
+            redirect_pending,
         );
 
         if let Some((trap, pc)) = trap_event {
@@ -320,7 +326,7 @@ impl ExecutionEngine for O3Engine {
             let squashed = self.rob.len();
             self.flush(cpu);
             self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             cpu.trap(&trap, pc);
             cpu.hart.committed_next_pc = cpu.hart.pc;
             return;
@@ -528,7 +534,7 @@ impl ExecutionEngine for O3Engine {
             }
 
             cpu.hart.pc = violation_pc;
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             rename_output.clear();
             return;
         }
@@ -820,7 +826,8 @@ impl ExecutionEngine for O3Engine {
                     (cc, p)
                 };
 
-                let (ex_result, flush) = execute::execute_one(cpu, entry, &mut self.rob);
+                let (ex_result, flush) =
+                    execute::execute_one(cpu, entry, &mut self.rob, redirect_pending);
                 issued_count += 1;
 
                 if is_vec_non_mem

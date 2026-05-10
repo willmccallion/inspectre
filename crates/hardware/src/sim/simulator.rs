@@ -38,11 +38,13 @@ impl Simulator {
                 frontend: Frontend::new(config.pipeline.width),
                 engine: InOrderEngine::new(config),
                 rename_output: Vec::with_capacity(config.pipeline.width),
+                redirect_pending: false,
             })),
             BackendType::OutOfOrder => PipelineDispatch::OutOfOrder(Box::new(Pipeline {
                 frontend: Frontend::new(config.pipeline.width),
                 engine: O3Engine::new(config),
                 rename_output: Vec::with_capacity(config.pipeline.width),
+                redirect_pending: false,
             })),
         };
         Self { cpu, pipeline }

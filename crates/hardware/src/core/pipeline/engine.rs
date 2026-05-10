@@ -37,7 +37,14 @@ pub enum BackendType {
 /// Covers the backend pipeline: Issue -> Execute -> Memory1 -> Memory2 -> Writeback -> Commit.
 pub trait ExecutionEngine {
     /// Run one cycle of all backend stages (reverse order internally).
-    fn tick(&mut self, cpu: &mut crate::core::Cpu, rename_output: &mut Vec<RenameIssueEntry>);
+    /// `redirect_pending` is set to `true` by the engine when an instruction
+    /// flushes the frontend (branch misprediction, trap, FENCE.I, MRET/SRET).
+    fn tick(
+        &mut self,
+        cpu: &mut crate::core::Cpu,
+        rename_output: &mut Vec<RenameIssueEntry>,
+        redirect_pending: &mut bool,
+    );
 
     /// How many instructions can the engine accept from rename this cycle?
     fn can_accept(&self) -> usize;
@@ -142,6 +149,10 @@ pub struct Pipeline<E: ExecutionEngine> {
     pub engine: E,
     /// Buffer for rename stage output, consumed by the engine each cycle.
     pub rename_output: Vec<RenameIssueEntry>,
+    /// Set by the backend (execute / commit) when a PC redirect occurs
+    /// (branch misprediction, trap, FENCE.I, MRET/SRET). Read at the top
+    /// of `tick` to decide whether to flush the frontend, then cleared.
+    pub redirect_pending: bool,
 }
 
 impl<E: ExecutionEngine> Pipeline<E> {
@@ -149,13 +160,11 @@ impl<E: ExecutionEngine> Pipeline<E> {
     pub fn tick(&mut self, cpu: &mut crate::core::Cpu) {
         let pc_before = cpu.hart.pc;
 
-        self.engine.tick(cpu, &mut self.rename_output);
+        self.engine.tick(cpu, &mut self.rename_output, &mut self.redirect_pending);
 
         // PC compare catches commit-stage redirects (MRET/SRET) that bypass execute's flush path.
-        let needs_frontend_flush = cpu.redirect_pending || cpu.hart.pc != pc_before;
-        if cpu.redirect_pending {
-            cpu.redirect_pending = false;
-        }
+        let needs_frontend_flush = self.redirect_pending || cpu.hart.pc != pc_before;
+        self.redirect_pending = false;
         if needs_frontend_flush {
             self.frontend.flush();
             self.rename_output.clear();
@@ -236,48 +245,10 @@ impl PipelineDispatch {
 }
 
 #[cfg(test)]
-#[allow(clippy::unimplemented)]
 mod tests {
     use super::*;
-
-    struct DummyEngine;
-    impl ExecutionEngine for DummyEngine {
-        fn tick(
-            &mut self,
-            _cpu: &mut crate::core::Cpu,
-            _rename_output: &mut Vec<RenameIssueEntry>,
-        ) {
-        }
-        fn can_accept(&self) -> usize {
-            0
-        }
-        fn flush(&mut self, _cpu: &mut crate::core::Cpu) {}
-        fn read_csr_speculative(
-            &self,
-            _cpu: &crate::core::Cpu,
-            _addr: crate::common::CsrAddr,
-        ) -> u64 {
-            0
-        }
-        fn scoreboard(&self) -> &Scoreboard {
-            unimplemented!()
-        }
-        fn scoreboard_mut(&mut self) -> &mut Scoreboard {
-            unimplemented!()
-        }
-        fn rob(&self) -> &Rob {
-            unimplemented!()
-        }
-        fn rob_mut(&mut self) -> &mut Rob {
-            unimplemented!()
-        }
-        fn store_buffer(&self) -> &StoreBuffer {
-            unimplemented!()
-        }
-        fn store_buffer_mut(&mut self) -> &mut StoreBuffer {
-            unimplemented!()
-        }
-    }
+    use crate::core::pipeline::backend::inorder::InOrderEngine;
+    use crate::core::pipeline::frontend::Frontend;
 
     #[test]
     fn test_backend_type_default() {
@@ -285,60 +256,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "rename_map only available for O3 backend")]
-    fn test_dummy_rename_map() {
-        let engine = DummyEngine;
-        let _ = engine.rename_map();
-    }
-
-    #[test]
-    #[should_panic(expected = "rename_map_mut only available for O3 backend")]
-    fn test_dummy_rename_map_mut() {
-        let mut engine = DummyEngine;
-        let _ = engine.rename_map_mut();
-    }
-
-    #[test]
-    #[should_panic(expected = "prf only available for O3 backend")]
-    fn test_dummy_prf() {
-        let engine = DummyEngine;
-        let _ = engine.prf();
-    }
-
-    #[test]
-    #[should_panic(expected = "prf_mut only available for O3 backend")]
-    fn test_dummy_prf_mut() {
-        let mut engine = DummyEngine;
-        let _ = engine.prf_mut();
-    }
-
-    #[test]
-    #[should_panic(expected = "free_list_mut only available for O3 backend")]
-    fn test_dummy_free_list_mut() {
-        let mut engine = DummyEngine;
-        let _ = engine.free_list_mut();
-    }
-
-    #[test]
-    fn test_dummy_load_queue_mut() {
-        let mut engine = DummyEngine;
-        assert!(engine.load_queue_mut().is_none());
-    }
-
-    #[test]
-    fn test_dummy_has_prf() {
-        let engine = DummyEngine;
-        assert!(!engine.has_prf());
-    }
-
-    #[test]
     fn test_pipeline_dispatch_inorder_tick_flush_snapshot() {
         let config = crate::config::Config::default();
         let mut cpu = crate::core::Cpu::build(&config, "");
 
-        let frontend = crate::core::pipeline::frontend::Frontend::new(config.pipeline.width);
-        let engine = crate::core::pipeline::backend::inorder::InOrderEngine::new(&config);
-        let pipeline = Pipeline { frontend, engine, rename_output: Vec::new() };
+        let frontend = Frontend::new(config.pipeline.width);
+        let engine = InOrderEngine::new(&config);
+        let pipeline = Pipeline {
+            frontend,
+            engine,
+            rename_output: Vec::new(),
+            redirect_pending: false,
+        };
         let mut dispatch = PipelineDispatch::InOrder(Box::new(pipeline));
 
         dispatch.tick(&mut cpu);

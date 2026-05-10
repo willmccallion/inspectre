@@ -35,7 +35,12 @@ const JALR_ALIGNMENT_MASK: u64 = !1;
 /// Returns `(ExMem1Entry, needs_flush)`. When `needs_flush` is true,
 /// the engine must flush younger instructions (misprediction, CSR,
 /// MRET/SRET, FENCE.I, etc.).
-pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem1Entry, bool) {
+pub fn execute_one(
+    cpu: &mut Cpu,
+    id: RenameIssueEntry,
+    rob: &mut Rob,
+    redirect_pending: &mut bool,
+) -> (ExMem1Entry, bool) {
     if let Some(trap) = id.trap.clone() {
         trace_execute!(cpu.config.general.trace_instructions;
             rob_tag         = id.rob_tag.0,
@@ -132,7 +137,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             match crate::core::units::vpu::execute::execute_vec_op(cpu, &id) {
                 Ok(scalar_result) => {
                     cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                    cpu.redirect_pending = true;
+                    *redirect_pending = true;
                     let result = ExMem1Entry {
                         rob_tag: id.rob_tag,
                         pc: id.pc,
@@ -154,7 +159,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
                 Err(trap) => {
                     rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
                     cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                    cpu.redirect_pending = true;
+                    *redirect_pending = true;
                     let result = ExMem1Entry {
                         rob_tag: id.rob_tag,
                         pc: id.pc,
@@ -199,7 +204,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
     // I-cache flush deferred to commit so prior stores are visible before refill.
     if id.ctrl.system_op == SystemOp::FenceI {
         cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-        cpu.redirect_pending = true;
+        *redirect_pending = true;
         trace_execute!(cpu.config.general.trace_instructions;
             rob_tag = id.rob_tag.0,
             pc      = %crate::trace::Hex(id.pc),
@@ -228,7 +233,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
     // FENCE is a NOP at execute — handled at commit only.
     if !matches!(id.ctrl.system_op, SystemOp::None | SystemOp::Fence) {
-        return execute_system(cpu, id, rob, fwd_a, store_data);
+        return execute_system(cpu, id, rob, fwd_a, store_data, redirect_pending);
     }
 
     // When mstatus.FS == OFF, all FP instructions trap as illegal.
@@ -318,7 +323,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
             cpu.stats.speculative_branch_mispredictions += 1;
             cpu.hart.pc = actual_next_pc;
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             needs_flush = true;
         } else {
             cpu.stats.speculative_branch_predictions += 1;
@@ -367,7 +372,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
             cpu.stats.speculative_branch_mispredictions += 1;
             cpu.hart.pc = actual_target;
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             needs_flush = true;
         } else {
             cpu.stats.speculative_branch_predictions += 1;
@@ -412,6 +417,7 @@ fn execute_system(
     rob: &mut Rob,
     fwd_a: u64,
     store_data: u64,
+    redirect_pending: &mut bool,
 ) -> (ExMem1Entry, bool) {
     let make_result =
         |alu: u64, ctrl: crate::core::pipeline::signals::ControlSignals| ExMem1Entry {
@@ -583,7 +589,7 @@ fn execute_system(
     }
 
     if id.ctrl.csr_op != CsrOp::None {
-        return execute_csr(cpu, id, rob, fwd_a, store_data);
+        return execute_csr(cpu, id, rob, fwd_a, store_data, redirect_pending);
     }
 
     (make_result(0, id.ctrl), true)
@@ -597,6 +603,7 @@ fn execute_csr(
     rob: &mut Rob,
     fwd_a: u64,
     store_data: u64,
+    redirect_pending: &mut bool,
 ) -> (ExMem1Entry, bool) {
     if id.ctrl.csr_addr == crate::core::arch::csr::SATP
         && cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor
@@ -802,7 +809,7 @@ fn execute_csr(
     let needs_flush = would_write;
     if needs_flush {
         cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-        cpu.redirect_pending = true;
+        *redirect_pending = true;
     }
 
     (
@@ -1044,7 +1051,8 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(!flush);
         assert_eq!(result.alu, 10); // rv1 (10) + 0
         assert_eq!(result.rob_tag, tag);
@@ -1111,7 +1119,8 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(flush);
         let entry = rob.find_entry(tag).unwrap();
         assert_eq!(entry.state, crate::core::pipeline::rob::RobState::Faulted);
@@ -1181,9 +1190,10 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(flush);
-        assert!(cpu.redirect_pending);
+        assert!(redirect_pending);
         assert_eq!(cpu.hart.pc, 0x1004);
     }
 
@@ -1255,7 +1265,8 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(flush);
         let entry = rob.find_entry(tag).unwrap();
         assert_eq!(entry.state, crate::core::pipeline::rob::RobState::Faulted);
@@ -1328,9 +1339,10 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(flush);
-        assert!(cpu.redirect_pending);
+        assert!(redirect_pending);
         assert_eq!(cpu.hart.pc, 0x1008); // Mispredicted, redirect to actual target
         let entry = rob.find_entry(tag).unwrap();
         assert!(entry.bp_outcome.mispredicted);
@@ -1399,9 +1411,10 @@ mod tests {
             vec_frm: 0,
         };
 
-        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
+        let mut redirect_pending = false;
+        let (_result, flush) = execute_one(&mut cpu, issue, &mut rob, &mut redirect_pending);
         assert!(flush);
-        assert!(cpu.redirect_pending);
+        assert!(redirect_pending);
 
         let expected_target = (0x2000 + 0x15) & !1;
         assert_eq!(cpu.hart.pc, expected_target);

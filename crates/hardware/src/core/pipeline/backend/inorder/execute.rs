@@ -38,6 +38,7 @@ pub fn execute_inorder(
     entries: Vec<RenameIssueEntry>,
     rob: &mut Rob,
     inflight_fp_flags: u8,
+    redirect_pending: &mut bool,
 ) -> (Vec<ExMem1Entry>, bool) {
     let mut results = Vec::with_capacity(entries.len());
     let mut flush_remaining = false;
@@ -139,7 +140,7 @@ pub fn execute_inorder(
         // I-cache flush deferred to commit so prior stores are visible before refill.
         if id.ctrl.system_op == SystemOp::FenceI {
             cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             flush_remaining = true;
 
             results.push(ExMem1Entry {
@@ -345,7 +346,7 @@ pub fn execute_inorder(
 
                 // Defer TLB flush to commit (after store buffer drains); just flush the frontend.
                 cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
                 flush_remaining = true;
 
                 results.push(ExMem1Entry {
@@ -638,7 +639,7 @@ pub fn execute_inorder(
                 }
 
                 cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
                 flush_remaining = true;
 
                 results.push(ExMem1Entry {
@@ -693,7 +694,7 @@ pub fn execute_inorder(
             match crate::core::units::vpu::execute::execute_vec_op(cpu, &id) {
                 Ok(alu_out) => {
                     cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                    cpu.redirect_pending = true;
+                    *redirect_pending = true;
                     flush_remaining = true;
 
                     rob.complete(id.rob_tag, alu_out);
@@ -716,7 +717,7 @@ pub fn execute_inorder(
                 }
                 Err(trap) => {
                     cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
-                    cpu.redirect_pending = true;
+                    *redirect_pending = true;
                     flush_remaining = true;
 
                     rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
@@ -780,7 +781,7 @@ pub fn execute_inorder(
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
                 cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_next_pc;
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
                 flush_remaining = true;
             } else {
                 cpu.stats.speculative_branch_predictions += 1;
@@ -820,7 +821,7 @@ pub fn execute_inorder(
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
                 cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_target;
-                cpu.redirect_pending = true;
+                *redirect_pending = true;
                 flush_remaining = true;
             } else {
                 cpu.stats.speculative_branch_predictions += 1;

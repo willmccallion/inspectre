@@ -104,7 +104,12 @@ impl InOrderEngine {
 }
 
 impl ExecutionEngine for InOrderEngine {
-    fn tick(&mut self, cpu: &mut Cpu, rename_output: &mut Vec<RenameIssueEntry>) {
+    fn tick(
+        &mut self,
+        cpu: &mut Cpu,
+        rename_output: &mut Vec<RenameIssueEntry>,
+        redirect_pending: &mut bool,
+    ) {
         self.cycle += 1;
 
         // Drain MSHRs first so parked loads re-enter the mem1→mem2 latch.
@@ -126,11 +131,12 @@ impl ExecutionEngine for InOrderEngine {
             None,
             None,
             None,
+            redirect_pending,
         );
 
         if let Some((trap, pc)) = trap_event {
             self.flush(cpu);
-            cpu.redirect_pending = true;
+            *redirect_pending = true;
             cpu.trap(&trap, pc);
             cpu.hart.committed_next_pc = cpu.hart.pc;
             return;
@@ -194,7 +200,7 @@ impl ExecutionEngine for InOrderEngine {
             for e in &self.mem2_wb {
                 inflight_fp_flags |= e.fp_flags;
             }
-            execute::execute_inorder(cpu, issued, &mut self.rob, inflight_fp_flags)
+            execute::execute_inorder(cpu, issued, &mut self.rob, inflight_fp_flags, redirect_pending)
         };
         self.execute_mem1.extend(results);
 
