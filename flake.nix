@@ -34,6 +34,13 @@
           runScript = "bash";
           profile = ''
             export RVSIM_FHS_ACTIVE=1
+            # Disable Nix's gcc-wrapper hardening flags
+            # (-Werror=format-security, -D_FORTIFY_SOURCE=2, etc.). Buildroot
+            # bootstraps its own host-gcc-initial whose libcpp/libiberty
+            # sources don't compile under format-security; we leave hardening
+            # to whichever toolchain Buildroot ultimately produces.
+            export NIX_HARDENING_ENABLE=
+            export NIX_ENFORCE_PURITY=
             # Activate the project's .venv if it exists so the rvsim Python
             # bindings (installed via maturin develop) are importable from
             # inside the FHS env. The venv's python is a /nix/store symlink
