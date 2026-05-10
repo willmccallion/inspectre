@@ -410,6 +410,9 @@ pub enum SystemOp {
     /// `SFENCE.VMA` — supervisor memory-management fence.
     SfenceVma,
 
+    /// `CBO.ZERO` (Zicboz) — zero a cache-block-aligned region at rs1.
+    CboZero,
+
     /// Generic system instruction (CSR, ECALL) not covered by a specific variant.
     System,
 }

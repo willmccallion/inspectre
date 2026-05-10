@@ -550,6 +550,30 @@ fn execute_system(
         );
     }
 
+    if id.ctrl.system_op == SystemOp::CboZero {
+        if !crate::core::arch::csr::cboz_allowed(
+            cpu.csrs.menvcfg,
+            cpu.csrs.senvcfg,
+            cpu.privilege,
+        ) {
+            rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
+            return (make_result(0, id.ctrl), true);
+        }
+        // Spec: cbo.zero ignores the low BLOCK_SIZE-1 bits of rs1.
+        let aligned_va = fwd_a & !(crate::isa::zicboz::CBOZ_BLOCK_SIZE - 1);
+        let result = cpu.translate(
+            crate::common::VirtAddr::new(aligned_va),
+            crate::common::AccessType::Write,
+            crate::isa::zicboz::CBOZ_BLOCK_SIZE,
+        );
+        if let Some(trap) = result.trap {
+            rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
+            return (make_result(0, id.ctrl), true);
+        }
+        // Resolved block paddr flows to commit via the alu field.
+        return (make_result(result.paddr.val(), id.ctrl), true);
+    }
+
     if id.inst == sys_ops::ECALL {
         use crate::core::arch::mode::PrivilegeMode;
         let trap = match cpu.privilege {

@@ -1161,6 +1161,18 @@ fn decode_fence_i() {
 }
 
 #[test]
+fn decode_cbo_zero() {
+    // cbo.zero rs1=x10: opcode=MISC-MEM, rd=0, funct3=CBO, rs1=10, imm=0x004.
+    let inst = i_type(i_op::OP_MISC_MEM, 0, i_f3::CBO, 10, 0x004);
+    let d = decode(inst);
+    assert_eq!(d.opcode, i_op::OP_MISC_MEM);
+    assert_eq!(d.funct3, i_f3::CBO);
+    assert_eq!(d.imm, 0x004);
+    assert_eq!(d.rs1.as_u8(), 10);
+    assert!(d.rd.is_zero());
+}
+
+#[test]
 fn i_type_imm_round_trip_all_values() {
     // Verify every 12-bit signed value round-trips through encode/decode.
     for raw in -2048i32..=2047 {

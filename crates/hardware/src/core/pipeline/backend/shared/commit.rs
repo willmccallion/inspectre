@@ -169,6 +169,11 @@ pub fn commit_stage(
         if head.ctrl.system_op == SystemOp::SfenceVma && store_buffer.has_committed_stores() {
             break;
         }
+        // CBO.ZERO is a 64-byte store; drain prior committed stores first so
+        // memory ordering against earlier writes matches a normal store.
+        if head.ctrl.system_op == SystemOp::CboZero && store_buffer.has_committed_stores() {
+            break;
+        }
 
         let Some(entry) = rob.commit_head() else { break };
         retired_count += 1;
@@ -496,6 +501,12 @@ pub fn commit_stage(
             break;
         }
 
+        // CBO.ZERO: SB is empty (stall above). entry.result holds the
+        // resolved block paddr from execute; write CBOZ_BLOCK_SIZE zero bytes.
+        if entry.ctrl.system_op == SystemOp::CboZero {
+            cboz_commit(cpu, entry.result.unwrap_or(0));
+        }
+
         cpu.regs.write(RegIdx::new(0), 0);
     }
 
@@ -587,6 +598,24 @@ fn flush_wcb(cpu: &mut Cpu) {
 }
 
 /// Writes a store's data to the correct memory target (RAM fast-path or bus).
+/// Writes `CBOZ_BLOCK_SIZE` bytes of zeros at `block_paddr` as a sequence of
+/// 8-byte stores. Caller must drain the store buffer first.
+fn cboz_commit(cpu: &mut Cpu, block_paddr: u64) {
+    use crate::common::PhysAddr;
+    use crate::isa::zicboz::CBOZ_BLOCK_SIZE;
+    const CHUNK: u64 = 8;
+    let mut offset = 0u64;
+    while offset < CBOZ_BLOCK_SIZE {
+        write_store_to_memory(
+            cpu,
+            PhysAddr::new(block_paddr + offset),
+            0,
+            MemWidth::Double,
+        );
+        offset += CHUNK;
+    }
+}
+
 fn write_store_to_memory(
     cpu: &mut Cpu,
     paddr: crate::common::PhysAddr,

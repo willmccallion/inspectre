@@ -71,6 +71,33 @@ pub const MENVCFG: CsrAddr = CsrAddr::from_u32(0x30A);
 /// STCE bit in menvcfg — enables Sstc (hardware stimecmp-based STIP) for S-mode.
 pub const MENVCFG_STCE: u64 = 1 << 63;
 
+/// CBZE bit in menvcfg — enables Zicboz cbo.zero in S/U modes.
+pub const MENVCFG_CBZE: u64 = 1 << 7;
+
+/// Supervisor environment configuration register CSR address.
+pub const SENVCFG: CsrAddr = CsrAddr::from_u32(0x10A);
+
+/// CBZE bit in senvcfg — enables Zicboz cbo.zero in U mode.
+pub const SENVCFG_CBZE: u64 = 1 << 7;
+
+/// Returns true when `cbo.zero` is permitted at the current privilege level
+/// per the Zicboz spec: M-mode is always allowed, S-mode requires
+/// `menvcfg.CBZE`, U-mode additionally requires `senvcfg.CBZE`.
+pub const fn cboz_allowed(
+    menvcfg: u64,
+    senvcfg: u64,
+    privilege: crate::core::arch::mode::PrivilegeMode,
+) -> bool {
+    use crate::core::arch::mode::PrivilegeMode;
+    match privilege {
+        PrivilegeMode::Machine => true,
+        PrivilegeMode::Supervisor => (menvcfg & MENVCFG_CBZE) != 0,
+        PrivilegeMode::User => {
+            (menvcfg & MENVCFG_CBZE) != 0 && (senvcfg & SENVCFG_CBZE) != 0
+        }
+    }
+}
+
 /// Machine scratch register CSR address.
 pub const MSCRATCH: CsrAddr = CsrAddr::from_u32(0x340);
 
@@ -557,6 +584,8 @@ pub struct Csrs {
     pub scounteren: u64,
     /// Machine environment configuration register.
     pub menvcfg: u64,
+    /// Supervisor environment configuration register.
+    pub senvcfg: u64,
     /// Vector start position.
     pub vstart: u64,
     /// Vector fixed-point saturation flag.
@@ -624,6 +653,7 @@ impl Csrs {
             x if x == MCOUNTEREN.as_u32() => self.mcounteren,
             x if x == SCOUNTEREN.as_u32() => self.scounteren,
             x if x == MENVCFG.as_u32() => self.menvcfg,
+            x if x == SENVCFG.as_u32() => self.senvcfg,
             x if x == VSTART.as_u32() => self.vstart,
             x if x == VXSAT.as_u32() => self.vxsat & 0x1,
             x if x == VXRM.as_u32() => self.vxrm & 0x3,

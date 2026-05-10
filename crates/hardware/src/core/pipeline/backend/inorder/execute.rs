@@ -372,6 +372,83 @@ pub fn execute_inorder(
                 continue;
             }
 
+            if id.ctrl.system_op == SystemOp::CboZero {
+                let cbze_ok = crate::core::arch::csr::cboz_allowed(
+                    cpu.csrs.menvcfg,
+                    cpu.csrs.senvcfg,
+                    cpu.privilege,
+                );
+                if !cbze_ok {
+                    rob.fault(
+                        id.rob_tag,
+                        Trap::IllegalInstruction(id.inst),
+                        ExceptionStage::Execute,
+                    );
+                    results.push(ExMem1Entry {
+                        rob_tag: id.rob_tag,
+                        pc: id.pc,
+                        inst: id.inst,
+                        inst_size: id.inst_size,
+                        rd: id.rd,
+                        alu: 0,
+                        store_data: 0,
+                        ctrl: id.ctrl,
+                        trap: None,
+                        exception_stage: None,
+                        rd_phys: PhysReg::default(),
+                        fp_flags: 0,
+                        sfence_vma: None,
+                        vec_mem: None,
+                    });
+                    continue;
+                }
+
+                let aligned_va = fwd_a & !(crate::isa::zicboz::CBOZ_BLOCK_SIZE - 1);
+                let result = cpu.translate(
+                    crate::common::VirtAddr::new(aligned_va),
+                    crate::common::AccessType::Write,
+                    crate::isa::zicboz::CBOZ_BLOCK_SIZE,
+                );
+                if let Some(trap) = result.trap {
+                    rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
+                    results.push(ExMem1Entry {
+                        rob_tag: id.rob_tag,
+                        pc: id.pc,
+                        inst: id.inst,
+                        inst_size: id.inst_size,
+                        rd: id.rd,
+                        alu: 0,
+                        store_data: 0,
+                        ctrl: id.ctrl,
+                        trap: None,
+                        exception_stage: None,
+                        rd_phys: PhysReg::default(),
+                        fp_flags: 0,
+                        sfence_vma: None,
+                        vec_mem: None,
+                    });
+                    continue;
+                }
+
+                results.push(ExMem1Entry {
+                    rob_tag: id.rob_tag,
+                    pc: id.pc,
+                    inst: id.inst,
+                    inst_size: id.inst_size,
+                    rd: id.rd,
+                    alu: result.paddr.val(),
+                    store_data: 0,
+                    ctrl: id.ctrl,
+                    trap: None,
+                    exception_stage: None,
+                    rd_phys: PhysReg::default(),
+                    fp_flags: 0,
+                    sfence_vma: None,
+                    vec_mem: None,
+                });
+                continue;
+            }
+
             if id.inst == sys_ops::ECALL {
                 use crate::core::arch::mode::PrivilegeMode;
                 let trap = match cpu.privilege {

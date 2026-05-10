@@ -61,3 +61,5 @@ pub const AND: u32 = 0b111;
 pub const FENCE: u32 = 0b000;
 /// Instruction Fence.
 pub const FENCE_I: u32 = 0b001;
+/// Cache-block operations (Zicbom / Zicboz).
+pub const CBO: u32 = 0b010;

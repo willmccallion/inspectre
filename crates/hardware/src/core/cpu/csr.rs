@@ -42,6 +42,7 @@ impl Cpu {
                 || x == csr::MCOUNTEREN.as_u32()
                 || x == csr::SCOUNTEREN.as_u32()
                 || x == csr::MENVCFG.as_u32()
+                || x == csr::SENVCFG.as_u32()
                 || x == csr::CYCLE.as_u32()
                 || x == csr::MCYCLE.as_u32()
                 || x == csr::TIME.as_u32()
@@ -125,6 +126,7 @@ impl Cpu {
             x if x == csr::MCOUNTEREN.as_u32() => self.csrs.mcounteren,
             x if x == csr::SCOUNTEREN.as_u32() => self.csrs.scounteren,
             x if x == csr::MENVCFG.as_u32() => self.csrs.menvcfg,
+            x if x == csr::SENVCFG.as_u32() => self.csrs.senvcfg,
             x if x == csr::CYCLE.as_u32() || x == csr::MCYCLE.as_u32() => self.stats.cycles,
             x if x == csr::TIME.as_u32() => self.stats.cycles / self.clint_divider,
             x if x == csr::INSTRET.as_u32() || x == csr::MINSTRET.as_u32() => {
@@ -313,6 +315,9 @@ impl Cpu {
             }
             x if x == csr::MENVCFG.as_u32() => {
                 self.csrs.menvcfg = val;
+            }
+            x if x == csr::SENVCFG.as_u32() => {
+                self.csrs.senvcfg = val;
             }
             x if x == csr::MCYCLE.as_u32() => self.stats.cycles = val,
             x if x == csr::MINSTRET.as_u32() => self.stats.instructions_retired = val,

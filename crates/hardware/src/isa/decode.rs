@@ -149,6 +149,7 @@ pub fn decode(inst: u32) -> Decoded {
         | opcodes::OP_LOAD
         | opcodes::OP_JALR
         | opcodes::OP_IMM_32
+        | opcodes::OP_MISC_MEM
         | fp_opcodes::OP_LOAD_FP => decode_i_type_imm(inst),
 
         opcodes::OP_STORE | fp_opcodes::OP_STORE_FP => decode_s_type_imm(inst),

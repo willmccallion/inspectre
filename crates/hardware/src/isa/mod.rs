@@ -57,3 +57,6 @@ pub mod rvc;
 
 /// Vector extension (RVV 1.0).
 pub mod rvv;
+
+/// Cache-block zero extension (Zicboz).
+pub mod zicboz;

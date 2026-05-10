@@ -28,6 +28,7 @@ use crate::isa::rv64f::{funct3 as f_funct3, funct7 as f_funct7, opcodes as f_opc
 use crate::isa::rv64i::{funct3 as i_funct3, funct7 as i_funct7, opcodes as i_opcodes};
 use crate::isa::rv64m::{funct3 as m_funct3, opcodes as m_opcodes};
 use crate::isa::rv64zfh::funct7 as h_funct7;
+use crate::isa::zicboz;
 use crate::isa::rvv::{
     encoding as v_enc, funct3 as v_funct3, funct6 as v_f6, opcodes as v_opcodes,
 };
@@ -620,6 +621,16 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
         i_opcodes::OP_MISC_MEM => match d.funct3 {
             i_funct3::FENCE => c.system_op = SystemOp::Fence,
             i_funct3::FENCE_I => c.system_op = SystemOp::FenceI,
+            i_funct3::CBO => {
+                // Zicboz: cbo.zero has imm[11:0]=CBO_ZERO_IMM and rd=x0. Other
+                // CBO encodings (cbo.inval/clean/flush from Zicbom) are not
+                // implemented and trap as illegal.
+                if d.imm == zicboz::CBO_ZERO_IMM && d.rd.is_zero() {
+                    c.system_op = SystemOp::CboZero;
+                } else {
+                    return Err(Trap::IllegalInstruction(inst));
+                }
+            }
             _ => return Err(Trap::IllegalInstruction(inst)),
         },
         v_opcodes::OP_V => {
