@@ -21,7 +21,6 @@ use crate::config::Config;
 use crate::core::arch::csr::Csrs;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::hart::HartInit;
-use crate::core::units::cache::CacheSim;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::core::{Core, Hart};
@@ -41,10 +40,8 @@ pub struct Cpu {
     /// branch predictor, prefetch filter, write-combining buffer).
     pub core: Core,
 
-    /// System-on-Chip: bus, memory controller, devices, exit signal.
+    /// System-on-Chip: bus, memory controller, shared L3, devices, exit signal.
     pub soc: Soc,
-    /// L3 Unified Cache.
-    pub l3_cache: CacheSim,
     /// Base address of RAM — addresses at or above this go through the
     /// cache hierarchy for latency simulation; addresses below are MMIO.
     pub cache_base: u64,
@@ -236,7 +233,6 @@ impl Cpu {
             direct_mode,
             cache_base: config.system.ram_base,
             stats: SimStats::default(),
-            l3_cache: CacheSim::new(&config.cache.l3),
             clint_divider: config.system.clint_divider,
             ram_ptr,
             ram_start,

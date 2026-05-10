@@ -3,6 +3,8 @@ use rvsim_core::Simulator;
 use rvsim_core::common::{PhysAddr, RegIdx};
 use rvsim_core::config::Config;
 use rvsim_core::core::Cpu;
+use rvsim_core::config::CacheConfig;
+use rvsim_core::core::units::cache::CacheSim;
 use rvsim_core::soc::Soc;
 use rvsim_core::soc::interconnect::Bus;
 use std::sync::Arc;
@@ -35,6 +37,7 @@ impl TestContext {
             cycle: 0,
             bus,
             mem_controller: Box::new(MockMemoryController::new(1)),
+            l3_cache: CacheSim::new(&CacheConfig::default()),
             exit_request: Arc::new(AtomicU64::new(u64::MAX)),
         };
 

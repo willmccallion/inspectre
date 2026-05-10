@@ -760,7 +760,7 @@ impl PyCpu {
         let _ = cpu.core.l1_i_cache.flush();
         let _ = cpu.core.l1_d_cache.flush();
         let _ = cpu.core.l2_cache.flush();
-        let _ = cpu.l3_cache.flush();
+        let _ = cpu.soc.l3_cache.flush();
         cpu.hart.mmu.dtlb.flush();
         cpu.hart.mmu.itlb.flush();
         cpu.hart.mmu.l2_tlb.flush();

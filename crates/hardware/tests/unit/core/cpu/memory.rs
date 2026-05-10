@@ -243,7 +243,7 @@ fn test_l3_cache_enabled() {
     let mut cpu = create_test_cpu();
     cpu.core.l1_d_cache.enabled = false;
     cpu.core.l2_cache.enabled = false;
-    cpu.l3_cache.enabled = true;
+    cpu.soc.l3_cache.enabled = true;
 
     let initial_l3_hits = cpu.stats.l3_hits;
     let initial_l3_misses = cpu.stats.l3_misses;
@@ -261,7 +261,7 @@ fn test_all_caches_enabled() {
     cpu.core.l1_i_cache.enabled = true;
     cpu.core.l1_d_cache.enabled = true;
     cpu.core.l2_cache.enabled = true;
-    cpu.l3_cache.enabled = true;
+    cpu.soc.l3_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
@@ -338,7 +338,7 @@ fn test_cache_hierarchy_miss_propagation() {
     let mut cpu = create_test_cpu();
     cpu.core.l1_d_cache.enabled = true;
     cpu.core.l2_cache.enabled = true;
-    cpu.l3_cache.enabled = true;
+    cpu.soc.l3_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
@@ -431,7 +431,7 @@ fn test_cache_disabled_no_stats_update() {
     cpu.core.l1_i_cache.enabled = false;
     cpu.core.l1_d_cache.enabled = false;
     cpu.core.l2_cache.enabled = false;
-    cpu.l3_cache.enabled = false;
+    cpu.soc.l3_cache.enabled = false;
 
     let initial_icache_hits = cpu.stats.icache_hits;
     let initial_dcache_hits = cpu.stats.dcache_hits;

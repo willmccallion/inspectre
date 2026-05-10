@@ -6,6 +6,7 @@
 //! coherence) is added in later phases.
 
 use crate::config::{Config, MemoryController as MemControllerType};
+use crate::core::units::cache::CacheSim;
 use crate::soc::devices::{Clint, GoldfishRtc, Htif, Plic, SysCon, Uart, VirtioBlock};
 use crate::soc::interconnect::Bus;
 use crate::soc::memory::Memory;
@@ -19,13 +20,12 @@ use std::sync::atomic::AtomicU64;
 
 /// The simulated System-on-Chip.
 ///
-/// Owns the IO interconnect, memory controller, and the exit-request flag
-/// shared with devices like `SysCon` and `Htif`. Also carries the master
-/// cycle counter that every subsystem reads from for time-correlated state
-/// (e.g. CLINT computes `mtime = cycle / divider`).
+/// Owns the IO interconnect, memory controller, shared last-level cache, and
+/// the exit-request flag shared with devices like `SysCon` and `Htif`. Also
+/// carries the master cycle counter that every subsystem reads from for
+/// time-correlated state (e.g. CLINT computes `mtime = cycle / divider`).
 ///
-/// Cores, shared caches, and coherence are added in later phases of the
-/// multi-core migration.
+/// Cores and coherence are added in later phases of the multi-core migration.
 pub struct Soc {
     /// Master clock; every subsystem reads from this.
     pub cycle: u64,
@@ -33,6 +33,8 @@ pub struct Soc {
     pub bus: Bus,
     /// Main memory controller (boxed for dynamic dispatch; `Send + Sync` for multi-threaded simulation).
     pub mem_controller: Box<dyn MemoryController + Send + Sync>,
+    /// Shared L3 cache (last-level cache; future shared LLC for multi-core).
+    pub l3_cache: CacheSim,
     /// Atomic exit code: when not `u64::MAX`, simulation should stop and use this as exit code.
     pub exit_request: Arc<AtomicU64>,
 }
@@ -42,6 +44,7 @@ impl std::fmt::Debug for Soc {
         f.debug_struct("Soc")
             .field("cycle", &self.cycle)
             .field("bus", &self.bus)
+            .field("l3_cache", &self.l3_cache)
             .field("exit_request", &self.exit_request)
             .finish_non_exhaustive()
     }
@@ -111,7 +114,9 @@ impl Soc {
             }
         };
 
-        Self { cycle: 0, bus, mem_controller, exit_request }
+        let l3_cache = CacheSim::new(&config.cache.l3);
+
+        Self { cycle: 0, bus, mem_controller, l3_cache, exit_request }
     }
 
     /// Loads a binary into memory at the given physical address.

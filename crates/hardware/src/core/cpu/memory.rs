@@ -162,15 +162,15 @@ impl Cpu {
             self.stats.l2_misses += 1;
         }
 
-        if self.l3_cache.enabled {
-            total_penalty += self.l3_cache.latency;
+        if self.soc.l3_cache.enabled {
+            total_penalty += self.soc.l3_cache.latency;
             let (l3_hit, _l3_pen, l3_evictions, l3_prefetches) =
-                self.l3_cache.access_tracked_split(raw_addr, is_write, WB_LAT);
+                self.soc.l3_cache.access_tracked_split(raw_addr, is_write, WB_LAT);
 
             // Filter and install L3 prefetch candidates
             let filtered =
                 self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.stats.pf_dedup_l3);
-            let pf_evictions = self.l3_cache.install_prefetches(&filtered, WB_LAT);
+            let pf_evictions = self.soc.l3_cache.install_prefetches(&filtered, WB_LAT);
 
             // Inclusive policy: L3 eviction → back-invalidate L2, L1D, L1I
             if inclusion == InclusionPolicy::Inclusive {
@@ -228,7 +228,7 @@ impl Cpu {
         let l1_enabled = if is_inst { self.core.l1_i_cache.enabled } else { self.core.l1_d_cache.enabled };
 
         // If no cache level is enabled, every access goes directly to DRAM.
-        if !l1_enabled && !self.core.l2_cache.enabled && !self.l3_cache.enabled {
+        if !l1_enabled && !self.core.l2_cache.enabled && !self.soc.l3_cache.enabled {
             let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.stats.cycles);
             return self.soc.bus.calculate_transit_time(8)
                 + ram_latency
@@ -312,15 +312,15 @@ impl Cpu {
             self.stats.l2_misses += 1;
         }
 
-        if self.l3_cache.enabled {
-            total_penalty += self.l3_cache.latency;
+        if self.soc.l3_cache.enabled {
+            total_penalty += self.soc.l3_cache.latency;
             let (l3_hit, _l3_pen, l3_evictions, l3_prefetches) =
-                self.l3_cache.access_tracked_split(raw_addr, is_write, WB_LAT);
+                self.soc.l3_cache.access_tracked_split(raw_addr, is_write, WB_LAT);
 
             // Filter and install L3 prefetch candidates
             let filtered_l3 =
                 self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.stats.pf_dedup_l3);
-            let l3_pf_evictions = self.l3_cache.install_prefetches(&filtered_l3, WB_LAT);
+            let l3_pf_evictions = self.soc.l3_cache.install_prefetches(&filtered_l3, WB_LAT);
 
             // Inclusive policy: L3 eviction → back-invalidate L2, L1D, L1I
             if inclusion == InclusionPolicy::Inclusive {
