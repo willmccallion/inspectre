@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/rvsim)](https://pypi.org/project/rvsim/)
 [![crates.io](https://img.shields.io/crates/v/rvsim-core)](https://crates.io/crates/rvsim-core)
 [![ISA Tests](https://img.shields.io/badge/riscv--tests-134%2F134-brightgreen)](#isa--privileged-architecture)
-[![ISA](https://img.shields.io/badge/ISA-RV64IMAFDC-blue)](#isa--privileged-architecture)
+[![ISA](https://img.shields.io/badge/ISA-RV64IMAFDCV-blue)](#isa--privileged-architecture)
 [![Boots Linux](https://img.shields.io/badge/Linux%206.6-boots%20to%20shell-blue)](#linux-boot)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue)](#license)
 
@@ -13,7 +13,7 @@ Cycle-accurate RISC-V 64-bit system simulator with a composable Python API for a
 
 ---
 
-rvsim models a complete superscalar processor at cycle granularity. It implements two pluggable microarchitectural backends — out-of-order and in-order — sharing a common frontend, memory hierarchy, and SoC device layer. It boots Linux 6.6 through OpenSBI to a BusyBox shell and passes all 134/134 `riscv-tests`.
+rvsim models a complete superscalar processor at cycle granularity. It implements two pluggable microarchitectural backends — out-of-order and in-order — sharing a common frontend, memory hierarchy, and SoC device layer. It boots Linux 6.6 through OpenSBI to a BusyBox shell and passes all 134/134 `riscv-tests`. The chipsalliance `riscv-vector-tests` suite is cross-checked against spike.
 
 ## Install
 
@@ -59,7 +59,7 @@ Both backends enforce identical serialization semantics: system/CSR instructions
 
 ### Memory Hierarchy
 
-- **SV39 virtual memory** — separate iTLB/dTLB, shared L2 TLB, full hardware page table walker with A/D bit management
+- **SV39 / SV48 / SV57 virtual memory** — separate iTLB/dTLB, shared L2 TLB, full hardware page table walker with A/D bit management
 - **L1i / L1d / L2 / L3 caches** — independently configurable size, associativity, latency, and replacement policy (LRU, PLRU, FIFO, Random, MRU)
 - **Non-blocking L1D** via MSHRs with request coalescing
 - **Hardware prefetchers** per cache level: next-line, stride, stream, tagged
@@ -82,9 +82,11 @@ RAS recognizes both x1 and x5 as link registers per RISC-V spec Table 2.1, inclu
 
 ### ISA & Privileged Architecture
 
-**RV64IMAFDC** — base integer, multiply/divide, atomics (LR/SC + AMO), single/double float with IEEE 754 NaN-boxing, compressed instructions. M/S/U privilege modes, full CSR set, trap delegation, MRET/SRET, WFI, SFENCE.VMA, FENCE/FENCE.I, PMP (16 regions).
+**RV64IMAFDC + V** — base integer, multiply/divide, atomics (LR/SC + AMO), single/double float with IEEE 754 NaN-boxing, compressed instructions, and the V vector extension (RVV 1.0). M/S/U privilege modes, full CSR set, trap delegation, MRET/SRET, WFI, SFENCE.VMA, FENCE/FENCE.I, PMP (16 regions). Cache management ops via Zicbom and Zicboz.
 
-Passes all **134/134** tests in [`riscv-software-src/riscv-tests`](https://github.com/riscv-software-src/riscv-tests).
+The vector extension supports configurable VLEN (default 512) and ELEN=64. Implemented sub-extensions: Zvfh (half-precision FP), Zvbb / Zvbc (bit-manip and carryless multiply), Zvkn (AES + SHA-256), Zvks (SM4), Zvkg (GHASH). Vector ops are cross-checked against spike.
+
+Passes all **134/134** tests in [`riscv-software-src/riscv-tests`](https://github.com/riscv-software-src/riscv-tests) and the chipsalliance [`riscv-vector-tests`](https://github.com/chipsalliance/riscv-vector-tests) suite. The RISCOF compliance framework is integrated under `testing/riscof/`.
 
 ### SoC Devices
 
