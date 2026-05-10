@@ -582,6 +582,12 @@ pub struct SystemConfig {
     /// registered at this address to intercept riscv-tests pass/fail writes.
     #[serde(default)]
     pub tohost_addr: u64,
+
+    /// Number of harts in the simulated `SoC`. Default 1 (single-hart).
+    /// Multi-hart support lands later in Phase C; this knob exists from
+    /// Phase A so config plumbing is in place when n>1 is enabled.
+    #[serde(default = "SystemConfig::default_hart_count")]
+    pub hart_count: usize,
 }
 
 impl SystemConfig {
@@ -629,6 +635,11 @@ impl SystemConfig {
     const fn default_clint_divider() -> u64 {
         defaults::CLINT_DIVIDER
     }
+
+    /// Returns the default hart count (1).
+    const fn default_hart_count() -> usize {
+        1
+    }
 }
 
 impl Default for SystemConfig {
@@ -646,6 +657,7 @@ impl Default for SystemConfig {
             uart_to_stderr: false,
             uart_quiet: false,
             tohost_addr: 0,
+            hart_count: 1,
         }
     }
 }
