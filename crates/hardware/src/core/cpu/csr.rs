@@ -83,11 +83,11 @@ impl Cpu {
             }
             x if x == csr::MVENDORID.as_u32()
                 || x == csr::MARCHID.as_u32()
-                || x == csr::MIMPID.as_u32()
-                || x == csr::MHARTID.as_u32() =>
+                || x == csr::MIMPID.as_u32() =>
             {
                 0
             }
+            x if x == csr::MHARTID.as_u32() => u64::from(self.hart.hart_id.val()),
             x if x == csr::MSTATUS.as_u32() => {
                 let val = self.hart.csrs.mstatus & !csr::MSTATUS_SD;
                 if val & csr::MSTATUS_FS == csr::MSTATUS_FS_DIRTY {

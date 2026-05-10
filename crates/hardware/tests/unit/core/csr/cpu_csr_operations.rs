@@ -24,7 +24,20 @@ fn test_csr_read_machine_info() {
     assert_eq!(cpu.csr_read(csr::MVENDORID), 0);
     assert_eq!(cpu.csr_read(csr::MARCHID), 0);
     assert_eq!(cpu.csr_read(csr::MIMPID), 0);
+    // Default hart_id is 0 until multi-core construction wires it.
     assert_eq!(cpu.csr_read(csr::MHARTID), 0);
+}
+
+#[test]
+fn test_mhartid_returns_hart_id() {
+    use rvsim_core::common::HartId;
+
+    let mut cpu = create_test_cpu();
+    cpu.hart.hart_id = HartId::new(7);
+    assert_eq!(cpu.csr_read(csr::MHARTID), 7);
+
+    cpu.hart.hart_id = HartId::new(0xFFFF_FFFF);
+    assert_eq!(cpu.csr_read(csr::MHARTID), 0xFFFF_FFFF);
 }
 
 #[test]
