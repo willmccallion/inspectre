@@ -27,11 +27,15 @@ pub mod reg;
 /// Top-level simulator error type.
 pub mod sim_error;
 
+/// Hart and physical-core identifier newtypes.
+pub mod ids;
+
 pub use addr::{Asid, IrqId, PhysAddr, Ppn, VirtAddr, Vpn};
 pub use constants::{PAGE_SHIFT, VPN_MASK};
 pub use csr_addr::CsrAddr;
 pub use data::AccessType;
 pub use error::{ExceptionStage, LrScRecord, PteUpdate, SfenceVmaInfo, TranslationResult, Trap};
+pub use ids::{CoreId, HartId};
 pub use inst_size::InstSize;
 pub use reg::RegisterFile;
 pub use reg_idx::RegIdx;
