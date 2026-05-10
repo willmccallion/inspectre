@@ -34,8 +34,8 @@ pub struct Soc {
     pub cycle: u64,
     /// IO interconnect; routes accesses to RAM and MMIO devices.
     pub bus: Bus,
-    /// Main memory controller (boxed for dynamic dispatch; `Send + Sync` for multi-threaded simulation).
-    pub mem_controller: Box<dyn MemoryController + Send + Sync>,
+    /// Main memory controller.
+    pub mem_controller: MemoryController,
     /// Shared L3 cache (last-level cache; future shared LLC for multi-core).
     pub l3_cache: CacheSim,
 }
@@ -72,7 +72,7 @@ impl Soc {
         let plic = Plic::new(plic_addr);
 
         let disk_base = config.system.disk_base;
-        let mut disk = VirtioBlock::new(disk_base, ram_base, ram_buffer);
+        let mut disk = VirtioBlock::new(disk_base, ram_base, ram_buffer.clone());
         if !disk_path.is_empty()
             && let Ok(disk_data) = fs::read(disk_path)
             && !disk_data.is_empty()
@@ -98,21 +98,26 @@ impl Soc {
             bus.add_device(Box::new(htif));
         }
 
-        let mem_controller: Box<dyn MemoryController + Send + Sync> = match config.memory.controller
-        {
-            MemControllerType::Dram => Box::new(DramController::new(DramConfig {
-                t_cas: config.memory.t_cas,
-                t_ras: config.memory.t_ras,
-                t_pre: config.memory.t_pre,
-                t_rrd: config.memory.t_rrd,
-                num_banks: config.memory.num_banks,
-                row_size_bytes: config.memory.row_size_bytes,
-                t_refi: config.memory.t_refi,
-                t_rfc: config.memory.t_rfc,
-            })),
-            MemControllerType::Simple => {
-                Box::new(SimpleController::new(config.memory.row_miss_latency))
-            }
+        let mem_controller = match config.memory.controller {
+            MemControllerType::Dram => MemoryController::Dram(DramController::new(
+                ram_buffer.clone(),
+                crate::common::PhysAddr::new(ram_base),
+                DramConfig {
+                    t_cas: config.memory.t_cas,
+                    t_ras: config.memory.t_ras,
+                    t_pre: config.memory.t_pre,
+                    t_rrd: config.memory.t_rrd,
+                    num_banks: config.memory.num_banks,
+                    row_size_bytes: config.memory.row_size_bytes,
+                    t_refi: config.memory.t_refi,
+                    t_rfc: config.memory.t_rfc,
+                },
+            )),
+            MemControllerType::Simple => MemoryController::Simple(SimpleController::new(
+                ram_buffer.clone(),
+                crate::common::PhysAddr::new(ram_base),
+                config.memory.row_miss_latency,
+            )),
         };
 
         let l3_cache = CacheSim::new(&config.cache.l3);

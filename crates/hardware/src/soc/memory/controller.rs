@@ -1,41 +1,21 @@
-//! Memory controllers: `SimpleController` (fixed latency) and `DramController`
-//! (multi-bank, row-buffer-aware with refresh).
+//! Memory controllers: own a backing DRAM buffer and respond to `MemReq`
+//! packets with `MemResp` after a model-determined latency.
+//!
+//! `SimpleController` is a fixed-latency model. `DramController` tracks per-bank
+//! row buffers, tRRD between activations, and periodic refresh. Both read /
+//! write the underlying [`DramBuffer`] directly so the response carries actual
+//! data.
 
-/// Trait for memory controller implementations that report access latency in cycles.
-///
-/// Implementors must be `Send + Sync` for thread-safe use with the bus and Python bindings.
-pub trait MemoryController: Send + Sync {
-    /// Returns the latency in cycles for an access to `addr` at `current_cycle`.
-    fn access_latency(&mut self, addr: u64, current_cycle: u64) -> u64;
-}
+use std::sync::Arc;
 
-/// Fixed-latency memory controller; every access takes the same number of cycles.
-#[derive(Debug)]
-pub struct SimpleController {
-    latency: u64,
-}
+use crate::common::{LineAddr, PhysAddr};
+use crate::sim::components::ComponentId;
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet, WriteData};
+use crate::soc::memory::buffer::DramBuffer;
 
-impl SimpleController {
-    /// Creates a simple controller with the given fixed latency in cycles.
-    pub const fn new(latency: u64) -> Self {
-        Self { latency }
-    }
-}
-
-impl MemoryController for SimpleController {
-    fn access_latency(&mut self, _addr: u64, _current_cycle: u64) -> u64 {
-        self.latency
-    }
-}
-
-/// Per-bank state for DRAM row-buffer tracking.
-#[derive(Debug)]
-struct BankState {
-    /// Currently open row in this bank, or `None` if no row is active.
-    open_row: Option<u64>,
-    /// Cycle at which this bank becomes available (after activation or refresh).
-    busy_until: u64,
-}
+/// Cache-line size used when building `LineAddr` from a `PhysAddr`.
+const CACHE_LINE_BYTES: u64 = 64;
 
 /// Configuration parameters for constructing a [`DramController`].
 #[derive(Clone, Copy, Debug)]
@@ -58,12 +38,63 @@ pub struct DramConfig {
     pub t_rfc: u64,
 }
 
+/// Per-bank state for DRAM row-buffer tracking.
+#[derive(Debug)]
+struct BankState {
+    /// Currently open row in this bank, or `None` if no row is active.
+    open_row: Option<u64>,
+    /// Cycle at which this bank becomes available (after activation or refresh).
+    busy_until: u64,
+}
+
+/// Fixed-latency memory controller backed by a [`DramBuffer`].
+#[derive(Debug)]
+pub struct SimpleController {
+    buffer: Arc<DramBuffer>,
+    base: PhysAddr,
+    latency: u64,
+}
+
+impl SimpleController {
+    /// Creates a simple controller. `base` is the physical address at which the
+    /// buffer's first byte is mapped.
+    pub const fn new(buffer: Arc<DramBuffer>, base: PhysAddr, latency: u64) -> Self {
+        Self { buffer, base, latency }
+    }
+
+    /// Returns a clone of the underlying DRAM buffer handle.
+    pub fn buffer(&self) -> Arc<DramBuffer> {
+        Arc::clone(&self.buffer)
+    }
+}
+
+impl Handle for SimpleController {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
+            let data = service_request(&self.buffer, self.base, paddr, size, op);
+            ctx.scheduler.schedule(
+                ctx.cycle + self.latency,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, CACHE_LINE_BYTES),
+                    data,
+                    hit_level: HitLevel::Dram,
+                },
+            );
+        }
+    }
+}
+
 /// DRAM controller with multi-bank row buffers, tRRD, and refresh modeling.
 ///
 /// Each bank independently tracks its open row and busy state. Refresh
 /// periodically marks all banks as unavailable for `t_rfc` cycles.
 #[derive(Debug)]
 pub struct DramController {
+    buffer: Arc<DramBuffer>,
+    base: PhysAddr,
     banks: Vec<BankState>,
     num_banks: usize,
     t_cas: u64,
@@ -75,7 +106,6 @@ pub struct DramController {
     row_mask: u64,
     row_shift: u32,
     /// Cycle of the last bank activation (for tRRD enforcement).
-    /// `None` means no activation has occurred yet.
     last_activate_cycle: Option<u64>,
     /// Next cycle at which an auto-refresh fires.
     next_refresh_cycle: u64,
@@ -83,7 +113,7 @@ pub struct DramController {
 
 impl DramController {
     /// Creates a DRAM controller from a [`DramConfig`].
-    pub fn new(cfg: DramConfig) -> Self {
+    pub fn new(buffer: Arc<DramBuffer>, base: PhysAddr, cfg: DramConfig) -> Self {
         debug_assert!(
             cfg.row_size_bytes.is_power_of_two(),
             "row_size_bytes must be a power of two"
@@ -99,6 +129,8 @@ impl DramController {
         }
 
         Self {
+            buffer,
+            base,
             banks,
             num_banks: cfg.num_banks,
             t_cas: cfg.t_cas,
@@ -114,21 +146,21 @@ impl DramController {
         }
     }
 
-    /// Determines the bank index for a given address.
-    /// `bank = (addr >> row_shift) % num_banks`
+    /// Returns a clone of the underlying DRAM buffer handle.
+    pub fn buffer(&self) -> Arc<DramBuffer> {
+        Arc::clone(&self.buffer)
+    }
+
     #[inline]
     const fn bank_index(&self, addr: u64) -> usize {
         ((addr >> self.row_shift) as usize) % self.num_banks
     }
 
-    /// Returns the row address for a given physical address.
     #[inline]
     const fn row_addr(&self, addr: u64) -> u64 {
         addr & self.row_mask
     }
 
-    /// Marks all banks busy for `t_rfc` cycles if a refresh is due. Returns
-    /// the earliest cycle the caller can proceed.
     fn handle_refresh(&mut self, current_cycle: u64) -> u64 {
         if self.t_refi == 0 {
             return current_cycle;
@@ -153,7 +185,6 @@ impl DramController {
         effective_cycle
     }
 
-    /// Enforces tRRD spacing and performs a row activation.
     const fn activate(&mut self, mut ready_cycle: u64) -> u64 {
         if let Some(last_act) = self.last_activate_cycle {
             let earliest_activate = last_act + self.t_rrd;
@@ -164,10 +195,10 @@ impl DramController {
         self.last_activate_cycle = Some(ready_cycle);
         ready_cycle
     }
-}
 
-impl MemoryController for DramController {
-    fn access_latency(&mut self, addr: u64, current_cycle: u64) -> u64 {
+    /// Computes the latency in cycles for an access at `addr` starting at
+    /// `current_cycle`. Mutates bank state and refresh tracking.
+    fn compute_latency(&mut self, addr: u64, current_cycle: u64) -> u64 {
         let mut ready_cycle = self.handle_refresh(current_cycle);
 
         let bank_idx = self.bank_index(addr);
@@ -196,5 +227,122 @@ impl MemoryController for DramController {
                 (ready_cycle - current_cycle) + self.t_ras + self.t_cas
             }
         }
+    }
+}
+
+impl Handle for DramController {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
+            let latency = self.compute_latency(paddr.val(), ctx.cycle);
+            let data = service_request(&self.buffer, self.base, paddr, size, op);
+            ctx.scheduler.schedule(
+                ctx.cycle + latency,
+                source,
+                ctx.self_id,
+                Packet::MemResp {
+                    req_id,
+                    line_addr: LineAddr::from_phys(paddr, CACHE_LINE_BYTES),
+                    data,
+                    hit_level: HitLevel::Dram,
+                },
+            );
+        }
+    }
+}
+
+/// Pluggable memory controller. Variants share a common `Handle` impl by
+/// dispatching to the contained controller.
+#[derive(Debug)]
+pub enum MemoryController {
+    /// Fixed-latency model.
+    Simple(SimpleController),
+    /// Row-buffer-aware DRAM model.
+    Dram(DramController),
+}
+
+impl MemoryController {
+    /// Returns a clone of the underlying DRAM buffer handle.
+    pub fn buffer(&self) -> Arc<DramBuffer> {
+        match self {
+            Self::Simple(c) => c.buffer(),
+            Self::Dram(c) => c.buffer(),
+        }
+    }
+}
+
+impl Handle for MemoryController {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        match self {
+            Self::Simple(c) => c.handle(packet, source, ctx),
+            Self::Dram(c) => c.handle(packet, source, ctx),
+        }
+    }
+}
+
+/// Reads or writes the underlying buffer for a memory request and returns the
+/// response payload. Writes return a zero `Small` payload.
+fn service_request(
+    buffer: &Arc<DramBuffer>,
+    base: PhysAddr,
+    paddr: PhysAddr,
+    size: AccessSize,
+    op: MemOp,
+) -> MemRespData {
+    let offset = (paddr.val().saturating_sub(base.val())) as usize;
+    match op {
+        MemOp::Read | MemOp::Fetch => read_response(buffer, offset, size),
+        MemOp::Write { data } => {
+            write_payload(buffer, offset, size, &data);
+            MemRespData::Small(0)
+        }
+        MemOp::Atomic { .. } => {
+            // Atomic semantics are resolved upstream (LR/SC reservation, AMO
+            // round-trip in the LSU). The controller serves the load value.
+            read_response(buffer, offset, size)
+        }
+    }
+}
+
+fn read_response(buffer: &Arc<DramBuffer>, offset: usize, size: AccessSize) -> MemRespData {
+    match size {
+        AccessSize::B1 => MemRespData::Small(u64::from(buffer.read_u8(offset))),
+        AccessSize::B2 => {
+            let s = buffer.read_slice(offset, 2);
+            MemRespData::Small(u64::from(u16::from_le_bytes([s[0], s[1]])))
+        }
+        AccessSize::B4 => {
+            let s = buffer.read_slice(offset, 4);
+            MemRespData::Small(u64::from(u32::from_le_bytes([s[0], s[1], s[2], s[3]])))
+        }
+        AccessSize::B8 => {
+            let s = buffer.read_slice(offset, 8);
+            MemRespData::Small(u64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]))
+        }
+        AccessSize::Line => {
+            let s = buffer.read_slice(offset, CACHE_LINE_BYTES as usize);
+            MemRespData::Line(s.to_vec().into_boxed_slice())
+        }
+    }
+}
+
+fn write_payload(buffer: &Arc<DramBuffer>, offset: usize, size: AccessSize, data: &WriteData) {
+    match (size, data) {
+        (AccessSize::B1, WriteData::Small(v)) => buffer.write_u8(offset, *v as u8),
+        (AccessSize::B2, WriteData::Small(v)) => {
+            buffer.write_slice(offset, &(*v as u16).to_le_bytes());
+        }
+        (AccessSize::B4, WriteData::Small(v)) => {
+            buffer.write_slice(offset, &(*v as u32).to_le_bytes());
+        }
+        (AccessSize::B8, WriteData::Small(v)) => {
+            buffer.write_slice(offset, &v.to_le_bytes());
+        }
+        (AccessSize::Line, WriteData::Line(bytes)) => {
+            buffer.write_slice(offset, bytes);
+        }
+        // Mismatched size/payload pairs are ignored — the upstream LSU should
+        // never construct them. A future tightening could express this in the
+        // packet enum's type by parameterizing `WriteData` on `AccessSize`.
+        _ => {}
     }
 }

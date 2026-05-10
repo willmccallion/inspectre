@@ -15,7 +15,8 @@ use crate::sim::stats::Stats;
 ///
 /// Carries the bench-side scaffolding a component might need: the event
 /// scheduler (to schedule outgoing packets), the stats sink, the simulation
-/// config (read-only), and the current cycle.
+/// config (read-only), the current cycle, and the receiver's own
+/// [`ComponentId`] so it can stamp `source` on outgoing packets.
 #[derive(Debug)]
 pub struct HandleCtx<'a> {
     /// Outgoing event scheduler.
@@ -26,6 +27,10 @@ pub struct HandleCtx<'a> {
     pub config: &'a Config,
     /// The cycle at which this event is being delivered.
     pub cycle: u64,
+    /// `ComponentId` of the component receiving this packet (the `self` of
+    /// the `Handle::handle` call). Set by the dispatch loop before invoking
+    /// the handler.
+    pub self_id: ComponentId,
 }
 
 /// Trait every event-driven component implements.
