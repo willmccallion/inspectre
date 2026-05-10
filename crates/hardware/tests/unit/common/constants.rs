@@ -45,7 +45,10 @@ fn test_page_offset_mask_clears_upper_bits() {
 
 #[test]
 fn test_vpn_mask_value() {
-    assert_eq!(VPN_MASK, 0x7FFFFFF, "VPN_MASK should be 0x7FFFFFF (27 bits)");
+    assert_eq!(
+        VPN_MASK, 0x1FFF_FFFF_FFFF,
+        "VPN_MASK should be wide enough for Sv57 (45 bits)"
+    );
 }
 
 #[test]

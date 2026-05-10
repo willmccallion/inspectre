@@ -29,6 +29,21 @@ from .types import (
 _START_PC_DEFAULT = 0x8000_0000
 
 
+_PAGING_MODES = ("bare", "sv39", "sv48", "sv57")
+
+
+def _validate_paging_mode(value: str) -> str:
+    """Normalize and validate a paging-mode-cap string for the Rust deserializer."""
+    if not isinstance(value, str):
+        raise TypeError(f"paging_mode_max must be a string, got {type(value).__name__}")
+    normalized = value.lower()
+    if normalized not in _PAGING_MODES:
+        raise ValueError(
+            f"paging_mode_max={value!r} not in {_PAGING_MODES}"
+        )
+    return normalized
+
+
 class Config:
     """
     Full simulator configuration with flat parameter access.
@@ -77,6 +92,7 @@ class Config:
         l2_tlb_latency: int = 4,
         software_ad_bits: bool = True,
         misaligned_access_trap: bool = False,
+        paging_mode_max: str = "sv57",
         # Vector ISA
         vlen: int = 128,
         num_vec_lanes: Optional[int] = None,
@@ -126,6 +142,7 @@ class Config:
         self.l2_tlb_latency = l2_tlb_latency
         self.software_ad_bits = software_ad_bits
         self.misaligned_access_trap = misaligned_access_trap
+        self.paging_mode_max = _validate_paging_mode(paging_mode_max)
 
         # Vector ISA
         self.vlen = vlen
@@ -182,6 +199,7 @@ class Config:
             l2_tlb_ways=self.l2_tlb_ways,
             l2_tlb_latency=self.l2_tlb_latency,
             software_ad_bits=self.software_ad_bits,
+            paging_mode_max=self.paging_mode_max,
             misaligned_access_trap=self.misaligned_access_trap,
             vlen=self.vlen,
             num_vec_lanes=self.num_vec_lanes,
@@ -625,6 +643,7 @@ def _config_to_dict_impl(cfg: Config) -> Dict[str, Any]:
         "l2_tlb_ways": cfg.l2_tlb_ways,
         "l2_tlb_latency": cfg.l2_tlb_latency,
         "software_ad_bits": cfg.software_ad_bits,
+        "paging_mode_max": cfg.paging_mode_max,
         "misaligned_access_trap": cfg.misaligned_access_trap,
     }
     # Always emit DRAM timing keys (Rust expects them)

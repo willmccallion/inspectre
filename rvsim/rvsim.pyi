@@ -218,6 +218,7 @@ class Config:
     ram_size: int
     memory_controller: Any
     tlb_size: int
+    paging_mode_max: str
     trace: bool
     initial_sp: Optional[int]
     ram_base: int
@@ -245,6 +246,7 @@ class Config:
         ram_size: str | int = "256MB",
         memory_controller: Any = None,
         tlb_size: int = 32,
+        paging_mode_max: str = "sv57",
         trace: bool = False,
         initial_sp: Optional[int] = None,
         ram_base: int = 0x8000_0000,

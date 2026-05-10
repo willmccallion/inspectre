@@ -12,7 +12,7 @@ pub mod ptw;
 pub mod tlb;
 
 use crate::common::{AccessType, Asid, PhysAddr, TranslationResult, Trap, VirtAddr, Vpn};
-use crate::core::arch::csr::Csrs;
+use crate::core::arch::csr::{Csrs, PagingMode};
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::soc::interconnect::Bus;
@@ -34,6 +34,10 @@ pub struct Mmu {
     /// Software-managed A/D bits: PTW faults on A=0 or D=0 instead of
     /// auto-setting them (matches spike's behavior).
     pub software_ad_bits: bool,
+    /// Highest SATP paging mode the CPU writer will accept. Anything above
+    /// this is coerced to Bare on write, letting tests pin a mode without
+    /// rebuilding the kernel (e.g. force a Sv57-aware Linux onto Sv39).
+    pub paging_mode_max: PagingMode,
 }
 
 impl Mmu {
@@ -55,12 +59,14 @@ impl Mmu {
         l2_ways: usize,
         l2_latency: u64,
         software_ad_bits: bool,
+        paging_mode_max: PagingMode,
     ) -> Self {
         Self {
             dtlb: Tlb::new(tlb_size),
             itlb: Tlb::new(tlb_size),
             l2_tlb: L2Tlb::new(l2_size, l2_ways, l2_latency),
             software_ad_bits,
+            paging_mode_max,
         }
     }
 
@@ -131,8 +137,7 @@ impl Mmu {
     ) -> TranslationResult {
         use crate::common::constants::{PAGE_SHIFT, VPN_MASK};
         use crate::core::arch::csr::{
-            SATP_ASID_MASK, SATP_ASID_SHIFT, SATP_MODE_BARE, SATP_MODE_MASK, SATP_MODE_SHIFT,
-            SATP_MODE_SV39,
+            PagingMode, SATP_ASID_MASK, SATP_ASID_SHIFT, SATP_MODE_MASK, SATP_MODE_SHIFT,
         };
         /// Bit position of MXR (Make eXecutable Readable) bit in sstatus register.
         const SSTATUS_MXR_SHIFT: u64 = 19;
@@ -140,21 +145,17 @@ impl Mmu {
         const SSTATUS_SUM_SHIFT: u64 = 18;
 
         let satp = csrs.satp;
-        let mode = (satp >> SATP_MODE_SHIFT) & SATP_MODE_MASK;
+        let mode_raw = (satp >> SATP_MODE_SHIFT) & SATP_MODE_MASK;
+        let Some(paging) = PagingMode::from_satp_mode(mode_raw) else {
+            return TranslationResult::fault(Trap::InstructionAccessFault(vaddr.val()), 0);
+        };
 
-        if privilege == PrivilegeMode::Machine || mode == SATP_MODE_BARE {
+        if privilege == PrivilegeMode::Machine || paging == PagingMode::Bare {
             return TranslationResult::success(PhysAddr::new(vaddr.val()), 0);
         }
 
-        if mode != SATP_MODE_SV39 {
-            return TranslationResult::fault(Trap::InstructionAccessFault(vaddr.val()), 0);
-        }
-
         let va = vaddr.val();
-        let bit_38 = (va >> 38) & 1;
-        let top_bits = va >> 39;
-        let expected_top = if bit_38 == 1 { 0x1FFFFFF } else { 0 };
-        if top_bits != expected_top {
+        if !is_canonical_va(va, paging) {
             return TranslationResult::fault(
                 match access {
                     AccessType::Fetch => Trap::InstructionPageFault(va),
@@ -275,12 +276,28 @@ impl Mmu {
             }
         }
 
+        let request = ptw::WalkRequest { access, privilege, mode: paging };
         if let Some(pmp_unit) = pmp {
-            ptw::page_table_walk_with_pmp(self, vaddr, access, privilege, csrs, bus, pmp_unit)
+            ptw::page_table_walk_with_pmp(self, vaddr, request, csrs, bus, pmp_unit)
         } else {
-            ptw::page_table_walk(self, vaddr, access, privilege, csrs, bus)
+            ptw::page_table_walk(self, vaddr, request, csrs, bus)
         }
     }
+}
+
+/// Returns true if `va` is a canonical virtual address for `mode`. Canonical
+/// addresses have the bits strictly above `mode.va_top_bit()` equal to bit
+/// `va_top_bit` itself (sign extension). For `Bare` every address is
+/// canonical because `va_top_bit = 63` makes the upper-bits range empty.
+const fn is_canonical_va(va: u64, mode: crate::core::arch::csr::PagingMode) -> bool {
+    let top = mode.va_top_bit();
+    if top >= 63 {
+        return true;
+    }
+    let top_bit = (va >> top) & 1;
+    let upper = va >> (top + 1);
+    let expected = if top_bit == 1 { (1u64 << (63 - top)) - 1 } else { 0 };
+    upper == expected
 }
 
 /// Creates an appropriate page fault trap for the access type.

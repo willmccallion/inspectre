@@ -1,11 +1,11 @@
 //! Page Table Walker (PTW) Unit Tests.
 //!
-//! Verifies SV39 address translation logic:
-//! - Page table walks (levels 2, 1, 0)
-//! - Superpages (2MB, 1GB)
+//! Verifies Sv39 / Sv48 / Sv57 address translation logic:
+//! - Page-table walks at every supported level depth
+//! - Superpages (2 MiB, 1 GiB, 512 GiB, 256 TiB)
 //! - Permission checks (R/W/X/U)
 //! - Accessed/Dirty bit updates
-//! - Canonical address checks
+//! - Canonical-address checks
 //! - Bare mode bypass
 
 use crate::common::harness::TestContext;
@@ -35,7 +35,7 @@ fn make_pte(ppn: u64, perms: u64) -> u64 {
 }
 
 fn setup_mmu() -> (Mmu, Csrs, TestContext) {
-    let mmu = Mmu::new(4, 4, 4, 4, false); // Small TLB + small L2 TLB to force walks
+    let mmu = Mmu::new(4, 4, 4, 4, false, csr::PagingMode::Sv57); // Small TLB + small L2 TLB to force walks
     let mut csrs = Csrs::default();
 
     // Enable SV39 mode
@@ -359,5 +359,304 @@ fn non_canonical_address_faults() {
     );
 
     // Non-canonical address is unmapped in the virtual address space → PageFault
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+fn setup_mmu_with_mode(mode: u64) -> (Mmu, Csrs, TestContext) {
+    let mmu = Mmu::new(4, 4, 4, 4, false, csr::PagingMode::Sv57);
+    let mut csrs = Csrs::default();
+    let satp_val = (mode << 60) | ROOT_PPN;
+    csrs.write(csr::SATP, satp_val);
+    csrs.write(csr::SSTATUS, (1 << 18) | (1 << 19));
+    let tc = TestContext::new().with_memory(MEM_SIZE, MEM_BASE);
+    (mmu, csrs, tc)
+}
+
+fn vpn_index(va: u64, level: u32) -> u64 {
+    (va >> (12 + 9 * level)) & 0x1FF
+}
+
+#[test]
+fn sv48_4kb_page_walk() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x4000_1234);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+    let l0 = vpn_index(vaddr.val(), 0);
+
+    let l2_table = ROOT_PPN + 1;
+    let l1_table = ROOT_PPN + 2;
+    let l0_table = ROOT_PPN + 3;
+    let target = ROOT_PPN + 10;
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(l0_table, 0));
+    write_pte(bus, l0_table, l0, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    assert_eq!(res.paddr.val(), (target << 12) | 0x234);
+}
+
+#[test]
+fn sv48_megapage_walk() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x4020_0000);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+
+    let l2_table = ROOT_PPN + 1;
+    let l1_table = ROOT_PPN + 2;
+    let target = ROOT_PPN + 0x200; // aligned for 2 MiB superpage (PPN[0]=0)
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    assert_eq!(res.paddr.val(), target << 12);
+}
+
+#[test]
+fn sv48_gigapage_walk() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x8000_0000);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+
+    let l2_table = ROOT_PPN + 1;
+    let target = ROOT_PPN + 0x40000; // aligned for 1 GiB superpage (PPN[0..18]=0)
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    assert_eq!(res.paddr.val(), target << 12);
+}
+
+#[test]
+fn sv48_terapage_walk() {
+    // Sv48-specific: 512 GiB superpage at L3 (top of the walk).
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    // VA in the first 512 GiB region; bit 47=0 so canonical.
+    let vaddr = VirtAddr::new(0x10_0000_1000);
+    let l3 = vpn_index(vaddr.val(), 3);
+
+    // Aligned for 512 GiB: PPN[0..27]=0, i.e. multiple of 1 << 27.
+    let target = 1u64 << 27;
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    let offset_mask = (1u64 << (12 + 9 * 3)) - 1;
+    assert_eq!(res.paddr.val(), (target << 12) | (vaddr.val() & offset_mask));
+}
+
+#[test]
+fn sv48_misaligned_superpage_causes_fault() {
+    // Mid-walk superpage with non-zero PPN low bits → reserved → page fault.
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x4020_0000);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+
+    let l2_table = ROOT_PPN + 1;
+    let l1_table = ROOT_PPN + 2;
+    let misaligned = (ROOT_PPN + 100) | 0x1; // L1 leaf must have PPN[0..8]=0
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(misaligned, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv48_pointer_at_level_0_causes_fault() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+    let vaddr = VirtAddr::new(0x1000);
+
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+    let l0 = vpn_index(vaddr.val(), 0);
+
+    let l2_table = ROOT_PPN + 1;
+    let l1_table = ROOT_PPN + 2;
+    let l0_table = ROOT_PPN + 3;
+
+    write_pte(bus, ROOT_PPN, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(l0_table, 0));
+    // L0 with no R/W/X is a pointer encoding, illegal at the leaf level.
+    write_pte(bus, l0_table, l0, make_pte(ROOT_PPN + 10, 0));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv48_non_canonical_address_faults() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+
+    // bit 47 = 1 but bits 63..48 = 0 → non-canonical for Sv48.
+    let non_canon_low = VirtAddr::new(1u64 << 47);
+    let res = mmu.translate(
+        non_canon_low,
+        AccessType::Read,
+        PrivilegeMode::Supervisor,
+        &csrs,
+        &mut tc.cpu_mut().bus.bus,
+    );
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+
+    // bit 47 = 0 but a stray upper bit set → non-canonical.
+    let non_canon_hi = VirtAddr::new(1u64 << 50);
+    let res = mmu.translate(
+        non_canon_hi,
+        AccessType::Read,
+        PrivilegeMode::Supervisor,
+        &csrs,
+        &mut tc.cpu_mut().bus.bus,
+    );
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv48_invalid_pte_causes_fault() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV48);
+    let bus = &mut tc.cpu_mut().bus.bus;
+    let vaddr = VirtAddr::new(0x1000);
+    // Default-zero memory at the root → V=0 at L3 → fault on the first read.
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv57_4kb_page_walk() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV57);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x4000_1234);
+    let l4 = vpn_index(vaddr.val(), 4);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+    let l0 = vpn_index(vaddr.val(), 0);
+
+    let l3_table = ROOT_PPN + 1;
+    let l2_table = ROOT_PPN + 2;
+    let l1_table = ROOT_PPN + 3;
+    let l0_table = ROOT_PPN + 4;
+    let target = ROOT_PPN + 20;
+
+    write_pte(bus, ROOT_PPN, l4, make_pte(l3_table, 0));
+    write_pte(bus, l3_table, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(l0_table, 0));
+    write_pte(bus, l0_table, l0, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    assert_eq!(res.paddr.val(), (target << 12) | 0x234);
+}
+
+#[test]
+fn sv57_petapage_walk() {
+    // Sv57-specific: 256 TiB superpage at L4 (top of the walk).
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV57);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    // VA inside the first 256 TiB region (bit 56 = 0 → canonical).
+    let vaddr = VirtAddr::new(0x10_0000_1000);
+    let l4 = vpn_index(vaddr.val(), 4);
+
+    // Aligned for 256 TiB: PPN[0..36]=0.
+    let target = 1u64 << 36;
+
+    write_pte(bus, ROOT_PPN, l4, make_pte(target, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(res.trap.is_none(), "Trap: {:?}", res.trap);
+    let offset_mask = (1u64 << (12 + 9 * 4)) - 1;
+    assert_eq!(res.paddr.val(), (target << 12) | (vaddr.val() & offset_mask));
+}
+
+#[test]
+fn sv57_misaligned_superpage_causes_fault() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV57);
+    let bus = &mut tc.cpu_mut().bus.bus;
+
+    let vaddr = VirtAddr::new(0x10_0000_1000);
+    let l4 = vpn_index(vaddr.val(), 4);
+
+    // L4 leaf needs PPN[0..36]=0; set bit 0 to misalign.
+    let misaligned = (1u64 << 36) | 0x1;
+    write_pte(bus, ROOT_PPN, l4, make_pte(misaligned, R | W | X | A | D));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv57_pointer_at_level_0_causes_fault() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV57);
+    let bus = &mut tc.cpu_mut().bus.bus;
+    let vaddr = VirtAddr::new(0x1000);
+
+    let l4 = vpn_index(vaddr.val(), 4);
+    let l3 = vpn_index(vaddr.val(), 3);
+    let l2 = vpn_index(vaddr.val(), 2);
+    let l1 = vpn_index(vaddr.val(), 1);
+    let l0 = vpn_index(vaddr.val(), 0);
+
+    let l3_table = ROOT_PPN + 1;
+    let l2_table = ROOT_PPN + 2;
+    let l1_table = ROOT_PPN + 3;
+    let l0_table = ROOT_PPN + 4;
+
+    write_pte(bus, ROOT_PPN, l4, make_pte(l3_table, 0));
+    write_pte(bus, l3_table, l3, make_pte(l2_table, 0));
+    write_pte(bus, l2_table, l2, make_pte(l1_table, 0));
+    write_pte(bus, l1_table, l1, make_pte(l0_table, 0));
+    write_pte(bus, l0_table, l0, make_pte(ROOT_PPN + 10, 0));
+
+    let res = mmu.translate(vaddr, AccessType::Read, PrivilegeMode::Supervisor, &csrs, bus);
+    assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
+}
+
+#[test]
+fn sv57_non_canonical_address_faults() {
+    let (mut mmu, csrs, mut tc) = setup_mmu_with_mode(csr::SATP_MODE_SV57);
+
+    // bit 56 = 1 but bits 63..57 = 0 → non-canonical.
+    let non_canon = VirtAddr::new(1u64 << 56);
+
+    let res = mmu.translate(
+        non_canon,
+        AccessType::Read,
+        PrivilegeMode::Supervisor,
+        &csrs,
+        &mut tc.cpu_mut().bus.bus,
+    );
     assert!(matches!(res.trap, Some(Trap::LoadPageFault(_))), "Trap: {:?}", res.trap);
 }

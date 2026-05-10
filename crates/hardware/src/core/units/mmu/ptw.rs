@@ -1,13 +1,13 @@
-//! Hardware Page Table Walker (PTW) for RISC-V SV39.
+//! Hardware Page Table Walker (PTW) for RISC-V Sv39 / Sv48 / Sv57.
 //!
-//! This module implements the hardware page table walking algorithm. It traverses
-//! the three-level page table structure defined by the SV39 virtual memory scheme
-//! to translate virtual addresses to physical addresses.
+//! This module implements the hardware page table walking algorithm. The PTE
+//! format and 9-bit-per-level VPN slicing are identical across modes; only the
+//! number of levels differs and is passed in by the caller.
 
 use crate::common::{
     AccessType, Asid, PAGE_SHIFT, PhysAddr, Ppn, TranslationResult, Trap, VPN_MASK, VirtAddr, Vpn,
 };
-use crate::core::arch::csr::{Csrs, SATP_ASID_MASK, SATP_ASID_SHIFT, SATP_PPN_MASK};
+use crate::core::arch::csr::{Csrs, PagingMode, SATP_ASID_MASK, SATP_ASID_SHIFT, SATP_PPN_MASK};
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::{Pmp, PmpResult};
@@ -115,55 +115,54 @@ impl PageTableEntry {
     }
 }
 
-/// Performs a hardware page table walk for SV39.
+/// Per-walk inputs that travel together: what is being accessed, by whom, and
+/// under which paging mode. Bundled into one struct so the PTW signature stays
+/// below the clippy too-many-arguments threshold.
+#[derive(Clone, Copy, Debug)]
+pub struct WalkRequest {
+    /// Type of memory access being attempted (fetch/read/write).
+    pub access: AccessType,
+    /// Privilege mode of the processor at the time of access.
+    pub privilege: PrivilegeMode,
+    /// Active paging mode (drives the level count and canonical-VA width).
+    pub mode: PagingMode,
+}
+
+/// Performs a hardware page table walk for the given paging mode.
 ///
 /// Traverses the page table tree starting from the root PPN in the SATP register.
-/// It supports 4KB pages, 2MB megapages, and 1GB gigapages.
-///
-/// # Arguments
-///
-/// * `mmu` - Mutable reference to the MMU for TLB updates.
-/// * `vaddr` - The virtual address to translate.
-/// * `access` - The type of memory access (Fetch, Read, Write).
-/// * `privilege` - The current privilege mode of the processor.
-/// * `csrs` - System CSRs (specifically SATP and STATUS).
-/// * `bus` - System bus for reading PTEs from memory.
+/// Supports 4KB pages plus all superpage sizes the mode allows
+/// (Sv39: 2 MiB / 1 GiB; Sv48 adds 512 GiB; Sv57 adds 256 TiB).
 pub fn page_table_walk(
     mmu: &mut Mmu,
     vaddr: VirtAddr,
-    access: AccessType,
-    privilege: PrivilegeMode,
+    request: WalkRequest,
     csrs: &Csrs,
     bus: &mut Bus,
 ) -> TranslationResult {
-    page_table_walk_inner(mmu, vaddr, access, privilege, csrs, bus, None)
+    page_table_walk_inner(mmu, vaddr, request, csrs, bus, None)
 }
 
 /// Page table walk with optional PMP checking on PTE reads.
 pub fn page_table_walk_with_pmp(
     mmu: &mut Mmu,
     vaddr: VirtAddr,
-    access: AccessType,
-    privilege: PrivilegeMode,
+    request: WalkRequest,
     csrs: &Csrs,
     bus: &mut Bus,
     pmp: &Pmp,
 ) -> TranslationResult {
-    page_table_walk_inner(mmu, vaddr, access, privilege, csrs, bus, Some(pmp))
+    page_table_walk_inner(mmu, vaddr, request, csrs, bus, Some(pmp))
 }
 
 fn page_table_walk_inner(
     mmu: &mut Mmu,
     vaddr: VirtAddr,
-    access: AccessType,
-    privilege: PrivilegeMode,
+    request: WalkRequest,
     csrs: &Csrs,
     bus: &mut Bus,
     pmp: Option<&Pmp>,
 ) -> TranslationResult {
-    /// Number of page table levels in SV39 (3 levels: L2, L1, L0).
-    const SV39_LEVELS: usize = 3;
-
     /// Number of bits used for VPN indexing at each level (9 bits per level).
     const VPN_BITS_PER_LEVEL: u64 = 9;
 
@@ -176,12 +175,14 @@ fn page_table_walk_inner(
     /// Cycles required to update a PTE's accessed/dirty bits in memory.
     const PTE_UPDATE_CYCLES: u64 = 10;
 
+    let WalkRequest { access, privilege, mode } = request;
+    let levels = mode.levels();
     let satp = csrs.satp;
     let mut ppn_raw = satp & SATP_PPN_MASK;
     let asid = Asid::new(((satp >> SATP_ASID_SHIFT) & SATP_ASID_MASK) as u16);
     let mut cycles = 0;
 
-    for level in (0..SV39_LEVELS).rev() {
+    for level in (0..levels).rev() {
         let vpn_shift = PAGE_SHIFT + level as u64 * VPN_BITS_PER_LEVEL;
         let vpn_i = (vaddr.val() >> vpn_shift) & VPN_ENTRY_MASK;
         let pte_addr = (ppn_raw << PAGE_SHIFT) + (vpn_i * PTE_SIZE);

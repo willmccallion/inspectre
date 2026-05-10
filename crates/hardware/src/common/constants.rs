@@ -6,8 +6,12 @@ pub const PAGE_SIZE: u64 = 4096;
 /// Number of bits to shift to convert between bytes and pages.
 pub const PAGE_SHIFT: u64 = 12;
 
-/// Mask for extracting the virtual page number (VPN) from an address.
-pub const VPN_MASK: u64 = 0x7FFFFFF;
+/// Mask for the bits of a VA that contribute to the 4KB VPN (Sv57 width).
+///
+/// Wide enough for Sv57's 45-bit VPN. Narrower modes leave the upper bits as
+/// sign-extended copies of the canonical-VA top bit, so the wider mask is a
+/// no-op for them.
+pub const VPN_MASK: u64 = 0x1FFF_FFFF_FFFF;
 
 /// Mask for extracting the page offset from an address.
 pub const PAGE_OFFSET_MASK: u64 = PAGE_SIZE - 1;

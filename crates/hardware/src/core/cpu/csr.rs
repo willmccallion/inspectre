@@ -335,8 +335,10 @@ impl Cpu {
             }
             x if x == csr::SATP.as_u32() => {
                 let mode = (val >> csr::SATP_MODE_SHIFT) & csr::SATP_MODE_MASK;
+                let allowed = csr::PagingMode::from_satp_mode(mode)
+                    .is_some_and(|m| m.is_at_most(self.mmu.paging_mode_max));
 
-                let new_val = if mode == csr::SATP_MODE_SV39 || mode == csr::SATP_MODE_BARE {
+                let new_val = if allowed {
                     val
                 } else {
                     val & !(csr::SATP_MODE_MASK << csr::SATP_MODE_SHIFT)

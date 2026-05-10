@@ -309,6 +309,40 @@ fn test_csr_satp_invalid_mode_rejected() {
 }
 
 #[test]
+fn test_csr_satp_sv48_accepted_by_default() {
+    let mut cpu = create_test_cpu();
+    let satp = (csr::SATP_MODE_SV48 << 60) | 0x12345;
+    cpu.csr_write(csr::SATP, satp);
+    assert_eq!(cpu.csr_read(csr::SATP), satp);
+}
+
+#[test]
+fn test_csr_satp_sv57_accepted_by_default() {
+    let mut cpu = create_test_cpu();
+    let satp = (csr::SATP_MODE_SV57 << 60) | 0x12345;
+    cpu.csr_write(csr::SATP, satp);
+    assert_eq!(cpu.csr_read(csr::SATP), satp);
+}
+
+#[test]
+fn test_csr_satp_paging_mode_cap_coerces_above_cap() {
+    let mut config = Config::default();
+    config.memory.paging_mode_max = csr::PagingMode::Sv39;
+    let system = rvsim_core::soc::System::new(&config, "");
+    let mut cpu = Cpu::new(system, &config);
+
+    // Sv48 is above the cap → coerce to Bare; PPN preserved.
+    let above_cap = (csr::SATP_MODE_SV48 << 60) | 0x12345;
+    cpu.csr_write(csr::SATP, above_cap);
+    assert_eq!(cpu.csr_read(csr::SATP), 0x12345);
+
+    // Sv39 is at the cap → accepted as written.
+    let at_cap = (csr::SATP_MODE_SV39 << 60) | 0x12345;
+    cpu.csr_write(csr::SATP, at_cap);
+    assert_eq!(cpu.csr_read(csr::SATP), at_cap);
+}
+
+#[test]
 fn test_csr_cycle_counter() {
     let cpu = create_test_cpu();
 

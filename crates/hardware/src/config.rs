@@ -730,6 +730,40 @@ pub struct MemoryConfig {
     /// penalty (like many modern RISC-V cores). Default: true.
     #[serde(default = "MemoryConfig::default_misaligned_access_trap")]
     pub misaligned_access_trap: bool,
+
+    /// Highest SATP paging mode the CPU's CSR writer will accept.
+    ///
+    /// Anything stronger than this is coerced to Bare on write. Lets test
+    /// configurations pin the active mode without rebuilding the kernel
+    /// (e.g. force a Sv57-aware Linux to fall back to Sv39). Accepted JSON
+    /// values: `"bare"`, `"sv39"`, `"sv48"`, `"sv57"`. Default: Sv57 (no cap).
+    #[serde(
+        default = "MemoryConfig::default_paging_mode_max",
+        deserialize_with = "deserialize_paging_mode"
+    )]
+    pub paging_mode_max: crate::core::arch::csr::PagingMode,
+}
+
+fn deserialize_paging_mode<'de, D>(
+    deserializer: D,
+) -> Result<crate::core::arch::csr::PagingMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use crate::core::arch::csr::PagingMode;
+    use serde::de::{Error, Unexpected};
+
+    let s = String::deserialize(deserializer)?;
+    match s.to_ascii_lowercase().as_str() {
+        "bare" => Ok(PagingMode::Bare),
+        "sv39" => Ok(PagingMode::Sv39),
+        "sv48" => Ok(PagingMode::Sv48),
+        "sv57" => Ok(PagingMode::Sv57),
+        _ => Err(D::Error::invalid_value(
+            Unexpected::Str(&s),
+            &"one of \"bare\", \"sv39\", \"sv48\", \"sv57\"",
+        )),
+    }
 }
 
 impl MemoryConfig {
@@ -816,6 +850,11 @@ impl MemoryConfig {
     const fn default_misaligned_access_trap() -> bool {
         false
     }
+
+    /// Default paging-mode cap: accept every supported mode.
+    const fn default_paging_mode_max() -> crate::core::arch::csr::PagingMode {
+        crate::core::arch::csr::PagingMode::Sv57
+    }
 }
 
 impl Default for MemoryConfig {
@@ -838,6 +877,7 @@ impl Default for MemoryConfig {
             l2_tlb_latency: defaults::L2_TLB_LATENCY,
             software_ad_bits: true,
             misaligned_access_trap: false,
+            paging_mode_max: crate::core::arch::csr::PagingMode::Sv57,
         }
     }
 }

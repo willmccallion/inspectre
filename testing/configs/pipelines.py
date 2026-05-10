@@ -358,6 +358,16 @@ PIPELINES = [
     ("o3 w4 small-tlb",     Config(width=4, backend=Backend.OutOfOrder(), tlb_size=4)),
     ("o3 w4 large-tlb",     Config(width=4, backend=Backend.OutOfOrder(), tlb_size=256)),
 
+    # ── Paging-mode caps ──────────────────────────────────────────────────────
+    # Force the SATP writer to coerce anything stronger to Bare. Most riscv-
+    # tests use Sv39, so only the Linux-boot config and any kernel that
+    # probes Sv57/Sv48 first will see different behaviour. Default is sv57
+    # (no cap).
+    ("o3 w4 sv39-only",     Config(width=4, backend=Backend.OutOfOrder(), paging_mode_max="sv39")),
+    ("o3 w4 sv48-cap",      Config(width=4, backend=Backend.OutOfOrder(), paging_mode_max="sv48")),
+    ("inorder w4 sv39-only", Config(width=4, backend=Backend.InOrder(), paging_mode_max="sv39")),
+    ("inorder w4 sv48-cap", Config(width=4, backend=Backend.InOrder(), paging_mode_max="sv48")),
+
     # ── Reference machine configs ──────────────────────────────────────────────
     ("ref cortex-a72",      cortex_a72_config()),
     ("ref p550",            p550_config()),

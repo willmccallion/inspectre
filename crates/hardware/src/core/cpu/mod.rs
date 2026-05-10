@@ -315,6 +315,7 @@ impl Cpu {
                 config.memory.l2_tlb_ways,
                 config.memory.l2_tlb_latency,
                 config.memory.software_ad_bits,
+                config.memory.paging_mode_max,
             ),
             pmp: Pmp::new(),
             load_reservation: None,
