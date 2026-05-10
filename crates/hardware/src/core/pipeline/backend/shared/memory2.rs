@@ -405,8 +405,7 @@ mod tests {
     #[test]
     fn test_memory2_pass_through() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut store_buffer = StoreBuffer::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
@@ -443,8 +442,7 @@ mod tests {
     #[test]
     fn test_memory2_trap_propagation() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut store_buffer = StoreBuffer::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
@@ -483,8 +481,7 @@ mod tests {
         use crate::common::error::LrScRecord;
 
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut store_buffer = StoreBuffer::new(4);
 
         let ctrl_lr = ControlSignals {
@@ -560,8 +557,7 @@ mod tests {
     #[test]
     fn test_memory2_ordering_violation() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut store_buffer = StoreBuffer::new(4);
         let mut load_queue = LoadQueue::new(4);
 

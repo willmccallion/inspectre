@@ -295,7 +295,7 @@ pub fn memory1_stage(
                 let l1d_hit = cpu.core.l1_d_cache.access_check(paddr.val(), is_write);
 
                 if l1d_hit {
-                    cpu.soc.stats.dcache_hits += 1;
+                    cpu.stats.dcache_hits += 1;
                     per_entry_latency += cpu.core.l1_d_cache.latency;
                     trace_mem!(cpu.soc.config.general.trace_instructions;
                         stage      = "M1",
@@ -327,7 +327,7 @@ pub fn memory1_stage(
                         vec_mem: ex.vec_mem,
                     });
                 } else {
-                    cpu.soc.stats.dcache_misses += 1;
+                    cpu.stats.dcache_misses += 1;
                     let miss_latency =
                         cpu.core.l1_d_cache.latency + cpu.simulate_l1d_miss_latency(paddr, access_type);
                     trace_mem!(cpu.soc.config.general.trace_instructions;
@@ -355,10 +355,10 @@ pub fn memory1_stage(
                         );
                         match resp {
                             CacheResponse::MshrAllocated { .. } => {
-                                cpu.soc.stats.mshr_allocations += 1;
+                                cpu.stats.mshr_allocations += 1;
                             }
                             CacheResponse::MshrCoalesced { .. } => {
-                                cpu.soc.stats.mshr_coalesces += 1;
+                                cpu.stats.mshr_coalesces += 1;
                             }
                             CacheResponse::MshrFull | CacheResponse::Hit => {
                                 // Store proceeds; worst case write-allocate is skipped.
@@ -416,9 +416,9 @@ pub fn memory1_stage(
                         );
                         match resp {
                             CacheResponse::MshrAllocated { .. } => {
-                                cpu.soc.stats.mshr_allocations += 1;
+                                cpu.stats.mshr_allocations += 1;
                                 cancelled_wakeups.push(ex.rd_phys);
-                                cpu.soc.stats.load_replays += 1;
+                                cpu.stats.load_replays += 1;
                                 trace_mem!(cpu.soc.config.general.trace_instructions;
                                     stage         = "M1",
                                     rob_tag       = ex.rob_tag.0,
@@ -431,9 +431,9 @@ pub fn memory1_stage(
                                 );
                             }
                             CacheResponse::MshrCoalesced { .. } => {
-                                cpu.soc.stats.mshr_coalesces += 1;
+                                cpu.stats.mshr_coalesces += 1;
                                 cancelled_wakeups.push(ex.rd_phys);
-                                cpu.soc.stats.load_replays += 1;
+                                cpu.stats.load_replays += 1;
                                 trace_mem!(cpu.soc.config.general.trace_instructions;
                                     stage       = "M1",
                                     rob_tag     = ex.rob_tag.0,
@@ -445,7 +445,7 @@ pub fn memory1_stage(
                                 );
                             }
                             CacheResponse::MshrFull => {
-                                cpu.soc.stats.stalls_mshr_full += 1;
+                                cpu.stats.stalls_mshr_full += 1;
                                 trace_mem!(cpu.soc.config.general.trace_instructions;
                                     stage       = "M1",
                                     rob_tag     = ex.rob_tag.0,
@@ -552,8 +552,7 @@ mod tests {
     #[test]
     fn test_memory1_pass_through() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let mut input = vec![ExMem1Entry {
             rob_tag: crate::core::pipeline::rob::RobTag(1),
@@ -585,8 +584,7 @@ mod tests {
     #[test]
     fn test_memory1_trap_propagation() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let mut input = vec![ExMem1Entry {
             rob_tag: crate::core::pipeline::rob::RobTag(2),
@@ -617,8 +615,7 @@ mod tests {
     #[test]
     fn test_memory1_translation_unmapped_access_fault() {
         let config = Config::default(); // RAM usually starts at 0x8000_0000.
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         cpu.hart.privilege = crate::core::arch::mode::PrivilegeMode::Supervisor; // S-mode traps on unmapped
 
         // Ensure translation succeeds (direct mode by default), but paddr is invalid
@@ -655,8 +652,7 @@ mod tests {
         config.cache.l1_d.enabled = true;
         config.cache.l1_d.size_bytes = 4096;
         config.cache.l1_d.mshr_count = 4;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let ctrl = ControlSignals { mem_read: true, ..Default::default() };
 
@@ -713,8 +709,7 @@ mod tests {
         let mut config = Config::default();
         config.cache.l1_d.enabled = true;
         config.cache.l1_d.mshr_count = 1; // Only 1 MSHR
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let ctrl = ControlSignals { mem_read: true, ..Default::default() };
 

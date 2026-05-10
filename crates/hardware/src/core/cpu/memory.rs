@@ -140,26 +140,26 @@ impl Cpu {
 
             // Filter and install L2 prefetch candidates through the shared filter
             let filtered =
-                self.core.prefetch_filter.filter_and_record(l2_prefetches, &mut self.soc.stats.pf_dedup_l2);
+                self.core.prefetch_filter.filter_and_record(l2_prefetches, &mut self.stats.pf_dedup_l2);
             let pf_evictions = self.core.l2_cache.install_prefetches(&filtered, WB_LAT);
 
             // Inclusive policy: L2 eviction → back-invalidate matching L1D/L1I lines
             if inclusion == InclusionPolicy::Inclusive {
                 for ev in l2_evictions.iter().chain(pf_evictions.iter()) {
                     if self.core.l1_d_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                     if self.core.l1_i_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                 }
             }
 
             if l2_hit {
-                self.soc.stats.l2_hits += 1;
+                self.stats.l2_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.l2_misses += 1;
+            self.stats.l2_misses += 1;
         }
 
         if self.soc.l3_cache.enabled {
@@ -169,7 +169,7 @@ impl Cpu {
 
             // Filter and install L3 prefetch candidates
             let filtered =
-                self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.soc.stats.pf_dedup_l3);
+                self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.stats.pf_dedup_l3);
             let pf_evictions = self.soc.l3_cache.install_prefetches(&filtered, WB_LAT);
 
             // Inclusive policy: L3 eviction → back-invalidate L2, L1D, L1I
@@ -177,19 +177,19 @@ impl Cpu {
                 for ev in l3_evictions.iter().chain(pf_evictions.iter()) {
                     let _ = self.core.l2_cache.invalidate_line(ev.addr);
                     if self.core.l1_d_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                     if self.core.l1_i_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                 }
             }
 
             if l3_hit {
-                self.soc.stats.l3_hits += 1;
+                self.stats.l3_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.l3_misses += 1;
+            self.stats.l3_misses += 1;
         }
 
         // All caches missed — now query the DRAM controller (stateful).
@@ -249,7 +249,7 @@ impl Cpu {
 
         // Filter L1 prefetch candidates through the shared filter, then install
         let filtered_l1 =
-            self.core.prefetch_filter.filter_and_record(l1_prefetches, &mut self.soc.stats.pf_dedup_l1);
+            self.core.prefetch_filter.filter_and_record(l1_prefetches, &mut self.stats.pf_dedup_l1);
         let l1_pf_evictions = if is_inst {
             self.core.l1_i_cache.install_prefetches(&filtered_l1, WB_LAT)
         } else {
@@ -260,22 +260,22 @@ impl Cpu {
         if inclusion == InclusionPolicy::Exclusive && self.core.l2_cache.enabled {
             for ev in l1_evictions.iter().chain(l1_pf_evictions.iter()) {
                 let _ = self.core.l2_cache.install_or_replace(ev.addr, ev.dirty, WB_LAT);
-                self.soc.stats.exclusive_l1_to_l2_swaps += 1;
+                self.stats.exclusive_l1_to_l2_swaps += 1;
             }
         }
 
         if is_inst && self.core.l1_i_cache.enabled {
             if l1_hit {
-                self.soc.stats.icache_hits += 1;
+                self.stats.icache_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.icache_misses += 1;
+            self.stats.icache_misses += 1;
         } else if !is_inst && self.core.l1_d_cache.enabled {
             if l1_hit {
-                self.soc.stats.dcache_hits += 1;
+                self.stats.dcache_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.dcache_misses += 1;
+            self.stats.dcache_misses += 1;
         }
 
         if self.core.l2_cache.enabled {
@@ -285,17 +285,17 @@ impl Cpu {
 
             // Filter and install L2 prefetch candidates
             let filtered_l2 =
-                self.core.prefetch_filter.filter_and_record(l2_prefetches, &mut self.soc.stats.pf_dedup_l2);
+                self.core.prefetch_filter.filter_and_record(l2_prefetches, &mut self.stats.pf_dedup_l2);
             let l2_pf_evictions = self.core.l2_cache.install_prefetches(&filtered_l2, WB_LAT);
 
             // Inclusive policy: L2 eviction → back-invalidate L1 lines
             if inclusion == InclusionPolicy::Inclusive {
                 for ev in l2_evictions.iter().chain(l2_pf_evictions.iter()) {
                     if self.core.l1_d_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                     if self.core.l1_i_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                 }
             }
@@ -306,10 +306,10 @@ impl Cpu {
             }
 
             if l2_hit {
-                self.soc.stats.l2_hits += 1;
+                self.stats.l2_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.l2_misses += 1;
+            self.stats.l2_misses += 1;
         }
 
         if self.soc.l3_cache.enabled {
@@ -319,7 +319,7 @@ impl Cpu {
 
             // Filter and install L3 prefetch candidates
             let filtered_l3 =
-                self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.soc.stats.pf_dedup_l3);
+                self.core.prefetch_filter.filter_and_record(l3_prefetches, &mut self.stats.pf_dedup_l3);
             let l3_pf_evictions = self.soc.l3_cache.install_prefetches(&filtered_l3, WB_LAT);
 
             // Inclusive policy: L3 eviction → back-invalidate L2, L1D, L1I
@@ -327,19 +327,19 @@ impl Cpu {
                 for ev in l3_evictions.iter().chain(l3_pf_evictions.iter()) {
                     let _ = self.core.l2_cache.invalidate_line(ev.addr);
                     if self.core.l1_d_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                     if self.core.l1_i_cache.invalidate_line(ev.addr) {
-                        self.soc.stats.inclusion_back_invalidations += 1;
+                        self.stats.inclusion_back_invalidations += 1;
                     }
                 }
             }
 
             if l3_hit {
-                self.soc.stats.l3_hits += 1;
+                self.stats.l3_hits += 1;
                 return total_penalty;
             }
-            self.soc.stats.l3_misses += 1;
+            self.stats.l3_misses += 1;
         }
 
         // Consult the stateful DRAM controller only on full miss so its bank,
@@ -362,8 +362,7 @@ mod tests {
     fn test_translate_direct_mode() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert_eq!(result.paddr.val(), 0x8000_0000);
@@ -379,8 +378,7 @@ mod tests {
 
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.pmp.set_addr(0, 0x9000_0000u64 >> 2);
         cpu.hart.pmp.set_cfg(0, 0x88);
@@ -395,8 +393,7 @@ mod tests {
     fn test_translate_direct_mode_pmp_allow_mmode() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert!(result.trap.is_none(), "M-mode should have full access with no PMP entries");
@@ -411,8 +408,7 @@ mod tests {
         config.cache.l2.enabled = false;
         config.cache.l3.enabled = false;
 
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         let penalty = cpu.simulate_memory_access(PhysAddr::new(0x8000_0000), AccessType::Read);
         assert!(penalty > 0);

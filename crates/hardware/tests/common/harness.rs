@@ -1,13 +1,12 @@
 use crate::common::mocks::memory::{MockMemory, MockMemoryController};
 use rvsim_core::Simulator;
 use rvsim_core::common::{PhysAddr, RegIdx};
+use rvsim_core::config::CacheConfig;
 use rvsim_core::config::Config;
 use rvsim_core::core::Cpu;
-use rvsim_core::config::CacheConfig;
 use rvsim_core::core::units::cache::CacheSim;
 use rvsim_core::soc::Soc;
 use rvsim_core::soc::interconnect::Bus;
-use rvsim_core::stats::SimStats;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -33,6 +32,7 @@ impl TestContext {
         let _ = env_logger::builder().is_test(true).try_init();
 
         let bus = Bus::new(8, 0);
+        let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
 
         let soc = Soc {
             config: config.clone(),
@@ -40,13 +40,9 @@ impl TestContext {
             bus,
             mem_controller: Box::new(MockMemoryController::new(1)),
             l3_cache: CacheSim::new(&CacheConfig::default()),
-            stats: SimStats::default(),
-            #[cfg(feature = "commit-log")]
-            commit_log: None,
-            exit_request: Arc::new(AtomicU64::new(u64::MAX)),
         };
 
-        let mut sim = Simulator::new(soc, config);
+        let mut sim = Simulator::new(soc, config, exit_signal);
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
         // every access through multi-cycle DRAM, starving the pipeline.
@@ -98,7 +94,7 @@ impl TestContext {
                 eprintln!("CPU tick error: {}", e);
                 break;
             }
-            if self.sim.cpu.soc.check_exit().is_some() {
+            if self.sim.cpu.check_exit().is_some() {
                 break;
             }
         }

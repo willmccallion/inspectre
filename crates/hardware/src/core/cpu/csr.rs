@@ -130,7 +130,7 @@ impl Cpu {
             x if x == csr::CYCLE.as_u32() || x == csr::MCYCLE.as_u32() => self.soc.cycle,
             x if x == csr::TIME.as_u32() => self.soc.cycle / self.soc.config.system.clint_divider,
             x if x == csr::INSTRET.as_u32() || x == csr::MINSTRET.as_u32() => {
-                self.soc.stats.instructions_retired
+                self.stats.instructions_retired
             }
             x if x == csr::PMPCFG0.as_u32() => {
                 self.hart.pmp.get_cfg(0) as u64
@@ -320,7 +320,7 @@ impl Cpu {
                 self.hart.csrs.senvcfg = val;
             }
             x if x == csr::MCYCLE.as_u32() => self.soc.cycle = val,
-            x if x == csr::MINSTRET.as_u32() => self.soc.stats.instructions_retired = val,
+            x if x == csr::MINSTRET.as_u32() => self.stats.instructions_retired = val,
             x if x == csr::PMPCFG0.as_u32() => {
                 for i in 0..8 {
                     self.hart.pmp.set_cfg(i, ((val >> (i * 8)) & 0xFF) as u8);
@@ -493,8 +493,7 @@ mod tests {
     #[test]
     fn test_cpu_csr_read_write_mstatus() {
         let config = Config::default();
-        let soc = crate::soc::builder::Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.csr_write(csr::MSTATUS, 0xFFFF_FFFF_FFFF_FFFF);
 
@@ -519,8 +518,7 @@ mod tests {
     #[test]
     fn test_cpu_csr_read_write_fcsr() {
         let config = Config::default();
-        let soc = crate::soc::builder::Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.csr_write(csr::FCSR, 0xFF);
         assert_eq!(cpu.csr_read(csr::FCSR), 0xFF);

@@ -26,6 +26,9 @@ use crate::core::units::mmu::pmp::Pmp;
 use crate::core::{Core, Hart};
 use crate::sim::per_hart_debug::HartDebug;
 use crate::soc::Soc;
+use crate::stats::SimStats;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// CPU architectural state: registers, caches, MMU, bus, and statistics.
 ///
@@ -39,14 +42,25 @@ pub struct Cpu {
     /// branch predictor, prefetch filter, write-combining buffer).
     pub core: Core,
 
-    /// System-on-Chip: config, bus, memory controller, shared L3, stats,
-    /// devices, exit signal.
+    /// System-on-Chip: config, bus, memory controller, shared L3, master clock.
     pub soc: Soc,
 
     /// Sim-side per-hart debug bookkeeping (hang detection, panic timing,
     /// retire trace). Indexed by `HartId`; transitionally lives here until
     /// the bench view replaces direct `Cpu` access.
     pub per_hart_debug: Vec<HartDebug>,
+
+    /// Sim-side perf observability counters.
+    pub stats: SimStats,
+    /// Optional buffered writer for the commit log (enabled by the
+    /// `commit-log` feature).
+    #[cfg(feature = "commit-log")]
+    pub commit_log: Option<std::io::BufWriter<std::fs::File>>,
+    /// Atomic slot bus-resident devices (HTIF, `SysCon`) write the harness
+    /// termination value into. `u64::MAX` means "no exit pending".
+    pub exit_signal: Arc<AtomicU64>,
+    /// Latched termination value the harness returns from `take_exit`.
+    pub exit_code: Option<u64>,
 
     /// Direct mode (no translation, flat memory). Initialised from
     /// `config.general.direct_mode` and runtime-mutable (the ELF loader
@@ -96,7 +110,9 @@ impl Cpu {
     }
 
     /// Creates a new CPU instance with the specified `SoC` and configuration.
-    pub fn new(soc: Soc, config: &Config) -> Self {
+    /// The `Soc` must have been built with the same `exit_signal` Arc so
+    /// HTIF / `SysCon` writes propagate to the harness.
+    pub fn new(soc: Soc, config: &Config, exit_signal: Arc<AtomicU64>) -> Self {
         use crate::core::arch::csr::{
             MISA_DEFAULT_RV64IMAFDC, MISA_EXT_A, MISA_EXT_C, MISA_EXT_D, MISA_EXT_F, MISA_EXT_I,
             MISA_EXT_M, MISA_EXT_S, MISA_EXT_U, MISA_XLEN_64, MSTATUS_DEFAULT_RV64, MSTATUS_FS,
@@ -198,9 +214,41 @@ impl Cpu {
             core: Core::new(CoreId::new(0), config),
             soc,
             per_hart_debug: vec![HartDebug::default()],
+            stats: SimStats::default(),
+            #[cfg(feature = "commit-log")]
+            commit_log: None,
+            exit_signal,
+            exit_code: None,
             direct_mode,
             redirect_pending: false,
         }
+    }
+
+    /// Atomically takes the exit code if a bus device has signalled termination.
+    pub fn take_exit(&self) -> Option<u64> {
+        let val = self.exit_signal.swap(u64::MAX, Ordering::Relaxed);
+        if val == u64::MAX { None } else { Some(val) }
+    }
+
+    /// Returns the exit code if a device has requested shutdown without
+    /// clearing the signal slot.
+    pub fn check_exit(&self) -> Option<u64> {
+        let val = self.exit_signal.load(Ordering::Relaxed);
+        if val == u64::MAX { None } else { Some(val) }
+    }
+
+    /// Manually signals exit (used by tests and the binding `step` loop).
+    pub fn signal_exit(&self, code: u64) {
+        self.exit_signal.store(code, Ordering::Relaxed);
+    }
+
+    /// Convenience constructor: builds the exit-signal `Arc`, the `Soc`, and
+    /// the `Cpu` together. Use this when you don't need to register additional
+    /// bus devices between `Soc::new` and `Cpu::new`.
+    pub fn build(config: &Config, disk_path: &str) -> Self {
+        let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
+        let soc = Soc::new(config, disk_path, &exit_signal);
+        Self::new(soc, config, exit_signal)
     }
 
     /// Opens a commit log file for writing retired instruction traces.
@@ -219,13 +267,8 @@ impl Cpu {
             path: path.to_owned(),
             source,
         })?;
-        self.soc.commit_log = Some(BufWriter::with_capacity(1 << 20, file));
+        self.commit_log = Some(BufWriter::with_capacity(1 << 20, file));
         Ok(())
-    }
-
-    /// Retrieves the exit code if the simulation has finished.
-    pub fn take_exit(&self) -> Option<u64> {
-        self.soc.take_exit()
     }
 
     /// Dumps the current CPU state (PC and registers) to stdout.
@@ -239,13 +282,11 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::Soc;
 
     #[test]
     fn test_cpu_reservation() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.set_reservation(PhysAddr::new(0x1000));
         assert!(cpu.check_reservation(PhysAddr::new(0x1000)));
@@ -259,19 +300,17 @@ mod tests {
     #[test]
     fn test_cpu_dump_state_no_panic() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let cpu = Cpu::new(soc, &config);
+        let cpu = Cpu::build(&config, "");
         cpu.dump_state();
     }
 
     #[test]
     fn test_cpu_take_exit() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let cpu = Cpu::new(soc, &config);
+        let cpu = Cpu::build(&config, "");
 
         assert_eq!(cpu.take_exit(), None);
-        cpu.soc.signal_exit(42);
+        cpu.signal_exit(42);
         assert_eq!(cpu.take_exit(), Some(42));
         assert_eq!(cpu.take_exit(), None);
     }

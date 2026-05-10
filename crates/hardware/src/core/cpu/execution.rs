@@ -21,7 +21,7 @@ impl Cpu {
     ///
     /// Returns [`SimError::KernelPanic`] when the bus panic sentinel fires.
     pub fn pre_tick(&mut self) -> Result<bool, SimError> {
-        if self.soc.check_exit().is_some() {
+        if self.check_exit().is_some() {
             return Ok(true);
         }
 
@@ -159,9 +159,9 @@ impl Cpu {
     /// Tracks cycles spent in each privilege mode for statistics.
     const fn track_mode_cycles(&mut self) {
         match self.hart.privilege {
-            PrivilegeMode::User => self.soc.stats.cycles_user += 1,
-            PrivilegeMode::Supervisor => self.soc.stats.cycles_kernel += 1,
-            PrivilegeMode::Machine => self.soc.stats.cycles_machine += 1,
+            PrivilegeMode::User => self.stats.cycles_user += 1,
+            PrivilegeMode::Supervisor => self.stats.cycles_kernel += 1,
+            PrivilegeMode::Machine => self.stats.cycles_machine += 1,
         }
     }
 }
@@ -174,27 +174,25 @@ mod tests {
     #[test]
     fn test_track_mode_cycles() {
         let config = Config::default();
-        let soc = crate::soc::builder::Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.privilege = PrivilegeMode::User;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.soc.stats.cycles_user, 1);
+        assert_eq!(cpu.stats.cycles_user, 1);
 
         cpu.hart.privilege = PrivilegeMode::Supervisor;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.soc.stats.cycles_kernel, 1);
+        assert_eq!(cpu.stats.cycles_kernel, 1);
 
         cpu.hart.privilege = PrivilegeMode::Machine;
         cpu.track_mode_cycles();
-        assert_eq!(cpu.soc.stats.cycles_machine, 1);
+        assert_eq!(cpu.stats.cycles_machine, 1);
     }
 
     #[test]
     fn test_post_tick_zero_reg() {
         let config = Config::default();
-        let soc = crate::soc::builder::Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.regs.write(abi::REG_ZERO, 42);
         cpu.post_tick(PrivilegeMode::Machine);

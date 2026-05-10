@@ -40,7 +40,7 @@ fn drain_mshr_completions(cpu: &mut Cpu, mem1_mem2: &mut Vec<Mem1Mem2Entry>, now
             && let Some(ev) = evicted
         {
             let _ = cpu.core.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
-            cpu.soc.stats.exclusive_l1_to_l2_swaps += 1;
+            cpu.stats.exclusive_l1_to_l2_swaps += 1;
         }
 
         for waiter in mshr_entry.waiters {
@@ -156,7 +156,7 @@ impl ExecutionEngine for InOrderEngine {
 
         if self.mem1_stall > 0 {
             self.mem1_stall -= 1;
-            cpu.soc.stats.stalls_mem += 1;
+            cpu.stats.stalls_mem += 1;
         } else {
             let _ = memory1::memory1_stage(
                 cpu,
@@ -181,7 +181,7 @@ impl ExecutionEngine for InOrderEngine {
         } else {
             let issued = self.issuer.select(self.width, &self.rob, &self.store_buffer, cpu);
             if issued.is_empty() && !self.issuer.is_empty() {
-                cpu.soc.stats.stalls_data += 1;
+                cpu.stats.stalls_data += 1;
             }
             // Aggregate in-flight fp_flags so CSR reads of fflags see older FP results.
             let mut inflight_fp_flags: u8 = 0;
@@ -199,8 +199,8 @@ impl ExecutionEngine for InOrderEngine {
         self.execute_mem1.extend(results);
 
         if needs_flush {
-            cpu.soc.stats.stalls_control += 1;
-            cpu.soc.stats.pipeline_flushes += 1;
+            cpu.stats.stalls_control += 1;
+            cpu.stats.pipeline_flushes += 1;
             self.issuer.flush();
             rename_output.clear();
             // mem1_stall was from a pre-branch op already past M1; clear so the branch can drain.
@@ -291,8 +291,7 @@ mod tests {
     fn test_inorder_engine_flush() {
         let config = Config::default();
         let mut engine = InOrderEngine::new(&config);
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         engine.mem1_stall = 5;
         engine.flush(&mut cpu);
@@ -314,8 +313,7 @@ mod tests {
     fn test_inorder_engine_read_csr_speculative() {
         let config = Config::default();
         let engine = InOrderEngine::new(&config);
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.csr_write(crate::core::arch::csr::MSCRATCH, 0x1234);
         assert_eq!(engine.read_csr_speculative(&cpu, crate::core::arch::csr::MSCRATCH), 0x1234);

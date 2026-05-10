@@ -778,12 +778,12 @@ pub fn execute_inorder(
                 cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
                 cpu.core.branch_predictor.speculate(id.pc, taken);
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-                cpu.soc.stats.speculative_branch_mispredictions += 1;
+                cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_next_pc;
                 cpu.redirect_pending = true;
                 flush_remaining = true;
             } else {
-                cpu.soc.stats.speculative_branch_predictions += 1;
+                cpu.stats.speculative_branch_predictions += 1;
             }
         }
 
@@ -818,12 +818,12 @@ pub fn execute_inorder(
             if mispredicted {
                 cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
                 cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-                cpu.soc.stats.speculative_branch_mispredictions += 1;
+                cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_target;
                 cpu.redirect_pending = true;
                 flush_remaining = true;
             } else {
-                cpu.soc.stats.speculative_branch_predictions += 1;
+                cpu.stats.speculative_branch_predictions += 1;
             }
 
             // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.

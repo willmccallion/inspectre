@@ -316,12 +316,12 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
             cpu.core.branch_predictor.speculate(id.pc, taken);
             cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-            cpu.soc.stats.speculative_branch_mispredictions += 1;
+            cpu.stats.speculative_branch_mispredictions += 1;
             cpu.hart.pc = actual_next_pc;
             cpu.redirect_pending = true;
             needs_flush = true;
         } else {
-            cpu.soc.stats.speculative_branch_predictions += 1;
+            cpu.stats.speculative_branch_predictions += 1;
         }
     }
 
@@ -365,12 +365,12 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         if mispredicted {
             cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
             cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
-            cpu.soc.stats.speculative_branch_mispredictions += 1;
+            cpu.stats.speculative_branch_mispredictions += 1;
             cpu.hart.pc = actual_target;
             cpu.redirect_pending = true;
             needs_flush = true;
         } else {
-            cpu.soc.stats.speculative_branch_predictions += 1;
+            cpu.stats.speculative_branch_predictions += 1;
         }
 
         // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.
@@ -986,8 +986,7 @@ mod tests {
     #[test]
     fn test_execute_one_normal() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1054,8 +1053,7 @@ mod tests {
     #[test]
     fn test_execute_trap_propagation() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1123,8 +1121,7 @@ mod tests {
     #[test]
     fn test_execute_fence_i() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1193,8 +1190,7 @@ mod tests {
     #[test]
     fn test_execute_fp_trap_when_fs_zero() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         cpu.hart.csrs.mstatus &= !crate::core::arch::csr::MSTATUS_FS; // Clear FS bits
@@ -1268,8 +1264,7 @@ mod tests {
     #[test]
     fn test_execute_branch_misprediction() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1344,8 +1339,7 @@ mod tests {
     #[test]
     fn test_execute_jump_jalr() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let tag = rob

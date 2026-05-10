@@ -140,7 +140,7 @@ impl PyCpu {
                 return Ok(Some(code));
             }
 
-            let s = &self.inner.cpu.soc.stats;
+            let s = &self.inner.cpu.stats;
             eprint!(
                 "\r\x1b[36m[rvsim]\x1b[0m  {:>14} cycles  {:>14} insns",
                 fmt_commas(self.inner.cpu.soc.cycle),
@@ -176,7 +176,9 @@ impl PyCpu {
     ) -> PyResult<Self> {
         let config = py_dict_to_config(py, config_dict)?;
         let disk = disk_path.unwrap_or_default();
-        let mut soc = rvsim_core::soc::Soc::new(&config, &disk);
+        let exit_signal =
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+        let mut soc = rvsim_core::soc::Soc::new(&config, &disk, &exit_signal);
 
         let mut elf_entry: Option<u64> = None;
         let mut tohost_addr: Option<u64> = None;
@@ -184,7 +186,7 @@ impl PyCpu {
             if let Some(result) = loader::try_load_elf(&data, &mut soc.bus) {
                 elf_entry = Some(result.entry);
                 if let Some(tohost) = result.tohost_addr {
-                    soc.add_htif(tohost);
+                    soc.add_htif(tohost, &exit_signal);
                     tohost_addr = Some(tohost);
                 }
             } else {
@@ -194,7 +196,7 @@ impl PyCpu {
             }
         }
 
-        let mut sim = Simulator::new(soc, &config);
+        let mut sim = Simulator::new(soc, &config, exit_signal);
 
         if let Some(entry) = elf_entry {
             sim.cpu.hart.pc = entry;
@@ -248,7 +250,7 @@ impl PyCpu {
     /// Performance statistics as a dict (read-only).
     #[getter]
     fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
+        let s = PyStats::from((self.inner.cpu.stats.clone(), self.inner.cpu.soc.cycle));
         Ok(s.to_dict(py)?.into_bound(py).into_any().unbind())
     }
 
@@ -373,7 +375,7 @@ impl PyCpu {
         };
 
         if let Some(sections) = stats_sections {
-            let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
+            let s = PyStats::from((self.inner.cpu.stats.clone(), self.inner.cpu.soc.cycle));
             if sections.is_empty() {
                 s.print();
             } else {
@@ -417,7 +419,7 @@ impl PyCpu {
             let exit = self.run_for_cycles(py, chunk)?;
             cycles_run += chunk;
 
-            let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
+            let s = PyStats::from((self.inner.cpu.stats.clone(), self.inner.cpu.soc.cycle));
             snapshots.push(s.to_dict(py)?.into_bound(py).into_any().unbind());
 
             if exit.is_some() {

@@ -16,8 +16,7 @@ use tempfile::NamedTempFile;
 /// Helper function to create a test CPU instance.
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let soc = rvsim_core::soc::Soc::new(&config, "");
-    Cpu::new(soc, &config)
+    Cpu::build(&config, "")
 }
 
 /// Helper function to create a temporary binary file for testing.
@@ -184,12 +183,10 @@ fn test_setup_kernel_load_different_ram_bases() {
     let mut config2 = Config::default();
     config2.system.ram_base = 0x90000000;
 
-    let soc1 = rvsim_core::soc::Soc::new(&config1, "");
-    let mut cpu1 = Cpu::new(soc1, &config1);
+    let mut cpu1 = Cpu::build(&config1, "");
     loader::setup_kernel_load(&mut cpu1, &config1, "", None, None).unwrap();
 
-    let soc2 = rvsim_core::soc::Soc::new(&config2, "");
-    let mut cpu2 = Cpu::new(soc2, &config2);
+    let mut cpu2 = Cpu::build(&config2, "");
     loader::setup_kernel_load(&mut cpu2, &config2, "", None, None).unwrap();
 
     // PC should match the respective RAM bases

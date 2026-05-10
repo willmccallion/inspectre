@@ -81,8 +81,7 @@ mod tests {
     #[test]
     fn test_writeback_stage_normal() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let rob_tag = rob
@@ -128,8 +127,7 @@ mod tests {
     #[test]
     fn test_writeback_stage_trap() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
         let mut rob = Rob::new(4);
 
         let rob_tag = rob

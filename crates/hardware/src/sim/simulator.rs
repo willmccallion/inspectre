@@ -11,6 +11,8 @@ use crate::core::pipeline::backend::o3::O3Engine;
 use crate::core::pipeline::engine::{BackendType, Pipeline, PipelineDispatch};
 use crate::core::pipeline::frontend::Frontend;
 use crate::soc::Soc;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 /// Top-level simulator: CPU architectural state + pipeline.
 #[derive(Debug)]
@@ -26,8 +28,11 @@ unsafe impl Sync for Simulator {}
 
 impl Simulator {
     /// Creates a new simulator with the given `SoC` and configuration.
-    pub fn new(soc: Soc, config: &Config) -> Self {
-        let cpu = Cpu::new(soc, config);
+    /// `exit_signal` must be the same `Arc` cloned into bus-resident
+    /// devices when `Soc` was constructed; HTIF / `SysCon` writes propagate
+    /// via this slot.
+    pub fn new(soc: Soc, config: &Config, exit_signal: Arc<AtomicU64>) -> Self {
+        let cpu = Cpu::new(soc, config, exit_signal);
         let pipeline = match config.pipeline.backend {
             BackendType::InOrder => PipelineDispatch::InOrder(Box::new(Pipeline {
                 frontend: Frontend::new(config.pipeline.width),

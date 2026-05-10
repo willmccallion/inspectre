@@ -31,27 +31,27 @@ impl Cpu {
                 let val_a0 = self.hart.regs.read(abi::REG_A0);
 
                 if val_a7 == sys_ops::SYS_EXIT {
-                    self.soc.signal_exit(val_a0);
+                    self.signal_exit(val_a0);
                     return;
                 } else if val_a0 == sys_ops::SYS_EXIT {
                     let val_a1 = self.hart.regs.read(abi::REG_A1);
-                    self.soc.signal_exit(val_a1);
+                    self.signal_exit(val_a1);
                     return;
                 }
 
                 eprintln!(
                     "\n[!] Unhandled ecall in direct mode: a7={val_a7} a0={val_a0} at PC {epc:#x}"
                 );
-                self.soc.signal_exit(1);
+                self.signal_exit(1);
                 return;
             }
 
             if matches!(cause, Trap::IllegalInstruction(0)) {
-                self.soc.signal_exit(0);
+                self.signal_exit(0);
                 return;
             }
             eprintln!("\n[!] Fatal trap in direct mode: {cause:?} at PC {epc:#x}");
-            self.soc.signal_exit(1);
+            self.signal_exit(1);
             return;
         }
 
@@ -186,7 +186,7 @@ impl Cpu {
             self.hart.pc = target_pc;
         }
 
-        self.soc.stats.traps_taken += 1;
+        self.stats.traps_taken += 1;
     }
 
     /// Executes the `MRET` instruction (Return from Machine Mode).
@@ -251,38 +251,35 @@ mod tests {
     fn test_trap_direct_mode_ecall() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.regs.write(abi::REG_A7, sys_ops::SYS_EXIT);
         cpu.hart.regs.write(abi::REG_A0, 42);
 
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x1000);
-        assert_eq!(cpu.soc.check_exit(), Some(42));
+        assert_eq!(cpu.check_exit(), Some(42));
     }
 
     #[test]
     fn test_trap_direct_mode_illegal_instruction() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.trap(&Trap::IllegalInstruction(0), 0x1000);
-        assert_eq!(cpu.soc.check_exit(), Some(0));
+        assert_eq!(cpu.check_exit(), Some(0));
     }
 
     #[test]
     fn test_trap_direct_mode_breakpoint_with_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.csrs.mtvec = 0x8000_1000;
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
 
-        assert!(cpu.soc.check_exit().is_none(), "should not be fatal when mtvec is set");
+        assert!(cpu.check_exit().is_none(), "should not be fatal when mtvec is set");
         assert_eq!(cpu.hart.csrs.mepc, 0x400);
         assert_eq!(cpu.hart.csrs.mcause, 3);
         assert_eq!(cpu.hart.csrs.mtval, 0x400);
@@ -293,24 +290,22 @@ mod tests {
     fn test_trap_direct_mode_breakpoint_no_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
-        assert_eq!(cpu.soc.check_exit(), Some(1));
+        assert_eq!(cpu.check_exit(), Some(1));
     }
 
     #[test]
     fn test_trap_direct_mode_ecall_with_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.csrs.mtvec = 0x8000_2000;
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x500);
 
-        assert!(cpu.soc.check_exit().is_none());
+        assert!(cpu.check_exit().is_none());
         assert_eq!(cpu.hart.csrs.mepc, 0x500);
         assert_eq!(cpu.hart.pc, 0x8000_2000);
     }
@@ -318,8 +313,7 @@ mod tests {
     #[test]
     fn test_do_mret() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.csrs.mepc = 0x2000;
         cpu.hart.csrs.mstatus = (PrivilegeMode::Supervisor.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
@@ -335,8 +329,7 @@ mod tests {
     #[test]
     fn test_do_sret() {
         let config = Config::default();
-        let soc = Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         cpu.hart.csrs.sepc = 0x3000;
         cpu.hart.csrs.sstatus = csr::MSTATUS_SPP | csr::MSTATUS_SPIE;

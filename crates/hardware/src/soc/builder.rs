@@ -14,19 +14,17 @@ use crate::soc::memory::buffer::DramBuffer;
 use crate::soc::memory::controller::{
     DramConfig, DramController, MemoryController, SimpleController,
 };
-use crate::stats::SimStats;
 use std::fs;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 /// The simulated System-on-Chip.
 ///
 /// Owns the simulator [`Config`] (single source of truth for ISA capability
 /// flags, system parameters, and pipeline knobs), the IO interconnect, the
-/// memory controller, the shared last-level cache, and the exit-request
-/// flag shared with devices like `SysCon` and `Htif`. Also carries the
-/// master cycle counter that every subsystem reads from for time-correlated
-/// state (e.g. CLINT computes `mtime = cycle / divider`).
+/// memory controller, the shared last-level cache, and the master cycle
+/// counter that every subsystem reads from for time-correlated state
+/// (e.g. CLINT computes `mtime = cycle / divider`).
 ///
 /// Cores and coherence are added in later phases of the multi-core migration.
 pub struct Soc {
@@ -44,16 +42,6 @@ pub struct Soc {
     pub mem_controller: Box<dyn MemoryController + Send + Sync>,
     /// Shared L3 cache (last-level cache; future shared LLC for multi-core).
     pub l3_cache: CacheSim,
-    /// Performance counters and other observability stats for the
-    /// simulated machine.
-    pub stats: SimStats,
-    /// Optional buffered writer for the commit log (enabled by the
-    /// `commit-log` feature). IO-side observability; lives here because the
-    /// commit stage writes to it.
-    #[cfg(feature = "commit-log")]
-    pub commit_log: Option<std::io::BufWriter<std::fs::File>>,
-    /// Atomic exit code: when not `u64::MAX`, simulation should stop and use this as exit code.
-    pub exit_request: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Soc {
@@ -62,34 +50,16 @@ impl std::fmt::Debug for Soc {
             .field("cycle", &self.cycle)
             .field("bus", &self.bus)
             .field("l3_cache", &self.l3_cache)
-            .field("stats", &self.stats)
-            .field("exit_request", &self.exit_request)
             .finish_non_exhaustive()
     }
 }
 
 impl Soc {
-    /// Atomically takes the exit code if simulation has been signalled to
-    /// exit. Returns `None` if no exit is pending. Clears the exit-request
-    /// slot on read so a subsequent call returns `None` until a device
-    /// signals again.
-    pub fn take_exit(&self) -> Option<u64> {
-        let val = self.exit_request.swap(u64::MAX, Ordering::Relaxed);
-        if val == u64::MAX { None } else { Some(val) }
-    }
-
-    /// Signals an exit with the given code. Equivalent to a device writing
-    /// the code into the shared exit-request slot.
-    pub fn signal_exit(&self, code: u64) {
-        self.exit_request.store(code, Ordering::Relaxed);
-    }
-}
-
-impl Soc {
     /// Builds a new `Soc` from configuration and optional disk image path.
-    pub fn new(config: &Config, disk_path: &str) -> Self {
+    /// `exit_signal` is cloned into bus-resident devices (`SysCon`, HTIF) so
+    /// they can write the harness termination value when triggered.
+    pub fn new(config: &Config, disk_path: &str, exit_signal: &Arc<AtomicU64>) -> Self {
         let mut bus = Bus::new(config.system.bus_width, config.system.bus_latency);
-        let exit_request = Arc::new(AtomicU64::new(u64::MAX));
 
         let ram_base = config.system.ram_base;
         let ram_size = config.memory.ram_size;
@@ -115,7 +85,7 @@ impl Soc {
         }
 
         let syscon_addr = config.system.syscon_base;
-        let syscon = SysCon::new(syscon_addr, exit_request.clone());
+        let syscon = SysCon::new(syscon_addr, exit_signal.clone());
 
         let rtc = GoldfishRtc::new(0x101000);
 
@@ -128,7 +98,7 @@ impl Soc {
         bus.add_device(Box::new(rtc));
 
         if config.system.tohost_addr != 0 {
-            let htif = Htif::new(config.system.tohost_addr, exit_request.clone());
+            let htif = Htif::new(config.system.tohost_addr, exit_signal.clone());
             bus.add_device(Box::new(htif));
         }
 
@@ -151,17 +121,7 @@ impl Soc {
 
         let l3_cache = CacheSim::new(&config.cache.l3);
 
-        Self {
-            config: config.clone(),
-            cycle: 0,
-            bus,
-            mem_controller,
-            l3_cache,
-            stats: SimStats::default(),
-            #[cfg(feature = "commit-log")]
-            commit_log: None,
-            exit_request,
-        }
+        Self { config: config.clone(), cycle: 0, bus, mem_controller, l3_cache }
     }
 
     /// Loads a binary into memory at the given physical address.
@@ -175,20 +135,16 @@ impl Soc {
         self.bus.tick()
     }
 
-    /// Returns the requested exit code if a device has requested shutdown.
-    pub fn check_exit(&self) -> Option<u64> {
-        let val = self.exit_request.load(std::sync::atomic::Ordering::Relaxed);
-        if val == u64::MAX { None } else { Some(val) }
-    }
-
     /// Checks whether the kernel has signaled panic via UART.
     pub fn check_kernel_panic(&mut self) -> bool {
         self.bus.check_kernel_panic()
     }
 
-    /// Registers an HTIF device at the given tohost address.
-    pub fn add_htif(&mut self, tohost_addr: u64) {
-        let htif = Htif::new(tohost_addr, self.exit_request.clone());
+    /// Registers an HTIF device at the given tohost address. `exit_signal`
+    /// is cloned into the device so HTIF tohost writes propagate up to the
+    /// harness.
+    pub fn add_htif(&mut self, tohost_addr: u64, exit_signal: &Arc<AtomicU64>) {
+        let htif = Htif::new(tohost_addr, exit_signal.clone());
         self.bus.add_device(Box::new(htif));
     }
 }

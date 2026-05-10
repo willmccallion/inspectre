@@ -539,12 +539,12 @@ fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidt
     if !cpu.core.wcb.is_disabled() && ram_target.is_some() {
         let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
-            cpu.soc.stats.wcb_coalesces += 1;
+            cpu.stats.wcb_coalesces += 1;
         }
         if let Some(drain) = evicted {
             let addr = PhysAddr::new(drain.line_addr);
             let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
-            cpu.soc.stats.wcb_drains += 1;
+            cpu.stats.wcb_drains += 1;
         }
     } else if ram_target.is_some() {
         let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);

@@ -10,8 +10,7 @@ use rvsim_core::core::arch::mode::PrivilegeMode;
 
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let soc = rvsim_core::soc::Soc::new(&config, "");
-    let mut cpu = Cpu::new(soc, &config);
+    let mut cpu = Cpu::build(&config, "");
     cpu.direct_mode = false;
     cpu
 }
@@ -30,22 +29,22 @@ fn test_trap_clears_load_reservation() {
 fn test_trap_direct_mode_illegal_instruction_zero_exits() {
     let mut cpu = create_test_cpu();
     cpu.direct_mode = true;
-    cpu.soc.exit_request.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+    cpu.exit_signal.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
 
     cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
-    assert_eq!(cpu.soc.check_exit(), Some(0));
+    assert_eq!(cpu.check_exit(), Some(0));
 }
 
 #[test]
 fn test_trap_direct_mode_other_exceptions_set_exit_code_1() {
     let mut cpu = create_test_cpu();
     cpu.direct_mode = true;
-    cpu.soc.exit_request.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+    cpu.exit_signal.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
 
     cpu.trap(&Trap::LoadAddressMisaligned(0x8000_0001), cpu.hart.pc);
 
-    assert_eq!(cpu.soc.check_exit(), Some(1));
+    assert_eq!(cpu.check_exit(), Some(1));
 }
 
 #[test]
@@ -53,7 +52,7 @@ fn test_trap_direct_mode_ecall_from_umode_processed() {
     let mut cpu = create_test_cpu();
     cpu.direct_mode = true;
     cpu.hart.privilege = PrivilegeMode::User;
-    cpu.soc.exit_request.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+    cpu.exit_signal.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
     cpu.hart.csrs.mtvec = 0x8000_0000;
 
     // ECALL in direct mode should be processed normally (not treated as fatal)
@@ -152,7 +151,7 @@ fn test_trap_double_fault_detection() {
 
     // A trap whose EPC equals the handler address is legitimate (not a double fault).
     cpu.trap(&Trap::IllegalInstruction(0), handler_pc);
-    assert_eq!(cpu.soc.check_exit(), None);
+    assert_eq!(cpu.check_exit(), None);
     assert_eq!(cpu.hart.pc, handler_pc); // dispatched to M-mode handler
 }
 

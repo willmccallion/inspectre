@@ -9,8 +9,9 @@ use rvsim_core::core::arch::mode::PrivilegeMode;
 
 fn create_test_sim() -> Simulator {
     let config = Config::default();
-    let soc = rvsim_core::soc::Soc::new(&config, "");
-    Simulator::new(soc, &config)
+    let exit_signal = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+    let soc = rvsim_core::soc::Soc::new(&config, "", &exit_signal);
+    Simulator::new(soc, &config, exit_signal)
 }
 
 #[test]
@@ -44,7 +45,7 @@ fn test_multiple_ticks() {
 #[test]
 fn test_exit_code_none_initially() {
     let sim = create_test_sim();
-    assert_eq!(sim.cpu.soc.check_exit(), None);
+    assert_eq!(sim.cpu.check_exit(), None);
 }
 
 #[test]
@@ -96,12 +97,12 @@ fn test_bus_interaction_tick() {
 #[test]
 fn test_stats_updated() {
     let mut sim = create_test_sim();
-    let initial_instructions = sim.cpu.soc.stats.instructions_retired;
+    let initial_instructions = sim.cpu.stats.instructions_retired;
 
     sim.tick().unwrap();
 
     // Stats should be updated or remain the same (can't execute if no valid instruction)
-    assert!(sim.cpu.soc.stats.instructions_retired >= initial_instructions);
+    assert!(sim.cpu.stats.instructions_retired >= initial_instructions);
 }
 
 #[test]

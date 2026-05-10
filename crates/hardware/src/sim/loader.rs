@@ -209,8 +209,7 @@ mod tests {
     #[test]
     fn test_setup_kernel_load_fallback() {
         let config = Config::default();
-        let soc = crate::soc::builder::Soc::new(&config, "");
-        let mut cpu = Cpu::new(soc, &config);
+        let mut cpu = Cpu::build(&config, "");
 
         setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
 
