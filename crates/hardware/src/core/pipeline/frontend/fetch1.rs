@@ -40,7 +40,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
     let line_bytes = cpu.core.l1_i_cache.line_bytes() as u64;
     let line_end = (current_pc | (line_bytes - 1)) + 1;
 
-    for _ in 0..cpu.soc.config.pipeline.width {
+    for _ in 0..cpu.config.pipeline.width {
         if current_pc + 2 > line_end {
             break;
         }
@@ -62,7 +62,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
 
         let trap_cause = fetch_trap.or(trap);
         if let Some(ref trap_cause) = trap_cause {
-            trace_fetch!(cpu.soc.config.general.trace_instructions;
+            trace_fetch!(cpu.config.general.trace_instructions;
                 pc          = %crate::trace::Hex(current_pc),
                 tlb_cycles  = cycles,
                 trap        = ?trap_cause,
@@ -114,7 +114,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     pred_target = tgt;
                     stop_fetch = true;
                 }
-                trace_branch!(cpu.soc.config.general.trace_instructions;
+                trace_branch!(cpu.config.general.trace_instructions;
                     event        = "predict",
                     pc           = %crate::trace::Hex(current_pc),
                     paddr        = %crate::trace::Hex(phys_addr),
@@ -132,7 +132,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                 *stall_out += result.cycles;
                 if result.trap.is_some() {
                     // Defer page-crossing fault to fetch2.
-                    trace_fetch!(cpu.soc.config.general.trace_instructions;
+                    trace_fetch!(cpu.config.general.trace_instructions;
                         pc           = %crate::trace::Hex(current_pc),
                         paddr        = %crate::trace::Hex(phys_addr),
                         crosses_page = true,
@@ -177,7 +177,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     pred_target = tgt;
                     stop_fetch = true;
                 }
-                trace_branch!(cpu.soc.config.general.trace_instructions;
+                trace_branch!(cpu.config.general.trace_instructions;
                     event        = "predict",
                     pc           = %crate::trace::Hex(current_pc),
                     paddr        = %crate::trace::Hex(phys_addr),
@@ -194,7 +194,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     pred_target = tgt;
                     stop_fetch = true;
                 }
-                trace_branch!(cpu.soc.config.general.trace_instructions;
+                trace_branch!(cpu.config.general.trace_instructions;
                     event       = "predict",
                     pc          = %crate::trace::Hex(current_pc),
                     paddr       = %crate::trace::Hex(phys_addr),
@@ -222,7 +222,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     pred_target = tgt;
                 }
                 stop_fetch = true;
-                trace_branch!(cpu.soc.config.general.trace_instructions;
+                trace_branch!(cpu.config.general.trace_instructions;
                     event       = "predict",
                     pc          = %crate::trace::Hex(current_pc),
                     paddr       = %crate::trace::Hex(phys_addr),
@@ -235,7 +235,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             }
         }
 
-        trace_fetch!(cpu.soc.config.general.trace_instructions;
+        trace_fetch!(cpu.config.general.trace_instructions;
             pc          = %crate::trace::Hex(current_pc),
             paddr       = %crate::trace::Hex(phys_addr),
             compressed  = is_compressed,

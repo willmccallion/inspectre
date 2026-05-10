@@ -35,7 +35,7 @@ fn drain_mshr_completions(cpu: &mut Cpu, mem1_mem2: &mut Vec<Mem1Mem2Entry>, now
             0,
         );
 
-        if cpu.soc.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
+        if cpu.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
             && cpu.core.l2_cache.enabled
             && let Some(ev) = evicted
         {

@@ -42,8 +42,13 @@ pub struct Cpu {
     /// branch predictor, prefetch filter, write-combining buffer).
     pub core: Core,
 
-    /// System-on-Chip: config, bus, memory controller, shared L3, master clock.
+    /// System-on-Chip: bus, memory controller, shared L3, master clock.
     pub soc: Soc,
+
+    /// Simulator parameters (cache sizes, ISA capability flags, pipeline
+    /// knobs, system layout). Owned by `Cpu` transitionally; the bench
+    /// view migrates this to `Simulator` later.
+    pub config: Config,
 
     /// Sim-side per-hart debug bookkeeping (hang detection, panic timing,
     /// retire trace). Indexed by `HartId`; transitionally lives here until
@@ -213,6 +218,7 @@ impl Cpu {
             hart,
             core: Core::new(CoreId::new(0), config),
             soc,
+            config: config.clone(),
             per_hart_debug: vec![HartDebug::default()],
             stats: SimStats::default(),
             #[cfg(feature = "commit-log")]

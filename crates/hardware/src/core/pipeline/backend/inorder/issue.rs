@@ -125,7 +125,7 @@ impl InOrderIssueUnit {
                 issued.rv3 = v3;
                 selected.push(issued);
             } else {
-                trace_issue!(cpu.soc.config.general.trace_instructions;
+                trace_issue!(cpu.config.general.trace_instructions;
                     pc       = %crate::trace::Hex(entry.pc),
                     rs1      = entry.rs1.as_usize(),
                     rs1_tag  = ?entry.rs1_tag,

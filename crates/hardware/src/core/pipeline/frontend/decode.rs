@@ -1374,7 +1374,7 @@ pub fn decode_stage(
     has_register_renaming: bool,
 ) {
     let mut consumed_count = 0;
-    let mut bundle_writes: Vec<(RegIdx, bool)> = Vec::with_capacity(cpu.soc.config.pipeline.width);
+    let mut bundle_writes: Vec<(RegIdx, bool)> = Vec::with_capacity(cpu.config.pipeline.width);
 
     for if_entry in input.iter() {
         if let Some(trap) = &if_entry.trap {

@@ -20,20 +20,16 @@ use std::sync::atomic::AtomicU64;
 
 /// The simulated System-on-Chip.
 ///
-/// Owns the simulator [`Config`] (single source of truth for ISA capability
-/// flags, system parameters, and pipeline knobs), the IO interconnect, the
-/// memory controller, the shared last-level cache, and the master cycle
-/// counter that every subsystem reads from for time-correlated state
-/// (e.g. CLINT computes `mtime = cycle / divider`).
+/// Owns the IO interconnect, the memory controller, the shared last-level
+/// cache, and the master cycle counter that every subsystem reads from for
+/// time-correlated state (e.g. CLINT computes `mtime = cycle / divider`).
+///
+/// The simulator [`Config`] lives on `Cpu` (transitionally, then on
+/// `Simulator`); `Soc` does not hold it because configuration is bench
+/// metadata, not hardware state.
 ///
 /// Cores and coherence are added in later phases of the multi-core migration.
 pub struct Soc {
-    /// Simulator configuration. Single source of truth for ISA capability
-    /// flags (vector ELEN/Zvfh, future Zvk*), pipeline knobs (width, ROB
-    /// size, …), system parameters (RAM base, CLINT divider, …), and cache
-    /// hierarchy parameters. Components read these via `soc.config.*`
-    /// rather than caching duplicates as their own fields.
-    pub config: Config,
     /// Master clock; every subsystem reads from this.
     pub cycle: u64,
     /// IO interconnect; routes accesses to RAM and MMIO devices.
@@ -121,7 +117,7 @@ impl Soc {
 
         let l3_cache = CacheSim::new(&config.cache.l3);
 
-        Self { config: config.clone(), cycle: 0, bus, mem_controller, l3_cache }
+        Self { cycle: 0, bus, mem_controller, l3_cache }
     }
 
     /// Loads a binary into memory at the given physical address.

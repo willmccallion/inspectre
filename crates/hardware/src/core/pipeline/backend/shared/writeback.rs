@@ -23,7 +23,7 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
                 trap.clone(),
                 wb.exception_stage.unwrap_or(ExceptionStage::Memory),
             );
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "writeback-fault",
                 pc      = %crate::trace::Hex(wb.pc),
                 rob_tag = wb.rob_tag.0,
@@ -56,7 +56,7 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
         }
         rob.complete(wb.rob_tag, val);
 
-        trace_writeback!(cpu.soc.config.general.trace_instructions;
+        trace_writeback!(cpu.config.general.trace_instructions;
             rob_tag  = wb.rob_tag.0,
             pc       = %crate::trace::Hex(wb.pc),
             result   = %crate::trace::Hex(val),

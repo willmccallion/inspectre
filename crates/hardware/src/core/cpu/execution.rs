@@ -58,13 +58,13 @@ impl Cpu {
                 };
 
                 if inst == WFI_INSTRUCTION {
-                    trace_trap!(self.soc.config.general.trace_instructions;
+                    trace_trap!(self.config.general.trace_instructions;
                         event = "wfi-wait",
                         pc    = %crate::trace::Hex(self.hart.pc),
                         "CPU stuck in WFI — waiting for interrupt"
                     );
                 } else {
-                    trace_trap!(self.soc.config.general.trace_instructions;
+                    trace_trap!(self.config.general.trace_instructions;
                         event = "potential-hang",
                         pc    = %crate::trace::Hex(self.hart.pc),
                         inst  = inst,
@@ -113,7 +113,7 @@ impl Cpu {
         // OpenSBI injects STIP via `csrw mip`), leave STIP entirely under
         // software control so that M-mode timer handlers work correctly.
         if (self.hart.csrs.menvcfg & csr::MENVCFG_STCE) != 0 {
-            let mtime = self.soc.cycle / self.soc.config.system.clint_divider;
+            let mtime = self.soc.cycle / self.config.system.clint_divider;
             if mtime >= self.hart.csrs.stimecmp {
                 mip |= csr::MIP_STIP;
             } else {
@@ -133,9 +133,9 @@ impl Cpu {
     pub fn post_tick(&mut self, prev_priv: PrivilegeMode) {
         self.hart.regs.write(abi::REG_ZERO, 0);
 
-        if self.soc.config.general.trace_instructions {
+        if self.config.general.trace_instructions {
             if self.hart.privilege != prev_priv {
-                trace_trap!(self.soc.config.general.trace_instructions;
+                trace_trap!(self.config.general.trace_instructions;
                     event      = "mode-switch",
                     from_mode  = prev_priv.name(),
                     to_mode    = self.hart.privilege.name(),

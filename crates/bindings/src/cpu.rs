@@ -239,12 +239,12 @@ impl PyCpu {
     /// Whether instruction tracing is enabled (read/write).
     #[getter]
     const fn trace(&self) -> bool {
-        self.inner.cpu.soc.config.general.trace_instructions
+        self.inner.cpu.config.general.trace_instructions
     }
 
     #[setter]
     const fn set_trace(&mut self, value: bool) {
-        self.inner.cpu.soc.config.general.trace_instructions = value;
+        self.inner.cpu.config.general.trace_instructions = value;
     }
 
     /// Performance statistics as a dict (read-only).
@@ -565,7 +565,7 @@ impl PyCpu {
     /// This performs a shallow clone of the latch vectors — it has no effect on
     /// simulation correctness or timing.
     fn pipeline_snapshot(&self) -> PyPipelineSnapshot {
-        let width = self.inner.cpu.soc.config.pipeline.width;
+        let width = self.inner.cpu.config.pipeline.width;
         PyPipelineSnapshot::new(self.inner.pipeline.snapshot(width))
     }
 
@@ -584,7 +584,7 @@ impl PyCpu {
         let _ = header.insert("pc".into(), serde_json::Value::from(cpu.hart.pc));
         let _ = header.insert("privilege".into(), serde_json::Value::from(cpu.hart.privilege.to_u8()));
         let _ = header.insert("direct_mode".into(), serde_json::Value::from(cpu.direct_mode));
-        let _ = header.insert("trace".into(), serde_json::Value::from(cpu.soc.config.general.trace_instructions));
+        let _ = header.insert("trace".into(), serde_json::Value::from(cpu.config.general.trace_instructions));
         let _ = header.insert("wfi_waiting".into(), serde_json::Value::from(cpu.hart.wfi_waiting));
         let _ = header.insert("wfi_pc".into(), serde_json::Value::from(cpu.hart.wfi_pc));
         let region = cpu.soc.bus.ram_region();
@@ -690,7 +690,7 @@ impl PyCpu {
         cpu.hart.pc = header["pc"].as_u64().unwrap_or(0);
         cpu.hart.privilege = PrivilegeMode::from_u8(header["privilege"].as_u64().unwrap_or(3) as u8);
         cpu.direct_mode = header["direct_mode"].as_bool().unwrap_or(false);
-        cpu.soc.config.general.trace_instructions = header["trace"].as_bool().unwrap_or(false);
+        cpu.config.general.trace_instructions = header["trace"].as_bool().unwrap_or(false);
         cpu.hart.wfi_waiting = header["wfi_waiting"].as_bool().unwrap_or(false);
         cpu.hart.wfi_pc = header["wfi_pc"].as_u64().unwrap_or(0);
 

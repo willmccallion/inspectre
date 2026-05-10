@@ -70,7 +70,7 @@ pub fn commit_stage(
         let interrupt = check_interrupts(cpu);
         if let Some(interrupt_trap) = interrupt {
             cpu.hart.wfi_waiting = false;
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event      = "interrupt",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?interrupt_trap,
@@ -140,7 +140,7 @@ pub fn commit_stage(
                             writeln!(log, "core   0: 0x{:016x} (0x{:08x})", entry.pc, entry.inst);
                     }
                 }
-                trace_trap!(cpu.soc.config.general.trace_instructions;
+                trace_trap!(cpu.config.general.trace_instructions;
                     event     = "sync-exception",
                     pc        = %crate::trace::Hex(entry.pc),
                     rob_tag   = entry.tag.0,
@@ -194,7 +194,7 @@ pub fn commit_stage(
             _ => entry.pc.wrapping_add(entry.inst_size.as_u64()),
         };
 
-        trace_commit!(cpu.soc.config.general.trace_instructions;
+        trace_commit!(cpu.config.general.trace_instructions;
             rob_tag    = entry.tag.0,
             pc         = %crate::trace::Hex(entry.pc),
             rd         = entry.rd.as_usize(),
@@ -240,7 +240,7 @@ pub fn commit_stage(
                 entry.bp_target,
                 &entry.bp_ghr_snapshot,
             );
-            trace_branch!(cpu.soc.config.general.trace_instructions;
+            trace_branch!(cpu.config.general.trace_instructions;
                 event         = "update",
                 pc            = %crate::trace::Hex(entry.bp_pc),
                 rob_tag       = entry.tag.0,
@@ -272,7 +272,7 @@ pub fn commit_stage(
             committed_rename_map.set(entry.rd, true, entry.phys_dst);
             cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
-            trace_commit!(cpu.soc.config.general.trace_instructions;
+            trace_commit!(cpu.config.general.trace_instructions;
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
                 reg      = entry.rd.as_usize(),
@@ -289,7 +289,7 @@ pub fn commit_stage(
                 free_list.reclaim(entry.old_phys_dst);
             }
             committed_rename_map.set(entry.rd, false, entry.phys_dst);
-            trace_commit!(cpu.soc.config.general.trace_instructions;
+            trace_commit!(cpu.config.general.trace_instructions;
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
                 reg      = entry.rd.as_usize(),
@@ -358,7 +358,7 @@ pub fn commit_stage(
             if !csr_update.applied {
                 cpu.csr_write(csr_update.addr, csr_update.new_val);
             }
-            trace_csr!(cpu.soc.config.general.trace_instructions;
+            trace_csr!(cpu.config.general.trace_instructions;
                 op       = if csr_update.applied { "write-eager" } else { "write-deferred" },
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
@@ -379,7 +379,7 @@ pub fn commit_stage(
         if entry.ctrl.system_op == SystemOp::Mret {
             cpu.do_mret();
             cpu.hart.committed_next_pc = cpu.hart.pc;
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event      = "return",
                 insn       = "MRET",
                 pc         = %crate::trace::Hex(entry.pc),
@@ -394,7 +394,7 @@ pub fn commit_stage(
         if entry.ctrl.system_op == SystemOp::Sret {
             cpu.do_sret();
             cpu.hart.committed_next_pc = cpu.hart.pc;
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event      = "return",
                 insn       = "SRET",
                 pc         = %crate::trace::Hex(entry.pc),
@@ -567,7 +567,7 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
         let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
     }
     write_store_to_memory(cpu, paddr, data, store.width);
-    trace_commit!(cpu.soc.config.general.trace_instructions;
+    trace_commit!(cpu.config.general.trace_instructions;
         paddr      = %crate::trace::Hex(paddr.val()),
         data       = %crate::trace::Hex(data),
         width      = ?store.width,

@@ -65,7 +65,7 @@ impl Cpu {
         );
 
         if !is_timer && !is_ecall {
-            trace_trap!(self.soc.config.general.trace_instructions;
+            trace_trap!(self.config.general.trace_instructions;
                 event      = "taken",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?cause,

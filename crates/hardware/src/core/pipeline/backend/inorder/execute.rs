@@ -50,7 +50,7 @@ pub fn execute_inorder(
         }
 
         if let Some(trap) = id.trap.clone() {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "EX",
                 pc      = %crate::trace::Hex(id.pc),
@@ -79,7 +79,7 @@ pub fn execute_inorder(
             continue;
         }
 
-        trace_execute!(cpu.soc.config.general.trace_instructions;
+        trace_execute!(cpu.config.general.trace_instructions;
             rob_tag  = id.rob_tag.0,
             pc       = %crate::trace::Hex(id.pc),
             inst     = %crate::trace::Hex32(id.inst),

@@ -276,7 +276,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 vec_frm: cpu.hart.csrs.frm,
             };
 
-            trace_rename!(cpu.soc.config.general.trace_instructions;
+            trace_rename!(cpu.config.general.trace_instructions;
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.rob_tag.0,
                 rd         = entry.rd.as_usize(),
@@ -368,7 +368,7 @@ pub fn rename_stage<E: ExecutionEngine>(
                 vec_frm: cpu.hart.csrs.frm,
             };
 
-            trace_rename!(cpu.soc.config.general.trace_instructions;
+            trace_rename!(cpu.config.general.trace_instructions;
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.rob_tag.0,
                 rd         = entry.rd.as_usize(),

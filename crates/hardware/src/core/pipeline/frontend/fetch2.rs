@@ -81,7 +81,7 @@ pub fn fetch2_stage(
 
     for f1 in entries {
         if let Some(ref trap) = f1.trap {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "F2",
                 pc      = %crate::trace::Hex(f1.pc),
@@ -145,7 +145,7 @@ pub fn fetch2_stage(
         };
 
         if let Some(t) = inst_trap {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "decode-trap",
                 stage   = "F2",
                 pc      = %crate::trace::Hex(f1.pc),
@@ -166,7 +166,7 @@ pub fn fetch2_stage(
             break;
         }
 
-        trace_fetch!(cpu.soc.config.general.trace_instructions;
+        trace_fetch!(cpu.config.general.trace_instructions;
             pc          = %crate::trace::Hex(f1.pc),
             inst        = inst,
             inst_size   = step.as_u64(),

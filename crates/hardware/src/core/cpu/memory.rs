@@ -131,7 +131,7 @@ impl Cpu {
         let mut total_penalty = 0;
         let raw_addr = addr.val();
         let is_write = matches!(access, AccessType::Write);
-        let inclusion = self.soc.config.cache.inclusion_policy;
+        let inclusion = self.config.cache.inclusion_policy;
 
         if self.core.l2_cache.enabled {
             total_penalty += self.core.l2_cache.latency;
@@ -222,7 +222,7 @@ impl Cpu {
         let raw_addr = addr.val();
         let is_inst = matches!(access, AccessType::Fetch);
         let is_write = matches!(access, AccessType::Write);
-        let inclusion = self.soc.config.cache.inclusion_policy;
+        let inclusion = self.config.cache.inclusion_policy;
 
         // Determine which L1 cache applies
         let l1_enabled = if is_inst { self.core.l1_i_cache.enabled } else { self.core.l1_d_cache.enabled };

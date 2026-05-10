@@ -35,7 +35,6 @@ impl TestContext {
         let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
 
         let soc = Soc {
-            config: config.clone(),
             cycle: 0,
             bus,
             mem_controller: Box::new(MockMemoryController::new(1)),
@@ -46,7 +45,7 @@ impl TestContext {
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
         // every access through multi-cycle DRAM, starving the pipeline.
-        sim.cpu.soc.config.system.ram_base = u64::MAX;
+        sim.cpu.config.system.ram_base = u64::MAX;
 
         Self { sim }
     }

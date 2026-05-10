@@ -48,7 +48,7 @@ pub fn memory1_stage(
 
     while let Some(ex) = iter.next() {
         if let Some(ref trap) = ex.trap {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "propagate",
                 stage   = "M1",
                 pc      = %crate::trace::Hex(ex.pc),
@@ -89,13 +89,13 @@ pub fn memory1_stage(
             let size = unaligned::width_to_bytes(ex.ctrl.width);
             let is_atomic = ex.ctrl.atomic_op != AtomicOp::None;
             if !unaligned::is_aligned(ex.alu, size) {
-                if cpu.soc.config.memory.misaligned_access_trap || is_atomic {
+                if cpu.config.memory.misaligned_access_trap || is_atomic {
                     let trap = if ex.ctrl.mem_write {
                         unaligned::store_misaligned_trap(ex.alu)
                     } else {
                         unaligned::load_misaligned_trap(ex.alu)
                     };
-                    trace_trap!(cpu.soc.config.general.trace_instructions;
+                    trace_trap!(cpu.config.general.trace_instructions;
                         event     = "misaligned-access",
                         stage     = "M1",
                         pc        = %crate::trace::Hex(ex.pc),
@@ -189,7 +189,7 @@ pub fn memory1_stage(
             per_entry_latency += cycles;
 
             if let Some(t) = fault {
-                trace_trap!(cpu.soc.config.general.trace_instructions;
+                trace_trap!(cpu.config.general.trace_instructions;
                     event      = "translation-fault",
                     stage      = "M1",
                     pc         = %crate::trace::Hex(ex.pc),
@@ -232,7 +232,7 @@ pub fn memory1_stage(
                 } else {
                     crate::common::Trap::LoadAccessFault(ex.alu)
                 };
-                trace_trap!(cpu.soc.config.general.trace_instructions;
+                trace_trap!(cpu.config.general.trace_instructions;
                     event     = "access-fault",
                     stage     = "M1",
                     pc        = %crate::trace::Hex(ex.pc),
@@ -267,7 +267,7 @@ pub fn memory1_stage(
                 return cancelled_wakeups;
             }
 
-            trace_mem!(cpu.soc.config.general.trace_instructions;
+            trace_mem!(cpu.config.general.trace_instructions;
                 stage            = "M1",
                 rob_tag          = ex.rob_tag.0,
                 pc               = %crate::trace::Hex(ex.pc),
@@ -278,7 +278,7 @@ pub fn memory1_stage(
                 paddr            = %crate::trace::Hex(paddr.val()),
                 tlb_cycles       = cycles,
                 unaligned_penalty = per_entry_latency.saturating_sub(cycles),
-                is_mmio          = paddr.val() < cpu.soc.config.system.ram_base,
+                is_mmio          = paddr.val() < cpu.config.system.ram_base,
                 "M1: address translated"
             );
 
@@ -290,14 +290,14 @@ pub fn memory1_stage(
             }
 
             // RAM goes through the cache hierarchy; MMIO bypasses it.
-            if paddr.val() >= cpu.soc.config.system.ram_base && has_mshrs {
+            if paddr.val() >= cpu.config.system.ram_base && has_mshrs {
                 let is_write = ex.ctrl.mem_write;
                 let l1d_hit = cpu.core.l1_d_cache.access_check(paddr.val(), is_write);
 
                 if l1d_hit {
                     cpu.stats.dcache_hits += 1;
                     per_entry_latency += cpu.core.l1_d_cache.latency;
-                    trace_mem!(cpu.soc.config.general.trace_instructions;
+                    trace_mem!(cpu.config.general.trace_instructions;
                         stage      = "M1",
                         rob_tag    = ex.rob_tag.0,
                         pc         = %crate::trace::Hex(ex.pc),
@@ -330,7 +330,7 @@ pub fn memory1_stage(
                     cpu.stats.dcache_misses += 1;
                     let miss_latency =
                         cpu.core.l1_d_cache.latency + cpu.simulate_l1d_miss_latency(paddr, access_type);
-                    trace_mem!(cpu.soc.config.general.trace_instructions;
+                    trace_mem!(cpu.config.general.trace_instructions;
                         stage       = "M1",
                         rob_tag     = ex.rob_tag.0,
                         pc          = %crate::trace::Hex(ex.pc),
@@ -419,7 +419,7 @@ pub fn memory1_stage(
                                 cpu.stats.mshr_allocations += 1;
                                 cancelled_wakeups.push(ex.rd_phys);
                                 cpu.stats.load_replays += 1;
-                                trace_mem!(cpu.soc.config.general.trace_instructions;
+                                trace_mem!(cpu.config.general.trace_instructions;
                                     stage         = "M1",
                                     rob_tag       = ex.rob_tag.0,
                                     pc            = %crate::trace::Hex(ex.pc),
@@ -434,7 +434,7 @@ pub fn memory1_stage(
                                 cpu.stats.mshr_coalesces += 1;
                                 cancelled_wakeups.push(ex.rd_phys);
                                 cpu.stats.load_replays += 1;
-                                trace_mem!(cpu.soc.config.general.trace_instructions;
+                                trace_mem!(cpu.config.general.trace_instructions;
                                     stage       = "M1",
                                     rob_tag     = ex.rob_tag.0,
                                     pc          = %crate::trace::Hex(ex.pc),
@@ -446,7 +446,7 @@ pub fn memory1_stage(
                             }
                             CacheResponse::MshrFull => {
                                 cpu.stats.stalls_mshr_full += 1;
-                                trace_mem!(cpu.soc.config.general.trace_instructions;
+                                trace_mem!(cpu.config.general.trace_instructions;
                                     stage       = "M1",
                                     rob_tag     = ex.rob_tag.0,
                                     pc          = %crate::trace::Hex(ex.pc),
@@ -462,7 +462,7 @@ pub fn memory1_stage(
                         }
                     }
                 }
-            } else if paddr.val() >= cpu.soc.config.system.ram_base {
+            } else if paddr.val() >= cpu.config.system.ram_base {
                 let lat = cpu.simulate_memory_access(paddr, access_type);
                 per_entry_latency += lat;
                 output.push(Mem1Mem2Entry {
@@ -508,7 +508,7 @@ pub fn memory1_stage(
                 });
             }
         } else {
-            trace_mem!(cpu.soc.config.general.trace_instructions;
+            trace_mem!(cpu.config.general.trace_instructions;
                 stage   = "M1",
                 rob_tag = ex.rob_tag.0,
                 pc      = %crate::trace::Hex(ex.pc),

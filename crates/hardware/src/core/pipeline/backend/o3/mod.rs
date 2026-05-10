@@ -412,7 +412,7 @@ impl ExecutionEngine for O3Engine {
                     0,
                 );
 
-                if cpu.soc.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
+                if cpu.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
                     && cpu.core.l2_cache.enabled
                     && let Some(ev) = evicted
                 {
@@ -878,8 +878,8 @@ impl ExecutionEngine for O3Engine {
                             saved.vec_vstart,
                             saved.vec_vxrm,
                             saved.vec_frm,
-                            cpu.soc.config.isa.vector.elen,
-                            cpu.soc.config.isa.vector.zvfh,
+                            cpu.config.isa.vector.elen,
+                            cpu.config.isa.vector.zvfh,
                             saved,
                         )
                     };

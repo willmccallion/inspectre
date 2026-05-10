@@ -37,7 +37,7 @@ const JALR_ALIGNMENT_MASK: u64 = !1;
 /// MRET/SRET, FENCE.I, etc.).
 pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem1Entry, bool) {
     if let Some(trap) = id.trap.clone() {
-        trace_execute!(cpu.soc.config.general.trace_instructions;
+        trace_execute!(cpu.config.general.trace_instructions;
             rob_tag         = id.rob_tag.0,
             pc              = %crate::trace::Hex(id.pc),
             inst            = %crate::trace::Hex32(id.inst),
@@ -85,7 +85,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         return (result, false);
     }
 
-    trace_execute!(cpu.soc.config.general.trace_instructions;
+    trace_execute!(cpu.config.general.trace_instructions;
         rob_tag  = id.rob_tag.0,
         pc       = %crate::trace::Hex(id.pc),
         inst     = %crate::trace::Hex32(id.inst),
@@ -200,7 +200,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
     if id.ctrl.system_op == SystemOp::FenceI {
         cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
         cpu.redirect_pending = true;
-        trace_execute!(cpu.soc.config.general.trace_instructions;
+        trace_execute!(cpu.config.general.trace_instructions;
             rob_tag = id.rob_tag.0,
             pc      = %crate::trace::Hex(id.pc),
             next_pc = %crate::trace::Hex(cpu.hart.pc),
@@ -261,7 +261,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
     let fp_rm = id.ctrl.fp_rm.or_else(|| RoundingMode::from_bits(cpu.hart.csrs.frm as u8));
     let (alu_out, fp_flags) =
         compute_alu(id.ctrl.alu, op_a, op_b, op_c, id.ctrl.is_f16, id.ctrl.is_rv32, fp_rm);
-    trace_execute!(cpu.soc.config.general.trace_instructions;
+    trace_execute!(cpu.config.general.trace_instructions;
         rob_tag  = id.rob_tag.0,
         pc       = %crate::trace::Hex(id.pc),
         op_a     = %crate::trace::Hex(op_a),
@@ -300,7 +300,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             id.ghr_snapshot,
         );
 
-        trace_branch!(cpu.soc.config.general.trace_instructions;
+        trace_branch!(cpu.config.general.trace_instructions;
             event          = "resolve",
             pc             = %crate::trace::Hex(id.pc),
             rob_tag        = id.rob_tag.0,
@@ -350,7 +350,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.core.branch_predictor.update_btb(id.pc, actual_target);
         }
 
-        trace_branch!(cpu.soc.config.general.trace_instructions;
+        trace_branch!(cpu.config.general.trace_instructions;
             event          = "resolve",
             pc             = %crate::trace::Hex(id.pc),
             rob_tag        = id.rob_tag.0,
@@ -436,7 +436,7 @@ fn execute_system(
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
             return (make_result(0, id.ctrl), true);
         }
-        trace_trap!(cpu.soc.config.general.trace_instructions;
+        trace_trap!(cpu.config.general.trace_instructions;
             event       = "return",
             pc          = %crate::trace::Hex(id.pc),
             rob_tag     = id.rob_tag.0,
@@ -456,7 +456,7 @@ fn execute_system(
         }
         let tsr = (cpu.hart.csrs.mstatus >> 22) & 1;
         if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tsr != 0 {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "illegal",
                 pc      = %crate::trace::Hex(id.pc),
                 rob_tag = id.rob_tag.0,
@@ -467,7 +467,7 @@ fn execute_system(
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
             return (make_result(0, id.ctrl), true);
         }
-        trace_trap!(cpu.soc.config.general.trace_instructions;
+        trace_trap!(cpu.config.general.trace_instructions;
             event     = "return",
             pc        = %crate::trace::Hex(id.pc),
             rob_tag   = id.rob_tag.0,
@@ -485,7 +485,7 @@ fn execute_system(
         if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::User
             || (cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tw != 0)
         {
-            trace_trap!(cpu.soc.config.general.trace_instructions;
+            trace_trap!(cpu.config.general.trace_instructions;
                 event   = "illegal",
                 pc      = %crate::trace::Hex(id.pc),
                 insn    = "WFI",
@@ -568,7 +568,7 @@ fn execute_system(
             PrivilegeMode::Supervisor => Trap::EnvironmentCallFromSMode,
             PrivilegeMode::Machine => Trap::EnvironmentCallFromMMode,
         };
-        trace_trap!(cpu.soc.config.general.trace_instructions;
+        trace_trap!(cpu.config.general.trace_instructions;
             event     = "take",
             pc        = %crate::trace::Hex(id.pc),
             rob_tag   = id.rob_tag.0,
@@ -773,7 +773,7 @@ fn execute_csr(
         CsrOp::None => old,
     };
 
-    trace_csr!(cpu.soc.config.general.trace_instructions;
+    trace_csr!(cpu.config.general.trace_instructions;
         op        = "write-deferred",
         pc        = %crate::trace::Hex(id.pc),
         rob_tag   = id.rob_tag.0,
