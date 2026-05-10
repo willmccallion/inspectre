@@ -10,7 +10,10 @@ A Python-first interface to the cycle-accurate RISC-V simulator:
 6. **Pipeline:** ``PipelineSnapshot`` (from ``cpu.pipeline_snapshot()``).
 """
 
-from importlib.metadata import version as _metadata_version
+from importlib.metadata import (
+    PackageNotFoundError as _PackageNotFoundError,
+    version as _metadata_version,
+)
 
 from . import presets
 from .config import Config
@@ -32,7 +35,14 @@ from .types import (
 )
 
 
-__version__ = _metadata_version("rvsim")
+try:
+    __version__ = _metadata_version("rvsim")
+except _PackageNotFoundError:
+    # Package not installed via pip / maturin develop. Common when running
+    # from source or in a parallel-test subprocess that races the install.
+    # Use a sentinel rather than failing import — version is observability,
+    # not load-bearing.
+    __version__ = "0.0.0+dev"
 
 # Scrub submodule references and private imports that the import machinery
 # pins as attributes. After this, `rvsim.objects` etc. raise AttributeError.
@@ -52,6 +62,7 @@ for _name in (
     "_core",
     "_cli",
     "_metadata_version",
+    "_PackageNotFoundError",
 ):
     _rvsim_dict.pop(_name, None)
 del _sys, _rvsim_dict, _name

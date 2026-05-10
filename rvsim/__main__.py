@@ -193,8 +193,17 @@ def main() -> None:
         _cmd_list()
         return
 
-    from importlib.metadata import version as _meta_version
+    from importlib.metadata import (
+        PackageNotFoundError as _PkgNotFound,
+        version as _meta_version,
+    )
     from .types import _parse_cycles
+
+    def _rvsim_version() -> str:
+        try:
+            return _meta_version("rvsim")
+        except _PkgNotFound:
+            return "0.0.0+dev"
 
     parser = argparse.ArgumentParser(
         prog="rvsim",
@@ -227,7 +236,7 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--version", action="version", version=f"rvsim {_meta_version('rvsim')}"
+        "--version", action="version", version=f"rvsim {_rvsim_version()}"
     )
     parser.add_argument(
         "--limit",
