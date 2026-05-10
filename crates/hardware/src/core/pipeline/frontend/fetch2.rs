@@ -50,8 +50,8 @@ pub fn fetch2_stage(
 
     // simulate_memory_access installs lines on miss, so a single probe is enough.
     let mut icache_penalty: u64 = 0;
-    if cpu.l1_i_cache.enabled {
-        let line_mask = !(cpu.i_cache_line_bytes as u64 - 1);
+    if cpu.core.l1_i_cache.enabled {
+        let line_mask = !(cpu.core.i_cache_line_bytes as u64 - 1);
         let mut last_line: u64 = u64::MAX;
 
         for f1 in input.iter() {

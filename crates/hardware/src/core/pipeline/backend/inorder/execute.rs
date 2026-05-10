@@ -775,9 +775,9 @@ pub fn execute_inorder(
 
             if mispredicted {
                 // Restore GHR to pre-speculation state, then push the actual outcome.
-                cpu.branch_predictor.repair_history(&id.ghr_snapshot);
-                cpu.branch_predictor.speculate(id.pc, taken);
-                cpu.branch_predictor.restore_ras(id.ras_snapshot);
+                cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
+                cpu.core.branch_predictor.speculate(id.pc, taken);
+                cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
                 cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_next_pc;
                 cpu.redirect_pending = true;
@@ -812,12 +812,12 @@ pub fn execute_inorder(
 
             // Skip for calls — on_call already updates the BTB.
             if !rd_link {
-                cpu.branch_predictor.update_btb(id.pc, actual_target);
+                cpu.core.branch_predictor.update_btb(id.pc, actual_target);
             }
 
             if mispredicted {
-                cpu.branch_predictor.repair_history(&id.ghr_snapshot);
-                cpu.branch_predictor.restore_ras(id.ras_snapshot);
+                cpu.core.branch_predictor.repair_history(&id.ghr_snapshot);
+                cpu.core.branch_predictor.restore_ras(id.ras_snapshot);
                 cpu.stats.speculative_branch_mispredictions += 1;
                 cpu.hart.pc = actual_target;
                 cpu.redirect_pending = true;
@@ -829,12 +829,12 @@ pub fn execute_inorder(
             // RAS management per RISC-V Table 2.1: x1 (ra) and x5 (t0) are link registers.
             let ret_addr = id.pc.wrapping_add(id.inst_size.as_u64());
             if rd_link && rs1_link && id.rd != id.rs1 {
-                cpu.branch_predictor.on_return();
-                cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
+                cpu.core.branch_predictor.on_return();
+                cpu.core.branch_predictor.on_call(id.pc, ret_addr, actual_target);
             } else if rd_link {
-                cpu.branch_predictor.on_call(id.pc, ret_addr, actual_target);
+                cpu.core.branch_predictor.on_call(id.pc, ret_addr, actual_target);
             } else if rs1_link {
-                cpu.branch_predictor.on_return();
+                cpu.core.branch_predictor.on_return();
             }
         }
 

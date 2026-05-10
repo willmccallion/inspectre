@@ -232,7 +232,7 @@ pub fn commit_stage(
         }
 
         if entry.bp_update {
-            cpu.branch_predictor.update_branch(
+            cpu.core.branch_predictor.update_branch(
                 entry.bp_pc,
                 entry.bp_outcome.taken,
                 entry.bp_target,
@@ -482,7 +482,7 @@ pub fn commit_stage(
         if entry.ctrl.system_op == SystemOp::FenceI {
             drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
             // I-cache flush after drain so refills see new data; force a fresh redirect.
-            let _ = cpu.l1_i_cache.invalidate_all();
+            let _ = cpu.core.l1_i_cache.invalidate_all();
             cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             cpu.redirect_pending = true;
             // FENCE.I serializes: break so younger insts fetched pre-drain don't retire here.
@@ -551,8 +551,8 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
     let is_ram = paddr.val() >= cpu.ram_start && paddr.val() < cpu.ram_end;
     let width_bytes = width_to_bytes(store.width);
 
-    if !cpu.wcb.is_disabled() && is_ram {
-        let evicted = cpu.wcb.merge_store(paddr, data, width_bytes);
+    if !cpu.core.wcb.is_disabled() && is_ram {
+        let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
             cpu.stats.wcb_coalesces += 1;
         }
@@ -569,7 +569,7 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
         paddr      = %crate::trace::Hex(paddr.val()),
         data       = %crate::trace::Hex(data),
         width      = ?store.width,
-        via_wcb    = !cpu.wcb.is_disabled(),
+        via_wcb    = !cpu.core.wcb.is_disabled(),
         "CM: committed store drained to memory"
     );
     true
@@ -603,7 +603,7 @@ fn drain_all_committed(
 
 /// Flushes all WCB entries through the cache hierarchy.
 fn flush_wcb(cpu: &mut Cpu) {
-    let drains = cpu.wcb.flush_all();
+    let drains = cpu.core.wcb.flush_all();
     for drain in drains {
         let addr = crate::common::PhysAddr::new(drain.line_addr);
         let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
@@ -662,10 +662,10 @@ fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> 
         // are already at RAM by commit, so the writeback is a no-op and we
         // share cbo.inval's drop-the-line implementation.
         SystemOp::CboInval | SystemOp::CboFlush => {
-            let _ = cpu.l1_d_cache.invalidate_line(paddr);
+            let _ = cpu.core.l1_d_cache.invalidate_line(paddr);
         }
         SystemOp::CboClean => {
-            let _ = cpu.l1_d_cache.clean_line(paddr);
+            let _ = cpu.core.l1_d_cache.clean_line(paddr);
         }
         _ => {}
     }
@@ -1074,8 +1074,8 @@ fn sfence_vma_commit(cpu: &mut Cpu, info: &SfenceVmaInfo) {
             cpu.hart.mmu.dtlb.flush();
             cpu.hart.mmu.itlb.flush();
             cpu.hart.mmu.l2_tlb.flush();
-            let _ = cpu.l1_d_cache.flush();
-            let _ = cpu.l1_i_cache.invalidate_all();
+            let _ = cpu.core.l1_d_cache.flush();
+            let _ = cpu.core.l1_i_cache.invalidate_all();
         }
         (true, false) => {
             let vpn = Vpn::new((info.rs1_val >> PAGE_SHIFT) & VPN_MASK);

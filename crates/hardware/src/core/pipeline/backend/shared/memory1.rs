@@ -40,7 +40,7 @@ pub fn memory1_stage(
     mut load_queue: Option<&mut LoadQueue>,
 ) -> Vec<PhysReg> {
     let entries = std::mem::take(input);
-    let has_mshrs = cpu.l1d_mshrs.capacity() > 0;
+    let has_mshrs = cpu.core.l1d_mshrs.capacity() > 0;
     let mut cancelled_wakeups: Vec<PhysReg> = Vec::new();
     // Do not clear output — memory2 may have pushed stalled entries back here.
 
@@ -292,18 +292,18 @@ pub fn memory1_stage(
             // RAM goes through the cache hierarchy; MMIO bypasses it.
             if paddr.val() >= cpu.cache_base && has_mshrs {
                 let is_write = ex.ctrl.mem_write;
-                let l1d_hit = cpu.l1_d_cache.access_check(paddr.val(), is_write);
+                let l1d_hit = cpu.core.l1_d_cache.access_check(paddr.val(), is_write);
 
                 if l1d_hit {
                     cpu.stats.dcache_hits += 1;
-                    per_entry_latency += cpu.l1_d_cache.latency;
+                    per_entry_latency += cpu.core.l1_d_cache.latency;
                     trace_mem!(cpu.trace;
                         stage      = "M1",
                         rob_tag    = ex.rob_tag.0,
                         pc         = %crate::trace::Hex(ex.pc),
                         paddr      = %crate::trace::Hex(paddr.val()),
                         cache_hit  = true,
-                        latency    = cpu.l1_d_cache.latency,
+                        latency    = cpu.core.l1_d_cache.latency,
                         "M1: L1D cache HIT"
                     );
                     output.push(Mem1Mem2Entry {
@@ -329,7 +329,7 @@ pub fn memory1_stage(
                 } else {
                     cpu.stats.dcache_misses += 1;
                     let miss_latency =
-                        cpu.l1_d_cache.latency + cpu.simulate_l1d_miss_latency(paddr, access_type);
+                        cpu.core.l1_d_cache.latency + cpu.simulate_l1d_miss_latency(paddr, access_type);
                     trace_mem!(cpu.trace;
                         stage       = "M1",
                         rob_tag     = ex.rob_tag.0,
@@ -346,7 +346,7 @@ pub fn memory1_stage(
                     if is_store_only {
                         // Allocate MSHR for write-allocate; store buffer does the write.
                         let waiter = MshrWaiter { rob_tag: ex.rob_tag, parked_entry: None };
-                        let resp = cpu.l1d_mshrs.request(
+                        let resp = cpu.core.l1d_mshrs.request(
                             paddr.val(),
                             true,
                             miss_latency,
@@ -364,7 +364,7 @@ pub fn memory1_stage(
                                 // Store proceeds; worst case write-allocate is skipped.
                             }
                         }
-                        per_entry_latency += cpu.l1_d_cache.latency;
+                        per_entry_latency += cpu.core.l1_d_cache.latency;
                         output.push(Mem1Mem2Entry {
                             rob_tag: ex.rob_tag,
                             pc: ex.pc,
@@ -407,7 +407,7 @@ pub fn memory1_stage(
                             vec_mem: ex.vec_mem.clone(),
                         };
                         let waiter = MshrWaiter { rob_tag: ex.rob_tag, parked_entry: Some(parked) };
-                        let resp = cpu.l1d_mshrs.request(
+                        let resp = cpu.core.l1d_mshrs.request(
                             paddr.val(),
                             is_write,
                             miss_latency,
@@ -685,7 +685,7 @@ mod tests {
         assert_eq!(output.len(), 0); // Parked in MSHR
 
         // 2nd load: hit (we must inject it directly into the cache first to simulate hit)
-        cpu.l1_d_cache.install_or_replace(0x8000_0000, false, 0);
+        cpu.core.l1_d_cache.install_or_replace(0x8000_0000, false, 0);
         let mut input2 = vec![ExMem1Entry {
             rob_tag: crate::core::pipeline::rob::RobTag(5),
             pc: 0x1004,

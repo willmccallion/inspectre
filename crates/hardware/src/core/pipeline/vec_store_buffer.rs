@@ -535,8 +535,8 @@ fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidt
     let is_ram = !in_htif && raw >= cpu.ram_start && raw < cpu.ram_end;
     let width_bytes = width_to_bytes(width);
 
-    if !cpu.wcb.is_disabled() && is_ram {
-        let evicted = cpu.wcb.merge_store(paddr, data, width_bytes);
+    if !cpu.core.wcb.is_disabled() && is_ram {
+        let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
             cpu.stats.wcb_coalesces += 1;
         }

@@ -127,8 +127,8 @@ fn test_cache_access_write() {
 #[test]
 fn test_cache_disabled() {
     let mut cpu = create_test_cpu();
-    cpu.l1_i_cache.enabled = false;
-    cpu.l1_d_cache.enabled = false;
+    cpu.core.l1_i_cache.enabled = false;
+    cpu.core.l1_d_cache.enabled = false;
 
     let paddr = 0x8000_0000u64;
 
@@ -185,7 +185,7 @@ fn test_cache_stats_updated() {
 #[test]
 fn test_l1_icache_enabled_hit_tracking() {
     let mut cpu = create_test_cpu();
-    cpu.l1_i_cache.enabled = true;
+    cpu.core.l1_i_cache.enabled = true;
 
     let initial_hits = cpu.stats.icache_hits;
     let initial_misses = cpu.stats.icache_misses;
@@ -205,7 +205,7 @@ fn test_l1_icache_enabled_hit_tracking() {
 #[test]
 fn test_l1_dcache_enabled_hit_tracking() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
 
     let initial_hits = cpu.stats.dcache_hits;
     let initial_misses = cpu.stats.dcache_misses;
@@ -225,8 +225,8 @@ fn test_l1_dcache_enabled_hit_tracking() {
 #[test]
 fn test_l2_cache_enabled() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = false;
-    cpu.l2_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = false;
+    cpu.core.l2_cache.enabled = true;
 
     let initial_l2_hits = cpu.stats.l2_hits;
     let initial_l2_misses = cpu.stats.l2_misses;
@@ -241,8 +241,8 @@ fn test_l2_cache_enabled() {
 #[test]
 fn test_l3_cache_enabled() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = false;
-    cpu.l2_cache.enabled = false;
+    cpu.core.l1_d_cache.enabled = false;
+    cpu.core.l2_cache.enabled = false;
     cpu.l3_cache.enabled = true;
 
     let initial_l3_hits = cpu.stats.l3_hits;
@@ -258,9 +258,9 @@ fn test_l3_cache_enabled() {
 #[test]
 fn test_all_caches_enabled() {
     let mut cpu = create_test_cpu();
-    cpu.l1_i_cache.enabled = true;
-    cpu.l1_d_cache.enabled = true;
-    cpu.l2_cache.enabled = true;
+    cpu.core.l1_i_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
+    cpu.core.l2_cache.enabled = true;
     cpu.l3_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
@@ -320,7 +320,7 @@ fn test_translate_invalid_address_write() {
 #[test]
 fn test_cache_write_access_tracking() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
@@ -336,8 +336,8 @@ fn test_cache_write_access_tracking() {
 #[test]
 fn test_cache_hierarchy_miss_propagation() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = true;
-    cpu.l2_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
+    cpu.core.l2_cache.enabled = true;
     cpu.l3_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
@@ -352,7 +352,7 @@ fn test_cache_hierarchy_miss_propagation() {
 #[test]
 fn test_different_addresses_different_cache_lines() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
 
     // Access addresses that should map to different cache lines
     for i in 0..10 {
@@ -367,8 +367,8 @@ fn test_different_addresses_different_cache_lines() {
 #[test]
 fn test_instruction_and_data_caches_independent() {
     let mut cpu = create_test_cpu();
-    cpu.l1_i_cache.enabled = true;
-    cpu.l1_d_cache.enabled = true;
+    cpu.core.l1_i_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
@@ -395,8 +395,8 @@ fn test_instruction_and_data_caches_independent() {
 #[test]
 fn test_memory_access_latency_increases_with_cache_misses() {
     let mut cpu = create_test_cpu();
-    cpu.l1_d_cache.enabled = true;
-    cpu.l2_cache.enabled = true;
+    cpu.core.l1_d_cache.enabled = true;
+    cpu.core.l2_cache.enabled = true;
 
     let paddr = rvsim_core::common::PhysAddr::new(0x8000_0000u64);
 
@@ -428,9 +428,9 @@ fn test_translate_with_direct_mode_false() {
 #[test]
 fn test_cache_disabled_no_stats_update() {
     let mut cpu = create_test_cpu();
-    cpu.l1_i_cache.enabled = false;
-    cpu.l1_d_cache.enabled = false;
-    cpu.l2_cache.enabled = false;
+    cpu.core.l1_i_cache.enabled = false;
+    cpu.core.l1_d_cache.enabled = false;
+    cpu.core.l2_cache.enabled = false;
     cpu.l3_cache.enabled = false;
 
     let initial_icache_hits = cpu.stats.icache_hits;

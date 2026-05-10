@@ -48,7 +48,7 @@ pub fn execute_vec_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap>
 
 /// Execute a vector crypto instruction (Zvkn*/Zvks*/Zvkg).
 fn execute_vec_crypto(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
     let vstart = cpu.hart.csrs.vstart as usize;
     let vl = cpu.hart.csrs.vl as usize;
     crypto::execute_crypto(
@@ -123,7 +123,7 @@ fn execute_vsetvl_rs2_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> u64 {
 
 /// Build the common execution context from CPU state.
 const fn build_ctx(cpu: &Cpu) -> VecExecCtx {
-    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.core.elen);
     VecExecCtx {
         sew: vtype.vsew,
         vl: cpu.hart.csrs.vl as usize,
@@ -137,7 +137,7 @@ const fn build_ctx(cpu: &Cpu) -> VecExecCtx {
             Some(rm) => rm,
             None => RoundingMode::Rne,
         },
-        zvfh: cpu.zvfh,
+        zvfh: cpu.core.zvfh,
     }
 }
 
@@ -254,8 +254,8 @@ const fn check_widening_lmul(inst: u32, op: VectorOp, vlmul: Vlmul) -> Result<()
 
 /// Execute a vector integer arithmetic operation on the VPR.
 fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
-    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.core.elen);
     check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -287,8 +287,8 @@ fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> 
 
 /// Execute a vector floating-point operation.
 fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
-    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.core.elen);
     check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
 
     let mut ctx = build_ctx(cpu);
@@ -312,7 +312,7 @@ fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
 
 /// Execute a vector reduction operation.
 fn execute_vec_reduction(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -335,7 +335,7 @@ fn execute_vec_reduction(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Tr
 
 /// Execute a vector mask operation.
 fn execute_vec_mask(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -357,7 +357,7 @@ fn execute_vec_mask(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
 
 /// Execute a vector permutation operation.
 fn execute_vec_permute(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.core.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;

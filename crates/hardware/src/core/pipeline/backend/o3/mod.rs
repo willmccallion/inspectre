@@ -402,21 +402,21 @@ impl ExecutionEngine for O3Engine {
         }
 
         // Drain completed MSHRs: install lines in L1D and resume parked loads.
-        if cpu.l1d_mshrs.capacity() > 0 {
-            let completed = cpu.l1d_mshrs.drain_completions(now);
+        if cpu.core.l1d_mshrs.capacity() > 0 {
+            let completed = cpu.core.l1d_mshrs.drain_completions(now);
             for mshr_entry in completed {
                 // miss latency already covers the write-back penalty.
-                let (_penalty, evicted) = cpu.l1_d_cache.install_line_public_tracked(
+                let (_penalty, evicted) = cpu.core.l1_d_cache.install_line_public_tracked(
                     mshr_entry.line_addr,
                     mshr_entry.is_write,
                     0,
                 );
 
-                if cpu.inclusion_policy == crate::config::InclusionPolicy::Exclusive
-                    && cpu.l2_cache.enabled
+                if cpu.core.inclusion_policy == crate::config::InclusionPolicy::Exclusive
+                    && cpu.core.l2_cache.enabled
                     && let Some(ev) = evicted
                 {
-                    let _ = cpu.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
+                    let _ = cpu.core.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
                     cpu.stats.exclusive_l1_to_l2_swaps += 1;
                 }
 
@@ -474,7 +474,7 @@ impl ExecutionEngine for O3Engine {
                 self.store_buffer.flush_after(keep_tag);
                 self.load_queue.flush_after(keep_tag);
                 self.mdp.flush_after(keep_tag, &self.rob);
-                cpu.l1d_mshrs.flush_after(keep_tag);
+                cpu.core.l1d_mshrs.flush_after(keep_tag);
 
                 self.mem1_mem2.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
                 self.mem2_wb.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
@@ -505,7 +505,7 @@ impl ExecutionEngine for O3Engine {
                 self.store_buffer.flush_speculative();
                 self.load_queue.flush();
                 self.mdp.flush();
-                cpu.l1d_mshrs.flush();
+                cpu.core.l1d_mshrs.flush();
 
                 self.mem1_mem2.clear();
                 self.mem2_wb.clear();
@@ -534,7 +534,7 @@ impl ExecutionEngine for O3Engine {
         }
 
         // With MSHRs: misses park there, so memory1 always accepts. Without: gate on oldest incomplete.
-        let has_mshrs = cpu.l1d_mshrs.capacity() > 0;
+        let has_mshrs = cpu.core.l1d_mshrs.capacity() > 0;
         let mem1_busy = !has_mshrs
             && self.mem1_mem2.iter().any(|e| {
                 let is_mem = e.ctrl.mem_read || e.ctrl.mem_write;
@@ -878,8 +878,8 @@ impl ExecutionEngine for O3Engine {
                             saved.vec_vstart,
                             saved.vec_vxrm,
                             saved.vec_frm,
-                            cpu.elen,
-                            cpu.zvfh,
+                            cpu.core.elen,
+                            cpu.core.zvfh,
                             saved,
                         )
                     };
@@ -1114,7 +1114,7 @@ impl ExecutionEngine for O3Engine {
 
                 // Speculative load wakeup assuming L1D hit (only if MSHRs are configured).
                 let is_load = ex_result.ctrl.mem_read && !ex_result.ctrl.mem_write;
-                if is_load && ex_result.trap.is_none() && cpu.l1d_mshrs.capacity() > 0 {
+                if is_load && ex_result.trap.is_none() && cpu.core.l1d_mshrs.capacity() > 0 {
                     self.issue_queue.speculative_wakeup_phys(ex_result.rd_phys);
                 }
 
@@ -1172,7 +1172,7 @@ impl ExecutionEngine for O3Engine {
                 self.store_buffer.flush_after(keep_tag);
                 self.load_queue.flush_after(keep_tag);
                 self.mdp.flush_after(keep_tag, &self.rob);
-                cpu.l1d_mshrs.flush_after(keep_tag);
+                cpu.core.l1d_mshrs.flush_after(keep_tag);
             } else {
                 // keep_tag already committed: flush everything in-flight.
                 for entry in self.rob.iter_all() {
@@ -1188,7 +1188,7 @@ impl ExecutionEngine for O3Engine {
                 self.store_buffer.flush_speculative();
                 self.load_queue.flush();
                 self.mdp.flush();
-                cpu.l1d_mshrs.flush();
+                cpu.core.l1d_mshrs.flush();
             }
             self.mem1_mem2.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
             self.mem2_wb.retain(|e| e.rob_tag.is_older_or_eq(keep_tag));
@@ -1296,8 +1296,8 @@ impl ExecutionEngine for O3Engine {
         self.execute_mem1.clear();
         self.mem1_mem2.clear();
         self.mem2_wb.clear();
-        cpu.l1d_mshrs.flush();
-        cpu.branch_predictor.repair_to_committed();
+        cpu.core.l1d_mshrs.flush();
+        cpu.core.branch_predictor.repair_to_committed();
 
         // Conservation invariant: every phys reg is either free or held by the committed map.
         debug_assert_eq!(

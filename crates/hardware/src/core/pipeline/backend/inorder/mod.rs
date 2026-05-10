@@ -24,22 +24,22 @@ use crate::core::units::bru::BranchPredictor;
 /// loads/atomics into the mem1→mem2 latch.  Mirrors the O3 backend's
 /// MSHR completion logic but without PRF/wakeup handling.
 fn drain_mshr_completions(cpu: &mut Cpu, mem1_mem2: &mut Vec<Mem1Mem2Entry>, now: u64) {
-    if cpu.l1d_mshrs.capacity() == 0 {
+    if cpu.core.l1d_mshrs.capacity() == 0 {
         return;
     }
-    let completed = cpu.l1d_mshrs.drain_completions(now);
+    let completed = cpu.core.l1d_mshrs.drain_completions(now);
     for mshr_entry in completed {
-        let (_penalty, evicted) = cpu.l1_d_cache.install_line_public_tracked(
+        let (_penalty, evicted) = cpu.core.l1_d_cache.install_line_public_tracked(
             mshr_entry.line_addr,
             mshr_entry.is_write,
             0,
         );
 
-        if cpu.inclusion_policy == crate::config::InclusionPolicy::Exclusive
-            && cpu.l2_cache.enabled
+        if cpu.core.inclusion_policy == crate::config::InclusionPolicy::Exclusive
+            && cpu.core.l2_cache.enabled
             && let Some(ev) = evicted
         {
-            let _ = cpu.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
+            let _ = cpu.core.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
             cpu.stats.exclusive_l1_to_l2_swaps += 1;
         }
 
@@ -239,8 +239,8 @@ impl ExecutionEngine for InOrderEngine {
         self.mem1_mem2.clear();
         self.mem2_wb.clear();
         self.mem1_stall = 0;
-        cpu.l1d_mshrs.flush();
-        cpu.branch_predictor.repair_to_committed();
+        cpu.core.l1d_mshrs.flush();
+        cpu.core.branch_predictor.repair_to_committed();
     }
 
     fn read_csr_speculative(&self, cpu: &crate::core::Cpu, addr: crate::common::CsrAddr) -> u64 {

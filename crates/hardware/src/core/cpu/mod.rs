@@ -16,19 +16,15 @@ pub mod memory;
 /// Trap and exception handling logic.
 pub mod trap;
 
-use crate::common::{HartId, PhysAddr, RegisterFile};
-use crate::config::{Config, InclusionPolicy};
-use crate::core::Hart;
+use crate::common::{CoreId, HartId, PhysAddr, RegisterFile};
+use crate::config::Config;
 use crate::core::arch::csr::Csrs;
-use crate::core::hart::HartInit;
 use crate::core::arch::mode::PrivilegeMode;
-use crate::core::pipeline::write_buffer::WriteCombiningBuffer;
-use crate::core::units::bru::BranchPredictorWrapper;
+use crate::core::hart::HartInit;
 use crate::core::units::cache::CacheSim;
-use crate::core::units::cache::mshr::MshrFile;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
-use crate::core::units::prefetch::PrefetchFilter;
+use crate::core::{Core, Hart};
 use crate::soc::Soc;
 use crate::stats::SimStats;
 
@@ -41,42 +37,17 @@ use crate::stats::SimStats;
 pub struct Cpu {
     /// Per-thread architectural state (registers, CSRs, PC, MMU, PMP, ...).
     pub hart: Hart,
+    /// Pipeline-private state shared by harts on this core (caches, MSHRs,
+    /// branch predictor, prefetch filter, write-combining buffer).
+    pub core: Core,
 
     /// System-on-Chip: bus, memory controller, devices, exit signal.
     pub soc: Soc,
-    /// L1 Instruction Cache.
-    pub l1_i_cache: CacheSim,
-    /// L1 Data Cache.
-    pub l1_d_cache: CacheSim,
-    /// L2 Unified Cache.
-    pub l2_cache: CacheSim,
     /// L3 Unified Cache.
     pub l3_cache: CacheSim,
-    /// L1D MSHR file for non-blocking cache access (O3 backend only).
-    pub l1d_mshrs: MshrFile,
-    /// Cache inclusion policy (Inclusive / Exclusive / NINE).
-    pub inclusion_policy: InclusionPolicy,
-    /// Write Combining Buffer for store coalescing.
-    pub wcb: WriteCombiningBuffer,
-    /// Shared prefetch filter to deduplicate prefetch requests across cache levels.
-    pub prefetch_filter: PrefetchFilter,
     /// Base address of RAM — addresses at or above this go through the
     /// cache hierarchy for latency simulation; addresses below are MMIO.
     pub cache_base: u64,
-
-    /// Branch Predictor Unit.
-    pub branch_predictor: BranchPredictorWrapper,
-    /// Pipeline width (superscalar degree).
-    pub pipeline_width: usize,
-    /// Maximum element width in bits (ELEN). 32 = Zve32x/Zve32f, 64 = standard.
-    pub elen: usize,
-    /// Whether the Zvfh (half-precision vector FP) extension is enabled.
-    pub zvfh: bool,
-    /// True when using an O3 backend with register renaming.
-    /// Decode skips intra-bundle RAW hazard checks (rename handles them).
-    pub has_register_renaming: bool,
-    /// I-cache line size in bytes (for cache-line-aligned fetch).
-    pub i_cache_line_bytes: usize,
 
     /// Enable instruction tracing.
     pub trace: bool,
@@ -213,8 +184,6 @@ impl Cpu {
             ..Default::default()
         };
 
-        let bp = BranchPredictorWrapper::new(config);
-
         let (ram_ptr, ram_start, ram_end) =
             soc.bus.get_ram_info().unwrap_or((std::ptr::null_mut(), 0, 0));
         let mut regs = if direct_mode {
@@ -260,36 +229,14 @@ impl Cpu {
 
         Self {
             hart,
+            core: Core::new(CoreId::new(0), config),
             trace: config.general.trace_instructions,
             soc,
             exit_code: None,
             direct_mode,
             cache_base: config.system.ram_base,
             stats: SimStats::default(),
-            branch_predictor: bp,
-            l1_i_cache: CacheSim::new(&config.cache.l1_i),
-            l1_d_cache: CacheSim::new(&config.cache.l1_d),
-            l1d_mshrs: MshrFile::new(config.cache.l1_d.mshr_count, config.cache.l1_d.line_bytes),
-            inclusion_policy: config.cache.inclusion_policy,
-            wcb: WriteCombiningBuffer::new(config.cache.wcb_entries, config.cache.l1_d.line_bytes),
-            prefetch_filter: PrefetchFilter::new(
-                if config.cache.l1_d.prefetcher != crate::config::Prefetcher::None
-                    || config.cache.l2.prefetcher != crate::config::Prefetcher::None
-                {
-                    64
-                } else {
-                    0
-                },
-                config.cache.l1_d.line_bytes,
-            ),
-            l2_cache: CacheSim::new(&config.cache.l2),
             l3_cache: CacheSim::new(&config.cache.l3),
-            pipeline_width: config.pipeline.width,
-            elen: config.pipeline.elen,
-            zvfh: config.pipeline.zvfh,
-            has_register_renaming: config.pipeline.backend
-                == crate::core::pipeline::engine::BackendType::OutOfOrder,
-            i_cache_line_bytes: config.cache.l1_i.line_bytes.max(1),
             clint_divider: config.system.clint_divider,
             ram_ptr,
             ram_start,

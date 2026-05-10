@@ -37,10 +37,10 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
     let align_mask: u64 = if c_enabled { 1 } else { 3 };
 
     // A real frontend fetches one cache line per cycle; bound the burst by line_end.
-    let line_bytes = cpu.i_cache_line_bytes as u64;
+    let line_bytes = cpu.core.i_cache_line_bytes as u64;
     let line_end = (current_pc | (line_bytes - 1)) + 1;
 
-    for _ in 0..cpu.pipeline_width {
+    for _ in 0..cpu.core.pipeline_width {
         if current_pc + 2 > line_end {
             break;
         }
@@ -102,16 +102,16 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
         let mut pred_taken = false;
         let mut pred_target = 0;
         let mut stop_fetch = false;
-        let ghr_snapshot = cpu.branch_predictor.snapshot_history();
-        let ras_snapshot = cpu.branch_predictor.snapshot_ras();
+        let ghr_snapshot = cpu.core.branch_predictor.snapshot_history();
+        let ras_snapshot = cpu.core.branch_predictor.snapshot_ras();
 
         if is_compressed {
             // C.BEQZ / C.BNEZ: quadrant 01, funct3 = 110 or 111.
             let quadrant = half_word & 0x3;
             let funct3_c = (half_word >> 13) & 0x7;
             if quadrant == 0x01 && (funct3_c == 0b110 || funct3_c == 0b111) {
-                let (taken, target) = cpu.branch_predictor.predict_branch(current_pc);
-                cpu.branch_predictor.speculate(current_pc, taken);
+                let (taken, target) = cpu.core.branch_predictor.predict_branch(current_pc);
+                cpu.core.branch_predictor.speculate(current_pc, taken);
                 if taken && let Some(tgt) = target {
                     next_pc_calc = tgt;
                     pred_taken = true;
@@ -177,8 +177,8 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             let rs1 = RegIdx::new(((full_inst >> RS1_SHIFT) & RS1_MASK) as u8);
 
             if opcode == opcodes::OP_BRANCH {
-                let (taken, target) = cpu.branch_predictor.predict_branch(current_pc);
-                cpu.branch_predictor.speculate(current_pc, taken);
+                let (taken, target) = cpu.core.branch_predictor.predict_branch(current_pc);
+                cpu.core.branch_predictor.speculate(current_pc, taken);
                 if taken && let Some(tgt) = target {
                     next_pc_calc = tgt;
                     pred_taken = true;
@@ -196,7 +196,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     "F1: branch prediction"
                 );
             } else if opcode == opcodes::OP_JAL {
-                if let Some(tgt) = cpu.branch_predictor.predict_btb(current_pc) {
+                if let Some(tgt) = cpu.core.branch_predictor.predict_btb(current_pc) {
                     next_pc_calc = tgt;
                     pred_taken = true;
                     pred_target = tgt;
@@ -219,12 +219,12 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                 // Use RAS for returns/coroutine swaps but not pure self-calls.
                 let use_ras = rs1_link && (!rd_link || rd != rs1);
                 if use_ras {
-                    if let Some(tgt) = cpu.branch_predictor.predict_return() {
+                    if let Some(tgt) = cpu.core.branch_predictor.predict_return() {
                         next_pc_calc = tgt;
                         pred_taken = true;
                         pred_target = tgt;
                     }
-                } else if let Some(tgt) = cpu.branch_predictor.predict_btb(current_pc) {
+                } else if let Some(tgt) = cpu.core.branch_predictor.predict_btb(current_pc) {
                     next_pc_calc = tgt;
                     pred_taken = true;
                     pred_target = tgt;

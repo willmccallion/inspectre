@@ -351,8 +351,8 @@ impl Cpu {
 
                 self.hart.csrs.satp = new_val;
 
-                let _ = self.l1_i_cache.invalidate_all();
-                let _ = self.l1_d_cache.flush();
+                let _ = self.core.l1_i_cache.invalidate_all();
+                let _ = self.core.l1_d_cache.flush();
 
                 self.hart.mmu.dtlb.flush();
                 self.hart.mmu.itlb.flush();

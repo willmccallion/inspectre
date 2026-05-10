@@ -565,7 +565,7 @@ impl PyCpu {
     /// This performs a shallow clone of the latch vectors — it has no effect on
     /// simulation correctness or timing.
     fn pipeline_snapshot(&self) -> PyPipelineSnapshot {
-        let width = self.inner.cpu.pipeline_width;
+        let width = self.inner.cpu.core.pipeline_width;
         PyPipelineSnapshot::new(self.inner.pipeline.snapshot(width))
     }
 
@@ -757,9 +757,9 @@ impl PyCpu {
                 .map_err(|e| PyRuntimeError::new_err(format!("read error restoring RAM: {e}")))?;
         }
 
-        let _ = cpu.l1_i_cache.flush();
-        let _ = cpu.l1_d_cache.flush();
-        let _ = cpu.l2_cache.flush();
+        let _ = cpu.core.l1_i_cache.flush();
+        let _ = cpu.core.l1_d_cache.flush();
+        let _ = cpu.core.l2_cache.flush();
         let _ = cpu.l3_cache.flush();
         cpu.hart.mmu.dtlb.flush();
         cpu.hart.mmu.itlb.flush();
