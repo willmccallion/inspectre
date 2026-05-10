@@ -90,7 +90,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                 ptr.read_unaligned()
             }
         } else {
-            cpu.bus.bus.read_u16(paddr)
+            cpu.soc.bus.read_u16(paddr)
         };
 
         let is_compressed =
@@ -168,7 +168,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                     ptr.read_unaligned()
                 }
             } else {
-                cpu.bus.bus.read_u16(upper_phys)
+                cpu.soc.bus.read_u16(upper_phys)
             };
 
             let full_inst = (upper_half as u32) << 16 | (half_word as u32);

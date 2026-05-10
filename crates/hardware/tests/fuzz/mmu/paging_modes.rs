@@ -36,7 +36,7 @@ fn make_pte(ppn: u64, perms: u64) -> u64 {
 
 fn write_pte(ctx: &mut TestContext, table_ppn: u64, vpn_index: u64, pte: u64) {
     let addr = (table_ppn << PAGE_SHIFT) | (vpn_index * PTE_SIZE);
-    ctx.cpu_mut().bus.bus.write_u64(PhysAddr::new(addr), pte);
+    ctx.cpu_mut().soc.bus.write_u64(PhysAddr::new(addr), pte);
 }
 
 fn mode_to_satp(mode: u64) -> u64 {
@@ -149,7 +149,7 @@ proptest! {
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().bus.bus,
+            &mut ctx.cpu_mut().soc.bus,
         );
         prop_assert!(result.trap.is_none(), "unexpected trap: {:?}", result.trap);
         prop_assert_eq!(result.paddr.val(), expected_paddr);
@@ -176,7 +176,7 @@ proptest! {
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().bus.bus,
+            &mut ctx.cpu_mut().soc.bus,
         );
         prop_assert!(matches!(result.trap, Some(Trap::LoadPageFault(_))));
     }
@@ -205,7 +205,7 @@ proptest! {
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().bus.bus,
+            &mut ctx.cpu_mut().soc.bus,
         );
         prop_assert!(matches!(result.trap, Some(Trap::LoadPageFault(_))));
     }

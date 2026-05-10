@@ -1402,13 +1402,13 @@ mod tests {
     use super::*;
     use crate::common::RegIdx;
     use crate::config::Config;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_o3_engine_new_and_flush() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let mut engine = O3Engine::new(&config);
         assert_eq!(engine.width, config.pipeline.width);
@@ -1420,8 +1420,8 @@ mod tests {
     #[test]
     fn test_o3_engine_sync_arch_regs() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut engine = O3Engine::new(&config);
 
         cpu.regs.write(RegIdx::new(1), 42);

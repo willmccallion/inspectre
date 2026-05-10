@@ -21,12 +21,12 @@ impl Cpu {
     ///
     /// Returns [`SimError::KernelPanic`] when the bus panic sentinel fires.
     pub fn pre_tick(&mut self) -> Result<bool, SimError> {
-        if let Some(code) = self.bus.check_exit() {
+        if let Some(code) = self.soc.check_exit() {
             self.exit_code = Some(code);
             return Ok(true);
         }
 
-        if self.bus.check_kernel_panic() {
+        if self.soc.check_kernel_panic() {
             let detected_at = *self.panic_detected_at_cycle.get_or_insert(self.stats.cycles);
             if self.stats.cycles.saturating_sub(detected_at) >= 10_000 {
                 return Err(SimError::KernelPanic { cycle: detected_at });
@@ -45,11 +45,11 @@ impl Cpu {
                     let paddr = crate::common::PhysAddr::new(
                         hit.ppn.to_addr() | (self.pc & PAGE_OFFSET_MASK),
                     );
-                    self.bus.bus.read_u32(paddr)
+                    self.soc.bus.read_u32(paddr)
                 } else {
                     let paddr = crate::common::PhysAddr::new(self.pc);
-                    if self.bus.bus.is_valid_address(paddr) {
-                        self.bus.bus.read_u32(paddr)
+                    if self.soc.bus.is_valid_address(paddr) {
+                        self.soc.bus.read_u32(paddr)
                     } else {
                         0
                     }
@@ -75,7 +75,7 @@ impl Cpu {
             self.same_pc_count = 0;
         }
 
-        let (timer_irq, msip, meip, seip) = self.bus.tick();
+        let (timer_irq, msip, meip, seip) = self.soc.tick();
 
         let mut mip = self.csrs.mip;
 
@@ -172,8 +172,8 @@ mod tests {
     #[test]
     fn test_track_mode_cycles() {
         let config = Config::default();
-        let system = crate::soc::builder::System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = crate::soc::builder::Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.privilege = PrivilegeMode::User;
         cpu.track_mode_cycles();
@@ -191,8 +191,8 @@ mod tests {
     #[test]
     fn test_post_tick_zero_reg() {
         let config = Config::default();
-        let system = crate::soc::builder::System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = crate::soc::builder::Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.regs.write(abi::REG_ZERO, 42);
         cpu.post_tick(PrivilegeMode::Machine);

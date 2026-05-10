@@ -9,8 +9,8 @@ use rvsim_core::core::arch::mode::PrivilegeMode;
 
 fn create_test_sim() -> Simulator {
     let config = Config::default();
-    let system = rvsim_core::soc::System::new(&config, "");
-    Simulator::new(system, &config)
+    let soc = rvsim_core::soc::Soc::new(&config, "");
+    Simulator::new(soc, &config)
 }
 
 #[test]

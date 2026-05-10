@@ -1,4 +1,9 @@
-//! System-on-Chip construction and top-level `System` type.
+//! `Soc` construction.
+//!
+//! Builds the simulated System-on-Chip from a [`Config`]: registers the IO
+//! interconnect, memory controller, and devices (CLINT, PLIC, UART, virtio,
+//! HTIF, syscon, RTC). The pipeline-side state (cores, shared caches,
+//! coherence) is added in later phases.
 
 use crate::config::{Config, MemoryController as MemControllerType};
 use crate::soc::devices::{Clint, GoldfishRtc, Htif, Plic, SysCon, Uart, VirtioBlock};
@@ -12,12 +17,19 @@ use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-/// Top-level system instance containing the bus, memory controller, and exit flag.
+/// The simulated System-on-Chip.
 ///
-/// Holds the interconnect (`Bus`), the main memory controller (for DRAM/simple timing),
-/// and an atomic exit request value used by devices (e.g., `SysCon`) to signal shutdown.
-pub struct System {
-    /// System interconnect; routes accesses to RAM and MMIO devices.
+/// Owns the IO interconnect, memory controller, and the exit-request flag
+/// shared with devices like `SysCon` and `Htif`. Also carries the master
+/// cycle counter that every subsystem reads from for time-correlated state
+/// (e.g. CLINT computes `mtime = cycle / divider`).
+///
+/// Cores, shared caches, and coherence are added in later phases of the
+/// multi-core migration.
+pub struct Soc {
+    /// Master clock; every subsystem reads from this.
+    pub cycle: u64,
+    /// IO interconnect; routes accesses to RAM and MMIO devices.
     pub bus: Bus,
     /// Main memory controller (boxed for dynamic dispatch; `Send + Sync` for multi-threaded simulation).
     pub mem_controller: Box<dyn MemoryController + Send + Sync>,
@@ -25,17 +37,18 @@ pub struct System {
     pub exit_request: Arc<AtomicU64>,
 }
 
-impl std::fmt::Debug for System {
+impl std::fmt::Debug for Soc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("System")
+        f.debug_struct("Soc")
+            .field("cycle", &self.cycle)
             .field("bus", &self.bus)
             .field("exit_request", &self.exit_request)
             .finish_non_exhaustive()
     }
 }
 
-impl System {
-    /// Builds a new system from configuration and optional disk image path.
+impl Soc {
+    /// Builds a new `Soc` from configuration and optional disk image path.
     pub fn new(config: &Config, disk_path: &str) -> Self {
         let mut bus = Bus::new(config.system.bus_width, config.system.bus_latency);
         let exit_request = Arc::new(AtomicU64::new(u64::MAX));
@@ -98,7 +111,7 @@ impl System {
             }
         };
 
-        Self { bus, mem_controller, exit_request }
+        Self { cycle: 0, bus, mem_controller, exit_request }
     }
 
     /// Loads a binary into memory at the given physical address.

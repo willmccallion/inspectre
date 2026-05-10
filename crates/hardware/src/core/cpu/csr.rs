@@ -493,8 +493,8 @@ mod tests {
     #[test]
     fn test_cpu_csr_read_write_mstatus() {
         let config = Config::default();
-        let system = crate::soc::builder::System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = crate::soc::builder::Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csr_write(csr::MSTATUS, 0xFFFF_FFFF_FFFF_FFFF);
 
@@ -519,8 +519,8 @@ mod tests {
     #[test]
     fn test_cpu_csr_read_write_fcsr() {
         let config = Config::default();
-        let system = crate::soc::builder::System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = crate::soc::builder::Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csr_write(csr::FCSR, 0xFF);
         assert_eq!(cpu.csr_read(csr::FCSR), 0xFF);

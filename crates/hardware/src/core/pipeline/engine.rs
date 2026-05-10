@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn test_pipeline_dispatch_inorder_tick_flush_snapshot() {
         let config = crate::config::Config::default();
-        let system = crate::soc::builder::System::new(&config, "");
-        let mut cpu = crate::core::Cpu::new(system, &config);
+        let soc = crate::soc::builder::Soc::new(&config, "");
+        let mut cpu = crate::core::Cpu::new(soc, &config);
 
         let frontend = crate::core::pipeline::frontend::Frontend::new(config.pipeline.width);
         let engine = crate::core::pipeline::backend::inorder::InOrderEngine::new(&config);

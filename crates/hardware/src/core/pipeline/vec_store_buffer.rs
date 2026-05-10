@@ -568,10 +568,10 @@ fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidt
         }
     } else {
         match width {
-            MemWidth::Byte => cpu.bus.bus.write_u8(paddr, data as u8),
-            MemWidth::Half => cpu.bus.bus.write_u16(paddr, data as u16),
-            MemWidth::Word => cpu.bus.bus.write_u32(paddr, data as u32),
-            MemWidth::Double => cpu.bus.bus.write_u64(paddr, data),
+            MemWidth::Byte => cpu.soc.bus.write_u8(paddr, data as u8),
+            MemWidth::Half => cpu.soc.bus.write_u16(paddr, data as u16),
+            MemWidth::Word => cpu.soc.bus.write_u32(paddr, data as u32),
+            MemWidth::Double => cpu.soc.bus.write_u64(paddr, data),
             MemWidth::Nop => {}
         }
     }

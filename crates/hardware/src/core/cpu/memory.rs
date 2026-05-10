@@ -38,7 +38,7 @@ impl Cpu {
                 return TranslationResult::fault(trap, 0);
             }
 
-            if !self.bus.bus.is_valid_address(paddr) {
+            if !self.soc.bus.is_valid_address(paddr) {
                 let trap = match access {
                     AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
                     AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
@@ -66,7 +66,7 @@ impl Cpu {
             access,
             effective_priv,
             &self.csrs,
-            &mut self.bus.bus,
+            &mut self.soc.bus,
             Some(&self.pmp),
         );
 
@@ -97,7 +97,7 @@ impl Cpu {
             // real hardware reports a bus error that the CPU turns into a
             // load/store/inst access fault. Firmware that probes memory
             // must install a trap handler (same as real hardware).
-            if !self.bus.bus.is_valid_address(result.paddr) {
+            if !self.soc.bus.is_valid_address(result.paddr) {
                 let trap = match access {
                     AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
                     AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
@@ -193,10 +193,10 @@ impl Cpu {
         }
 
         // All caches missed — now query the DRAM controller (stateful).
-        let ram_latency = self.bus.mem_controller.access_latency(raw_addr, self.stats.cycles);
-        total_penalty += self.bus.bus.calculate_transit_time(8);
+        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.stats.cycles);
+        total_penalty += self.soc.bus.calculate_transit_time(8);
         total_penalty += ram_latency;
-        total_penalty += self.bus.bus.calculate_transit_time(64);
+        total_penalty += self.soc.bus.calculate_transit_time(64);
         total_penalty
     }
 
@@ -229,10 +229,10 @@ impl Cpu {
 
         // If no cache level is enabled, every access goes directly to DRAM.
         if !l1_enabled && !self.l2_cache.enabled && !self.l3_cache.enabled {
-            let ram_latency = self.bus.mem_controller.access_latency(raw_addr, self.stats.cycles);
-            return self.bus.bus.calculate_transit_time(8)
+            let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.stats.cycles);
+            return self.soc.bus.calculate_transit_time(8)
                 + ram_latency
-                + self.bus.bus.calculate_transit_time(64);
+                + self.soc.bus.calculate_transit_time(64);
         }
 
         let (l1_hit, _l1_pen, l1_evictions, l1_prefetches) = if is_inst {
@@ -344,10 +344,10 @@ impl Cpu {
 
         // Consult the stateful DRAM controller only on full miss so its bank,
         // row-buffer, and refresh state reflects real memory traffic only.
-        let ram_latency = self.bus.mem_controller.access_latency(raw_addr, self.stats.cycles);
-        total_penalty += self.bus.bus.calculate_transit_time(8);
+        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.stats.cycles);
+        total_penalty += self.soc.bus.calculate_transit_time(8);
         total_penalty += ram_latency;
-        total_penalty += self.bus.bus.calculate_transit_time(64);
+        total_penalty += self.soc.bus.calculate_transit_time(64);
         total_penalty
     }
 }
@@ -356,14 +356,14 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_translate_direct_mode() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert_eq!(result.paddr.val(), 0x8000_0000);
@@ -379,8 +379,8 @@ mod tests {
 
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.pmp.set_addr(0, 0x9000_0000u64 >> 2);
         cpu.pmp.set_cfg(0, 0x88);
@@ -395,8 +395,8 @@ mod tests {
     fn test_translate_direct_mode_pmp_allow_mmode() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert!(result.trap.is_none(), "M-mode should have full access with no PMP entries");
@@ -411,8 +411,8 @@ mod tests {
         config.cache.l2.enabled = false;
         config.cache.l3.enabled = false;
 
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let penalty = cpu.simulate_memory_access(PhysAddr::new(0x8000_0000), AccessType::Read);
         assert!(penalty > 0);

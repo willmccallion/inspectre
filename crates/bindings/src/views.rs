@@ -122,8 +122,8 @@ impl Memory {
         let mut cpu = self.cpu.borrow_mut(py);
         let paddr = rvsim_core::common::PhysAddr::new(addr);
         match self.width {
-            32 => u64::from(cpu.inner.cpu.bus.bus.read_u32(paddr)),
-            64 => cpu.inner.cpu.bus.bus.read_u64(paddr),
+            32 => u64::from(cpu.inner.cpu.soc.bus.read_u32(paddr)),
+            64 => cpu.inner.cpu.soc.bus.read_u64(paddr),
             _ => unreachable!(),
         }
     }
@@ -158,8 +158,8 @@ impl VirtualMemory {
         }
         let paddr = result.paddr;
         Ok(match self.width {
-            32 => u64::from(cpu.inner.cpu.bus.bus.read_u32(paddr)),
-            64 => cpu.inner.cpu.bus.bus.read_u64(paddr),
+            32 => u64::from(cpu.inner.cpu.soc.bus.read_u32(paddr)),
+            64 => cpu.inner.cpu.soc.bus.read_u64(paddr),
             _ => unreachable!(),
         })
     }

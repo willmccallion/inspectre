@@ -16,8 +16,8 @@ use tempfile::NamedTempFile;
 /// Helper function to create a test CPU instance.
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let system = rvsim_core::soc::System::new(&config, "");
-    Cpu::new(system, &config)
+    let soc = rvsim_core::soc::Soc::new(&config, "");
+    Cpu::new(soc, &config)
 }
 
 /// Helper function to create a temporary binary file for testing.
@@ -114,7 +114,7 @@ fn test_setup_kernel_load_with_dtb_file() {
 
     // Verify DTB was loaded into memory at expected address
     let dtb_addr = config.system.ram_base + 0x2200000;
-    let loaded_byte = cpu.bus.bus.read_u8(PhysAddr::new(dtb_addr));
+    let loaded_byte = cpu.soc.bus.read_u8(PhysAddr::new(dtb_addr));
     assert_eq!(loaded_byte, 0xd0);
 }
 
@@ -152,7 +152,7 @@ fn test_setup_kernel_load_mret_instruction_at_ram_base() {
 
     // MRET instruction (0x30200073) should be loaded at RAM base
     let ram_base = config.system.ram_base;
-    let instruction = cpu.bus.bus.read_u32(PhysAddr::new(ram_base));
+    let instruction = cpu.soc.bus.read_u32(PhysAddr::new(ram_base));
 
     // MRET opcode is 0x30200073
     assert_eq!(instruction, 0x30200073);
@@ -184,12 +184,12 @@ fn test_setup_kernel_load_different_ram_bases() {
     let mut config2 = Config::default();
     config2.system.ram_base = 0x90000000;
 
-    let system1 = rvsim_core::soc::System::new(&config1, "");
-    let mut cpu1 = Cpu::new(system1, &config1);
+    let soc1 = rvsim_core::soc::Soc::new(&config1, "");
+    let mut cpu1 = Cpu::new(soc1, &config1);
     loader::setup_kernel_load(&mut cpu1, &config1, "", None, None).unwrap();
 
-    let system2 = rvsim_core::soc::System::new(&config2, "");
-    let mut cpu2 = Cpu::new(system2, &config2);
+    let soc2 = rvsim_core::soc::Soc::new(&config2, "");
+    let mut cpu2 = Cpu::new(soc2, &config2);
     loader::setup_kernel_load(&mut cpu2, &config2, "", None, None).unwrap();
 
     // PC should match the respective RAM bases

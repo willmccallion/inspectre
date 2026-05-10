@@ -299,8 +299,8 @@ fn harness_boot_default_pc() {
 #[test]
 fn harness_with_memory_adds_device() {
     let mut ctx = TestContext::new().with_memory(4096, 0x1000);
-    ctx.cpu_mut().bus.bus.write_u32(PhysAddr::new(0x1000), 0xDEADBEEF);
-    assert_eq!(ctx.cpu_mut().bus.bus.read_u32(PhysAddr::new(0x1000)), 0xDEADBEEF);
+    ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(0x1000), 0xDEADBEEF);
+    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1000)), 0xDEADBEEF);
 }
 
 #[test]
@@ -312,8 +312,8 @@ fn harness_load_program_writes_instructions_and_sets_pc() {
     let mut ctx = TestContext::new().with_memory(4096, 0x1000).load_program(0x1000, &program);
 
     assert_eq!(ctx.cpu().pc, 0x1000, "PC should be set to program base");
-    assert_eq!(ctx.cpu_mut().bus.bus.read_u32(PhysAddr::new(0x1000)), nop);
-    assert_eq!(ctx.cpu_mut().bus.bus.read_u32(PhysAddr::new(0x1004)), addi);
+    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1000)), nop);
+    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1004)), addi);
 }
 
 #[test]

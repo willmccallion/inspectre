@@ -277,7 +277,7 @@ impl ExecutionEngine for InOrderEngine {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_inorder_engine_new() {
@@ -291,8 +291,8 @@ mod tests {
     fn test_inorder_engine_flush() {
         let config = Config::default();
         let mut engine = InOrderEngine::new(&config);
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         engine.mem1_stall = 5;
         engine.flush(&mut cpu);
@@ -314,8 +314,8 @@ mod tests {
     fn test_inorder_engine_read_csr_speculative() {
         let config = Config::default();
         let engine = InOrderEngine::new(&config);
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csr_write(crate::core::arch::csr::MSCRATCH, 0x1234);
         assert_eq!(engine.read_csr_speculative(&cpu, crate::core::arch::csr::MSCRATCH), 0x1234);

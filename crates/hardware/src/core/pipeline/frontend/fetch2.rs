@@ -111,7 +111,7 @@ pub fn fetch2_stage(
                 ptr.read_unaligned()
             }
         } else {
-            cpu.bus.bus.read_u16(f1.paddr)
+            cpu.soc.bus.read_u16(f1.paddr)
         };
 
         let is_compressed =
@@ -143,7 +143,7 @@ pub fn fetch2_stage(
                         ptr.read_unaligned()
                     }
                 } else {
-                    cpu.bus.bus.read_u16(upper_phys)
+                    cpu.soc.bus.read_u16(upper_phys)
                 };
 
                 let full_inst = (upper_half as u32) << 16 | (half_word as u32);

@@ -10,12 +10,12 @@ use crate::core::pipeline::backend::inorder::InOrderEngine;
 use crate::core::pipeline::backend::o3::O3Engine;
 use crate::core::pipeline::engine::{BackendType, Pipeline, PipelineDispatch};
 use crate::core::pipeline::frontend::Frontend;
-use crate::soc::System;
+use crate::soc::Soc;
 
 /// Top-level simulator: CPU architectural state + pipeline.
 #[derive(Debug)]
 pub struct Simulator {
-    /// CPU architectural state (registers, caches, MMU, bus, stats).
+    /// CPU architectural state (registers, caches, MMU, `SoC`, stats).
     pub cpu: Cpu,
     /// Pipeline implementation (frontend + backend engine).
     pub pipeline: PipelineDispatch,
@@ -25,9 +25,9 @@ unsafe impl Send for Simulator {}
 unsafe impl Sync for Simulator {}
 
 impl Simulator {
-    /// Creates a new simulator with the given system and configuration.
-    pub fn new(system: System, config: &Config) -> Self {
-        let cpu = Cpu::new(system, config);
+    /// Creates a new simulator with the given `SoC` and configuration.
+    pub fn new(soc: Soc, config: &Config) -> Self {
+        let cpu = Cpu::new(soc, config);
         let pipeline = match config.pipeline.backend {
             BackendType::InOrder => PipelineDispatch::InOrder(Box::new(Pipeline {
                 frontend: Frontend::new(config.pipeline.width),

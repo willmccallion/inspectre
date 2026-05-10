@@ -91,8 +91,8 @@ pub fn memory2_stage(
                         return violation;
                     }
                     ld = match mem.ctrl.width {
-                        MemWidth::Word => (cpu.bus.bus.read_u32(raw_paddr) as i32) as i64 as u64,
-                        MemWidth::Double => cpu.bus.bus.read_u64(raw_paddr),
+                        MemWidth::Word => (cpu.soc.bus.read_u32(raw_paddr) as i32) as i64 as u64,
+                        MemWidth::Double => cpu.soc.bus.read_u64(raw_paddr),
                         _ => 0,
                     };
                     // Defer reservation to commit; speculative LR mustn't touch arch state.
@@ -125,8 +125,8 @@ pub fn memory2_stage(
                         return violation;
                     }
                     let old_val = match mem.ctrl.width {
-                        MemWidth::Word => (cpu.bus.bus.read_u32(raw_paddr) as i32) as i64 as u64,
-                        MemWidth::Double => cpu.bus.bus.read_u64(raw_paddr),
+                        MemWidth::Word => (cpu.soc.bus.read_u32(raw_paddr) as i32) as i64 as u64,
+                        MemWidth::Double => cpu.soc.bus.read_u64(raw_paddr),
                         _ => 0,
                     };
 
@@ -268,18 +268,18 @@ pub fn memory2_stage(
                     } else {
                         match (mem.ctrl.width, mem.ctrl.signed_load) {
                             (MemWidth::Byte, true) => {
-                                (cpu.bus.bus.read_u8(raw_paddr) as i8) as i64 as u64
+                                (cpu.soc.bus.read_u8(raw_paddr) as i8) as i64 as u64
                             }
                             (MemWidth::Half, true) => {
-                                (cpu.bus.bus.read_u16(raw_paddr) as i16) as i64 as u64
+                                (cpu.soc.bus.read_u16(raw_paddr) as i16) as i64 as u64
                             }
                             (MemWidth::Word, true) => {
-                                (cpu.bus.bus.read_u32(raw_paddr) as i32) as i64 as u64
+                                (cpu.soc.bus.read_u32(raw_paddr) as i32) as i64 as u64
                             }
-                            (MemWidth::Byte, false) => cpu.bus.bus.read_u8(raw_paddr) as u64,
-                            (MemWidth::Half, false) => cpu.bus.bus.read_u16(raw_paddr) as u64,
-                            (MemWidth::Word, false) => cpu.bus.bus.read_u32(raw_paddr) as u64,
-                            (MemWidth::Double, _) => cpu.bus.bus.read_u64(raw_paddr),
+                            (MemWidth::Byte, false) => cpu.soc.bus.read_u8(raw_paddr) as u64,
+                            (MemWidth::Half, false) => cpu.soc.bus.read_u16(raw_paddr) as u64,
+                            (MemWidth::Word, false) => cpu.soc.bus.read_u32(raw_paddr) as u64,
+                            (MemWidth::Double, _) => cpu.soc.bus.read_u64(raw_paddr),
                             _ => 0,
                         }
                     };
@@ -404,13 +404,13 @@ mod tests {
     use crate::config::Config;
     use crate::core::pipeline::signals::ControlSignals;
     use crate::core::pipeline::store_buffer::StoreBuffer;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_memory2_pass_through() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut store_buffer = StoreBuffer::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
@@ -447,8 +447,8 @@ mod tests {
     #[test]
     fn test_memory2_trap_propagation() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut store_buffer = StoreBuffer::new(4);
 
         let mut input = vec![Mem1Mem2Entry {
@@ -487,8 +487,8 @@ mod tests {
         use crate::common::error::LrScRecord;
 
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut store_buffer = StoreBuffer::new(4);
 
         let ctrl_lr = ControlSignals {
@@ -564,8 +564,8 @@ mod tests {
     #[test]
     fn test_memory2_ordering_violation() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut store_buffer = StoreBuffer::new(4);
         let mut load_queue = LoadQueue::new(4);
 

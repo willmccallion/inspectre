@@ -981,13 +981,13 @@ mod tests {
     use crate::config::Config;
     use crate::core::pipeline::signals::ControlSignals;
     use crate::core::units::bru::Ghr;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_execute_one_normal() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1054,8 +1054,8 @@ mod tests {
     #[test]
     fn test_execute_trap_propagation() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1123,8 +1123,8 @@ mod tests {
     #[test]
     fn test_execute_fence_i() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1193,8 +1193,8 @@ mod tests {
     #[test]
     fn test_execute_fp_trap_when_fs_zero() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         cpu.csrs.mstatus &= !crate::core::arch::csr::MSTATUS_FS; // Clear FS bits
@@ -1268,8 +1268,8 @@ mod tests {
     #[test]
     fn test_execute_branch_misprediction() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let tag = rob
@@ -1344,8 +1344,8 @@ mod tests {
     #[test]
     fn test_execute_jump_jalr() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let tag = rob

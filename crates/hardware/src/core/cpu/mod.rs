@@ -27,7 +27,7 @@ use crate::core::units::cache::mshr::MshrFile;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::core::units::prefetch::PrefetchFilter;
-use crate::soc::System;
+use crate::soc::Soc;
 use crate::stats::SimStats;
 
 /// CPU architectural state: registers, caches, MMU, bus, and statistics.
@@ -48,8 +48,8 @@ pub struct Cpu {
     /// Load Reservation address (for LR/SC).
     pub load_reservation: Option<PhysAddr>,
 
-    /// System Bus and Devices.
-    pub bus: System,
+    /// System-on-Chip: bus, memory controller, devices, exit signal.
+    pub soc: Soc,
     /// Memory Management Unit.
     pub mmu: Mmu,
     /// Physical Memory Protection unit.
@@ -198,8 +198,8 @@ impl Cpu {
         self.load_reservation = None;
     }
 
-    /// Creates a new CPU instance with the specified system and configuration.
-    pub fn new(mut system: System, config: &Config) -> Self {
+    /// Creates a new CPU instance with the specified `SoC` and configuration.
+    pub fn new(mut soc: Soc, config: &Config) -> Self {
         use crate::core::arch::csr::{
             MISA_DEFAULT_RV64IMAFDC, MISA_EXT_A, MISA_EXT_C, MISA_EXT_D, MISA_EXT_F, MISA_EXT_I,
             MISA_EXT_M, MISA_EXT_S, MISA_EXT_U, MISA_XLEN_64, MSTATUS_DEFAULT_RV64, MSTATUS_FS,
@@ -260,7 +260,7 @@ impl Cpu {
         let bp = BranchPredictorWrapper::new(config);
 
         let (ram_ptr, ram_start, ram_end) =
-            system.bus.get_ram_info().unwrap_or((std::ptr::null_mut(), 0, 0));
+            soc.bus.get_ram_info().unwrap_or((std::ptr::null_mut(), 0, 0));
         let mut regs = if direct_mode {
             let sp = config.general.initial_sp.unwrap_or(config.system.ram_base + 0x100_0000);
             let mut r = RegisterFile::new();
@@ -284,7 +284,7 @@ impl Cpu {
             regs,
             pc: config.general.start_pc,
             trace: config.general.trace_instructions,
-            bus: system,
+            soc,
             exit_code: None,
             csrs,
             privilege,
@@ -383,13 +383,13 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_cpu_reservation() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.set_reservation(PhysAddr::new(0x1000));
         assert!(cpu.check_reservation(PhysAddr::new(0x1000)));
@@ -403,16 +403,16 @@ mod tests {
     #[test]
     fn test_cpu_dump_state_no_panic() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let cpu = Cpu::new(soc, &config);
         cpu.dump_state();
     }
 
     #[test]
     fn test_cpu_take_exit() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         assert_eq!(cpu.take_exit(), None);
         cpu.exit_code = Some(42);

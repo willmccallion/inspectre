@@ -740,10 +740,10 @@ fn mem_read_element(cpu: &mut Cpu, vaddr: u64, eew: Sew) -> Result<u64, Trap> {
     }
     let paddr = tr.paddr;
     let val = match eew {
-        Sew::E8 => u64::from(cpu.bus.bus.read_u8(paddr)),
-        Sew::E16 => u64::from(cpu.bus.bus.read_u16(paddr)),
-        Sew::E32 => u64::from(cpu.bus.bus.read_u32(paddr)),
-        Sew::E64 => cpu.bus.bus.read_u64(paddr),
+        Sew::E8 => u64::from(cpu.soc.bus.read_u8(paddr)),
+        Sew::E16 => u64::from(cpu.soc.bus.read_u16(paddr)),
+        Sew::E32 => u64::from(cpu.soc.bus.read_u32(paddr)),
+        Sew::E64 => cpu.soc.bus.read_u64(paddr),
     };
     Ok(val)
 }
@@ -757,10 +757,10 @@ fn mem_write_element(cpu: &mut Cpu, vaddr: u64, eew: Sew, val: u64) -> Result<()
     }
     let paddr = tr.paddr;
     match eew {
-        Sew::E8 => cpu.bus.bus.write_u8(paddr, val as u8),
-        Sew::E16 => cpu.bus.bus.write_u16(paddr, val as u16),
-        Sew::E32 => cpu.bus.bus.write_u32(paddr, val as u32),
-        Sew::E64 => cpu.bus.bus.write_u64(paddr, val),
+        Sew::E8 => cpu.soc.bus.write_u8(paddr, val as u8),
+        Sew::E16 => cpu.soc.bus.write_u16(paddr, val as u16),
+        Sew::E32 => cpu.soc.bus.write_u32(paddr, val as u32),
+        Sew::E64 => cpu.soc.bus.write_u64(paddr, val),
     }
     Ok(())
 }

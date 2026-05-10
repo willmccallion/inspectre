@@ -54,7 +54,7 @@ fn run_program(config: &Config, program: &[u32], cycles: u64) -> TestContext {
     let mut ctx = TestContext::new_with_config(config).with_memory(RAM_SIZE, RAM_BASE);
     for (i, inst) in program.iter().enumerate() {
         let addr = RAM_BASE + (i as u64) * 4;
-        ctx.cpu_mut().bus.bus.write_u32(PhysAddr::new(addr), *inst);
+        ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(addr), *inst);
     }
     ctx.cpu_mut().pc = RAM_BASE;
     ctx.run(cycles);

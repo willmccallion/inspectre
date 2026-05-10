@@ -176,15 +176,15 @@ impl PyCpu {
     ) -> PyResult<Self> {
         let config = py_dict_to_config(py, config_dict)?;
         let disk = disk_path.unwrap_or_default();
-        let mut system = rvsim_core::soc::System::new(&config, &disk);
+        let mut soc = rvsim_core::soc::Soc::new(&config, &disk);
 
         let mut elf_entry: Option<u64> = None;
         let mut tohost_addr: Option<u64> = None;
         if let Some(data) = elf_data {
-            if let Some(result) = loader::try_load_elf(&data, &mut system.bus) {
+            if let Some(result) = loader::try_load_elf(&data, &mut soc.bus) {
                 elf_entry = Some(result.entry);
                 if let Some(tohost) = result.tohost_addr {
-                    system.add_htif(tohost);
+                    soc.add_htif(tohost);
                     tohost_addr = Some(tohost);
                 }
             } else {
@@ -194,7 +194,7 @@ impl PyCpu {
             }
         }
 
-        let mut sim = Simulator::new(system, &config);
+        let mut sim = Simulator::new(soc, &config);
 
         if let Some(entry) = elf_entry {
             sim.cpu.pc = entry;
@@ -548,7 +548,7 @@ impl PyCpu {
                 *byte = self
                     .inner
                     .cpu
-                    .bus
+                    .soc
                     .bus
                     .read_u8(rvsim_core::common::PhysAddr::new(paddr + i as u64));
             }

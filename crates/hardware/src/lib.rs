@@ -33,5 +33,5 @@ pub use crate::config::Config;
 pub use crate::core::Cpu;
 /// Top-level simulator; owns the CPU and pipeline side-by-side.
 pub use crate::sim::simulator::Simulator;
-/// Top-level system (bus, memory controller, devices); construct with `System::new`.
-pub use crate::soc::System;
+/// Top-level System-on-Chip (bus, memory controller, devices); construct with `Soc::new`.
+pub use crate::soc::Soc;

@@ -245,14 +245,14 @@ impl Cpu {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_trap_direct_mode_ecall() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.regs.write(abi::REG_A7, sys_ops::SYS_EXIT);
         cpu.regs.write(abi::REG_A0, 42);
@@ -265,8 +265,8 @@ mod tests {
     fn test_trap_direct_mode_illegal_instruction() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.trap(&Trap::IllegalInstruction(0), 0x1000);
         assert_eq!(cpu.exit_code, Some(0));
@@ -276,8 +276,8 @@ mod tests {
     fn test_trap_direct_mode_breakpoint_with_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.mtvec = 0x8000_1000;
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
@@ -293,8 +293,8 @@ mod tests {
     fn test_trap_direct_mode_breakpoint_no_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
         assert_eq!(cpu.exit_code, Some(1));
@@ -304,8 +304,8 @@ mod tests {
     fn test_trap_direct_mode_ecall_with_mtvec() {
         let mut config = Config::default();
         config.general.direct_mode = true;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.mtvec = 0x8000_2000;
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x500);
@@ -318,8 +318,8 @@ mod tests {
     #[test]
     fn test_do_mret() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.mepc = 0x2000;
         cpu.csrs.mstatus = (PrivilegeMode::Supervisor.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
@@ -335,8 +335,8 @@ mod tests {
     #[test]
     fn test_do_sret() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.sepc = 0x3000;
         cpu.csrs.sstatus = csr::MSTATUS_SPP | csr::MSTATUS_SPIE;

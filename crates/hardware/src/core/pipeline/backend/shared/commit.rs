@@ -716,10 +716,10 @@ fn write_store_to_memory(
         }
     } else {
         match width {
-            MemWidth::Byte => cpu.bus.bus.write_u8(paddr, data as u8),
-            MemWidth::Half => cpu.bus.bus.write_u16(paddr, data as u16),
-            MemWidth::Word => cpu.bus.bus.write_u32(paddr, data as u32),
-            MemWidth::Double => cpu.bus.bus.write_u64(paddr, data),
+            MemWidth::Byte => cpu.soc.bus.write_u8(paddr, data as u8),
+            MemWidth::Half => cpu.soc.bus.write_u16(paddr, data as u16),
+            MemWidth::Word => cpu.soc.bus.write_u32(paddr, data as u32),
+            MemWidth::Double => cpu.soc.bus.write_u64(paddr, data),
             MemWidth::Nop => {}
         }
     }
@@ -1106,13 +1106,13 @@ mod tests {
     use crate::common::InstSize;
     use crate::config::Config;
     use crate::core::Cpu;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_check_interrupts_none() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let cpu = Cpu::new(soc, &config);
 
         assert!(check_interrupts(&cpu).is_none());
     }
@@ -1120,8 +1120,8 @@ mod tests {
     #[test]
     fn test_check_interrupts_m_mode() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.mip = csr::MIP_MEIP;
         cpu.csrs.mie = csr::MIE_MEIP;
@@ -1134,8 +1134,8 @@ mod tests {
     #[test]
     fn test_check_interrupts_s_mode_delegated() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         cpu.csrs.mip = csr::MIP_SEIP;
         cpu.csrs.mie = csr::MIE_SEIP;
@@ -1149,8 +1149,8 @@ mod tests {
     #[test]
     fn test_commit_stage_normal() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let mut rob = Rob::new(4);
         let mut store_buffer = StoreBuffer::new(4);

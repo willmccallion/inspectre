@@ -225,7 +225,7 @@ pub fn memory1_stage(
 
             // S/U-mode trap on unmapped paddr; M-mode firmware probing expects bus default.
             if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine
-                && !cpu.bus.bus.is_valid_address(paddr)
+                && !cpu.soc.bus.is_valid_address(paddr)
             {
                 let fault = if ex.ctrl.mem_write {
                     crate::common::Trap::StoreAccessFault(ex.alu)
@@ -547,13 +547,13 @@ mod tests {
     use crate::common::{InstSize, RegIdx};
     use crate::config::Config;
     use crate::core::pipeline::signals::ControlSignals;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_memory1_pass_through() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let mut input = vec![ExMem1Entry {
             rob_tag: crate::core::pipeline::rob::RobTag(1),
@@ -585,8 +585,8 @@ mod tests {
     #[test]
     fn test_memory1_trap_propagation() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let mut input = vec![ExMem1Entry {
             rob_tag: crate::core::pipeline::rob::RobTag(2),
@@ -617,8 +617,8 @@ mod tests {
     #[test]
     fn test_memory1_translation_unmapped_access_fault() {
         let config = Config::default(); // RAM usually starts at 0x8000_0000.
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         cpu.privilege = crate::core::arch::mode::PrivilegeMode::Supervisor; // S-mode traps on unmapped
 
         // Ensure translation succeeds (direct mode by default), but paddr is invalid
@@ -655,8 +655,8 @@ mod tests {
         config.cache.l1_d.enabled = true;
         config.cache.l1_d.size_bytes = 4096;
         config.cache.l1_d.mshr_count = 4;
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let ctrl = ControlSignals { mem_read: true, ..Default::default() };
 
@@ -713,8 +713,8 @@ mod tests {
         let mut config = Config::default();
         config.cache.l1_d.enabled = true;
         config.cache.l1_d.mshr_count = 1; // Only 1 MSHR
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
 
         let ctrl = ControlSignals { mem_read: true, ..Default::default() };
 

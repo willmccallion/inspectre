@@ -3,7 +3,7 @@ use rvsim_core::Simulator;
 use rvsim_core::common::{PhysAddr, RegIdx};
 use rvsim_core::config::Config;
 use rvsim_core::core::Cpu;
-use rvsim_core::soc::System;
+use rvsim_core::soc::Soc;
 use rvsim_core::soc::interconnect::Bus;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -31,13 +31,14 @@ impl TestContext {
 
         let bus = Bus::new(8, 0);
 
-        let system = System {
+        let soc = Soc {
+            cycle: 0,
             bus,
             mem_controller: Box::new(MockMemoryController::new(1)),
             exit_request: Arc::new(AtomicU64::new(u64::MAX)),
         };
 
-        let mut sim = Simulator::new(system, config);
+        let mut sim = Simulator::new(soc, config);
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
         // every access through multi-cycle DRAM, starving the pipeline.
@@ -58,7 +59,7 @@ impl TestContext {
 
     pub fn with_memory(mut self, size: usize, base: u64) -> Self {
         let mem = MockMemory::new(size, base);
-        self.sim.cpu.bus.bus.add_device(Box::new(mem));
+        self.sim.cpu.soc.bus.add_device(Box::new(mem));
         self
     }
 
@@ -66,7 +67,7 @@ impl TestContext {
     pub fn load_program(mut self, addr: u64, instructions: &[u32]) -> Self {
         for (i, inst) in instructions.iter().enumerate() {
             let offset = addr + (i as u64) * 4;
-            self.sim.cpu.bus.bus.write_u32(PhysAddr::new(offset), *inst);
+            self.sim.cpu.soc.bus.write_u32(PhysAddr::new(offset), *inst);
         }
         self.sim.cpu.pc = addr;
         self

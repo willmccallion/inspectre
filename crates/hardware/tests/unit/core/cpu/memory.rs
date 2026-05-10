@@ -8,8 +8,8 @@ use rvsim_core::core::Cpu;
 
 fn create_test_cpu() -> Cpu {
     let config = Config::default();
-    let system = rvsim_core::soc::System::new(&config, "");
-    let mut cpu = Cpu::new(system, &config);
+    let soc = rvsim_core::soc::Soc::new(&config, "");
+    let mut cpu = Cpu::new(soc, &config);
     cpu.direct_mode = true; // Use direct addressing for simple tests
     cpu
 }

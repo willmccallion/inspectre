@@ -76,13 +76,13 @@ mod tests {
     use crate::common::{InstSize, RegIdx, Trap};
     use crate::config::Config;
     use crate::core::pipeline::signals::ControlSignals;
-    use crate::soc::builder::System;
+    use crate::soc::builder::Soc;
 
     #[test]
     fn test_writeback_stage_normal() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let rob_tag = rob
@@ -128,8 +128,8 @@ mod tests {
     #[test]
     fn test_writeback_stage_trap() {
         let config = Config::default();
-        let system = System::new(&config, "");
-        let mut cpu = Cpu::new(system, &config);
+        let soc = Soc::new(&config, "");
+        let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
         let rob_tag = rob
