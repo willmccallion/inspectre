@@ -206,8 +206,6 @@ impl Cpu {
             privilege,
             mmu,
             pmp: Pmp::new(),
-            software_ad_bits: config.memory.software_ad_bits,
-            misaligned_access_trap: config.memory.misaligned_access_trap,
         });
         hart.committed_next_pc = config.general.start_pc;
 

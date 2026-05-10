@@ -60,12 +60,6 @@ pub struct Hart {
     /// Software-written SEIP bit. The `mip` SEIP bit is the OR of this and
     /// the PLIC hardware signal, so the software component is tracked here.
     pub sw_seip: bool,
-    /// When true, the PTW raises a page fault on `A=0` or `D=0` instead of
-    /// auto-setting the Accessed/Dirty bits (matches spike's behaviour).
-    pub software_ad_bits: bool,
-    /// When true, misaligned loads/stores raise an alignment exception
-    /// instead of being handled transparently.
-    pub misaligned_access_trap: bool,
 }
 
 /// Initial values for constructing a [`Hart`].
@@ -88,10 +82,6 @@ pub struct HartInit {
     pub mmu: Mmu,
     /// Physical memory protection unit.
     pub pmp: Pmp,
-    /// Whether the PTW raises page-faults on `A=0`/`D=0` instead of auto-set.
-    pub software_ad_bits: bool,
-    /// Whether misaligned memory accesses raise an alignment exception.
-    pub misaligned_access_trap: bool,
 }
 
 impl Hart {
@@ -115,8 +105,6 @@ impl Hart {
             last_invalid_pc_debug: None,
             panic_detected_at_cycle: None,
             sw_seip: false,
-            software_ad_bits: init.software_ad_bits,
-            misaligned_access_trap: init.misaligned_access_trap,
         }
     }
 }

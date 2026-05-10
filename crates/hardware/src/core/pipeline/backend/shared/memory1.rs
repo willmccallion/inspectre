@@ -89,7 +89,7 @@ pub fn memory1_stage(
             let size = unaligned::width_to_bytes(ex.ctrl.width);
             let is_atomic = ex.ctrl.atomic_op != AtomicOp::None;
             if !unaligned::is_aligned(ex.alu, size) {
-                if cpu.hart.misaligned_access_trap || is_atomic {
+                if cpu.soc.config.memory.misaligned_access_trap || is_atomic {
                     let trap = if ex.ctrl.mem_write {
                         unaligned::store_misaligned_trap(ex.alu)
                     } else {
