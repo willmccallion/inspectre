@@ -83,14 +83,10 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
 
         let phys_addr = paddr.val();
 
-        let half_word = if phys_addr >= cpu.ram_start && phys_addr < cpu.ram_end {
-            let offset = (phys_addr - cpu.ram_start) as usize;
-            unsafe {
-                let ptr = cpu.ram_ptr.add(offset) as *const u16;
-                ptr.read_unaligned()
-            }
-        } else {
-            cpu.soc.bus.read_u16(paddr)
+        let half_word = match cpu.soc.bus.ram_region().filter(|r| r.contains(phys_addr, 2)) {
+            // SAFETY: bounds-checked by `RamRegion::contains(phys_addr, 2)` above.
+            Some(r) => unsafe { (r.ptr(phys_addr).cast::<u16>()).read_unaligned() },
+            None => cpu.soc.bus.read_u16(paddr),
         };
 
         let is_compressed =
@@ -161,14 +157,10 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
             };
 
             let upper_raw = upper_phys.val();
-            let upper_half = if upper_raw >= cpu.ram_start && upper_raw < cpu.ram_end {
-                let offset = (upper_raw - cpu.ram_start) as usize;
-                unsafe {
-                    let ptr = cpu.ram_ptr.add(offset) as *const u16;
-                    ptr.read_unaligned()
-                }
-            } else {
-                cpu.soc.bus.read_u16(upper_phys)
+            let upper_half = match cpu.soc.bus.ram_region().filter(|r| r.contains(upper_raw, 2)) {
+                // SAFETY: bounds-checked by `RamRegion::contains(upper_raw, 2)` above.
+                Some(r) => unsafe { (r.ptr(upper_raw).cast::<u16>()).read_unaligned() },
+                None => cpu.soc.bus.read_u16(upper_phys),
             };
 
             let full_inst = (upper_half as u32) << 16 | (half_word as u32);

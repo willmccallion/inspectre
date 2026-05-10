@@ -73,8 +73,8 @@ pub fn memory2_stage(
         }
 
         let raw_paddr = mem.paddr;
-        let is_ram = raw_paddr.val() >= cpu.ram_start && raw_paddr.val() < cpu.ram_end;
-        let ram_offset = if is_ram { (raw_paddr.val() - cpu.ram_start) as usize } else { 0 };
+        let ram_region = cpu.soc.bus.ram_region().filter(|r| r.contains(raw_paddr.val(), 1));
+        let is_ram = ram_region.is_some();
 
         let mut ld: u64 = 0;
         let trap: Option<Trap> = None;
@@ -236,32 +236,28 @@ pub fn memory2_stage(
                         is_ram,
                         "M2: store buffer miss — reading from memory"
                     );
-                    ld = if is_ram {
+                    ld = if let Some(r) = ram_region {
+                        // SAFETY: `ram_region` was derived from `RamRegion::contains`,
+                        // confirming the address sits inside DRAM; widths up to 8 bytes
+                        // also fit because `Soc` only registers contiguous DRAM regions.
                         unsafe {
+                            let ptr = r.ptr(raw_paddr.val());
                             match (mem.ctrl.width, mem.ctrl.signed_load) {
-                                (MemWidth::Byte, true) => {
-                                    (*cpu.ram_ptr.add(ram_offset) as i8) as i64 as u64
-                                }
+                                (MemWidth::Byte, true) => (*ptr as i8) as i64 as u64,
                                 (MemWidth::Half, true) => {
-                                    ((cpu.ram_ptr.add(ram_offset) as *const u16).read_unaligned()
-                                        as i16) as i64 as u64
+                                    (ptr.cast::<u16>().read_unaligned() as i16) as i64 as u64
                                 }
                                 (MemWidth::Word, true) => {
-                                    ((cpu.ram_ptr.add(ram_offset) as *const u32).read_unaligned()
-                                        as i32) as i64 as u64
+                                    (ptr.cast::<u32>().read_unaligned() as i32) as i64 as u64
                                 }
-                                (MemWidth::Byte, false) => *cpu.ram_ptr.add(ram_offset) as u64,
+                                (MemWidth::Byte, false) => *ptr as u64,
                                 (MemWidth::Half, false) => {
-                                    (cpu.ram_ptr.add(ram_offset) as *const u16).read_unaligned()
-                                        as u64
+                                    ptr.cast::<u16>().read_unaligned() as u64
                                 }
                                 (MemWidth::Word, false) => {
-                                    (cpu.ram_ptr.add(ram_offset) as *const u32).read_unaligned()
-                                        as u64
+                                    ptr.cast::<u32>().read_unaligned() as u64
                                 }
-                                (MemWidth::Double, _) => {
-                                    (cpu.ram_ptr.add(ram_offset) as *const u64).read_unaligned()
-                                }
+                                (MemWidth::Double, _) => ptr.cast::<u64>().read_unaligned(),
                                 _ => 0,
                             }
                         }

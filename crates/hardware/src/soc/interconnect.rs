@@ -2,6 +2,7 @@
 //! devices, aggregates IRQs through PLIC, and exposes the RAM pointer.
 
 use super::devices::Device;
+use super::memory::RamRegion;
 use crate::common::PhysAddr;
 
 /// Aggregated interrupt signals returned by [`Bus::tick`] each cycle.
@@ -34,6 +35,14 @@ pub struct Bus {
     uart_idx: Option<usize>,
     htif_idx: Option<usize>,
     clint_idx: Option<usize>,
+    /// Cached fast-path view of the DRAM device's backing buffer; populated
+    /// when a device named `"DRAM"` is registered. The pipeline reads this
+    /// on hot loads/stores to skip device-table dispatch.
+    ram_region: Option<RamRegion>,
+    /// Cached `(start, end_exclusive)` for the HTIF device. The pipeline
+    /// checks this before the RAM fast path so HTIF tohost stores are
+    /// always routed through the device.
+    htif_range: Option<(u64, u64)>,
 }
 
 impl std::fmt::Debug for Bus {
@@ -63,6 +72,8 @@ impl Bus {
             uart_idx: None,
             htif_idx: None,
             clint_idx: None,
+            ram_region: None,
+            htif_range: None,
         }
     }
 
@@ -75,6 +86,33 @@ impl Bus {
         self.htif_idx = self.devices.iter().position(|d| d.name() == "HTIF");
         self.clint_idx = self.devices.iter().position(|d| d.name() == "CLINT");
         self.last_device_idx = 0;
+        self.refresh_fast_paths();
+    }
+
+    /// Recomputes the cached `RamRegion` and HTIF range after a device-set change.
+    fn refresh_fast_paths(&mut self) {
+        self.ram_region = self.ram_idx.and_then(|idx| {
+            let (base, size) = self.devices[idx].address_range();
+            self.devices[idx].as_memory_mut().map(|mem| RamRegion::new(mem.as_mut_ptr(), base, size))
+        });
+        self.htif_range = self.htif_idx.map(|idx| {
+            let (start, size) = self.devices[idx].address_range();
+            (start, start + size)
+        });
+    }
+
+    /// Returns the cached fast-path view of the DRAM region, or `None` when
+    /// no DRAM device is registered.
+    #[inline]
+    pub const fn ram_region(&self) -> Option<RamRegion> {
+        self.ram_region
+    }
+
+    /// Returns the cached `(start, end_exclusive)` HTIF range, or `None`
+    /// when no HTIF device is registered.
+    #[inline]
+    pub const fn htif_range(&self) -> Option<(u64, u64)> {
+        self.htif_range
     }
 
     /// Returns cycles = base latency plus ceiling(bytes / `width_bytes`) transfers.

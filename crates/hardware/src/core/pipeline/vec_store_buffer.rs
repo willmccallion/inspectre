@@ -531,11 +531,12 @@ fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
 /// Wraps scalar-SB drain semantics (WCB merge + memory write) for a single VSB write.
 fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidth) {
     let raw = paddr.val();
-    let in_htif = cpu.htif_range.is_some_and(|(lo, hi)| raw >= lo && raw < hi);
-    let is_ram = !in_htif && raw >= cpu.ram_start && raw < cpu.ram_end;
+    let in_htif = cpu.soc.bus.htif_range().is_some_and(|(lo, hi)| raw >= lo && raw < hi);
+    let ram_target =
+        if in_htif { None } else { cpu.soc.bus.ram_region().filter(|r| r.contains(raw, 1)) };
     let width_bytes = width_to_bytes(width);
 
-    if !cpu.core.wcb.is_disabled() && is_ram {
+    if !cpu.core.wcb.is_disabled() && ram_target.is_some() {
         let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
             cpu.soc.stats.wcb_coalesces += 1;
@@ -545,24 +546,20 @@ fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidt
             let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
             cpu.soc.stats.wcb_drains += 1;
         }
-    } else if is_ram {
+    } else if ram_target.is_some() {
         let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
     }
 
-    if is_ram {
-        let offset = (raw - cpu.ram_start) as usize;
+    if let Some(r) = ram_target {
+        // SAFETY: `ram_target` is `Some` only after `RamRegion::contains` confirms
+        // the address is inside DRAM; widths up to 8 bytes fit because DRAM is contiguous.
         unsafe {
+            let ptr = r.ptr(raw);
             match width {
-                MemWidth::Byte => *cpu.ram_ptr.add(offset) = data as u8,
-                MemWidth::Half => {
-                    (cpu.ram_ptr.add(offset) as *mut u16).write_unaligned(data as u16);
-                }
-                MemWidth::Word => {
-                    (cpu.ram_ptr.add(offset) as *mut u32).write_unaligned(data as u32);
-                }
-                MemWidth::Double => {
-                    (cpu.ram_ptr.add(offset) as *mut u64).write_unaligned(data);
-                }
+                MemWidth::Byte => *ptr = data as u8,
+                MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
+                MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
+                MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
                 MemWidth::Nop => {}
             }
         }

@@ -47,22 +47,6 @@ pub struct Cpu {
     /// `config.general.direct_mode` and runtime-mutable (the ELF loader
     /// writes it after init).
     pub direct_mode: bool,
-    /// Raw pointer to the start of simulated RAM.
-    ///
-    /// # Safety
-    ///
-    /// Must point to a valid, mutable memory region of size `ram_end - ram_start`
-    /// bytes that remains live for the lifetime of the `Cpu`. All accesses must
-    /// verify `ram_start <= address < ram_end` before dereferencing.
-    pub ram_ptr: *mut u8,
-    /// Physical address where RAM starts.
-    pub ram_start: u64,
-    /// Physical address where RAM ends (exclusive).
-    pub ram_end: u64,
-
-    /// HTIF tohost address range (start, end). Stores in this range bypass the
-    /// RAM fast-path and go through the bus so the HTIF device can intercept them.
-    pub htif_range: Option<(u64, u64)>,
 
     /// Set by the backend when a PC redirect occurs (branch misprediction,
     /// trap, FENCE.I, etc.). The pipeline uses this to flush the frontend,
@@ -110,7 +94,7 @@ impl Cpu {
     }
 
     /// Creates a new CPU instance with the specified `SoC` and configuration.
-    pub fn new(mut soc: Soc, config: &Config) -> Self {
+    pub fn new(soc: Soc, config: &Config) -> Self {
         use crate::core::arch::csr::{
             MISA_DEFAULT_RV64IMAFDC, MISA_EXT_A, MISA_EXT_C, MISA_EXT_D, MISA_EXT_F, MISA_EXT_I,
             MISA_EXT_M, MISA_EXT_S, MISA_EXT_U, MISA_XLEN_64, MSTATUS_DEFAULT_RV64, MSTATUS_FS,
@@ -168,8 +152,6 @@ impl Cpu {
             ..Default::default()
         };
 
-        let (ram_ptr, ram_start, ram_end) =
-            soc.bus.get_ram_info().unwrap_or((std::ptr::null_mut(), 0, 0));
         let mut regs = if direct_mode {
             let sp = config.general.initial_sp.unwrap_or(config.system.ram_base + 0x100_0000);
             let mut r = RegisterFile::new();
@@ -214,10 +196,6 @@ impl Cpu {
             core: Core::new(CoreId::new(0), config),
             soc,
             direct_mode,
-            ram_ptr,
-            ram_start,
-            ram_end,
-            htif_range: None,
             redirect_pending: false,
         }
     }

@@ -200,10 +200,9 @@ impl PyCpu {
             sim.cpu.hart.pc = entry;
         }
 
-        if let Some(tohost) = tohost_addr {
+        if tohost_addr.is_some() {
             sim.cpu.direct_mode = false;
             sim.cpu.hart.privilege = PrivilegeMode::Machine;
-            sim.cpu.htif_range = Some((tohost, tohost + 16));
         }
 
         if let Some(kpath) = kernel_path {
@@ -537,10 +536,9 @@ impl PyCpu {
         length: usize,
     ) -> Bound<'py, pyo3::types::PyBytes> {
         let cpu = &self.inner.cpu;
-        if paddr >= cpu.ram_start && paddr + length as u64 <= cpu.ram_end && !cpu.ram_ptr.is_null()
-        {
-            let offset = (paddr - cpu.ram_start) as usize;
-            let slice = unsafe { std::slice::from_raw_parts(cpu.ram_ptr.add(offset), length) };
+        if let Some(r) = cpu.soc.bus.ram_region().filter(|r| r.contains(paddr, length as u64)) {
+            // SAFETY: bounds-checked by `RamRegion::contains(paddr, length)` above.
+            let slice = unsafe { std::slice::from_raw_parts(r.ptr(paddr), length) };
             pyo3::types::PyBytes::new(py, slice)
         } else {
             let mut buf = vec![0u8; length];
@@ -587,8 +585,11 @@ impl PyCpu {
         let _ = header.insert("trace".into(), serde_json::Value::from(cpu.soc.config.general.trace_instructions));
         let _ = header.insert("wfi_waiting".into(), serde_json::Value::from(cpu.hart.wfi_waiting));
         let _ = header.insert("wfi_pc".into(), serde_json::Value::from(cpu.hart.wfi_pc));
-        let _ = header.insert("ram_start".into(), serde_json::Value::from(cpu.ram_start));
-        let _ = header.insert("ram_end".into(), serde_json::Value::from(cpu.ram_end));
+        let region = cpu.soc.bus.ram_region();
+        let ram_start = region.map_or(0, |r| r.base());
+        let ram_end = region.map_or(0, |r| r.base() + r.size());
+        let _ = header.insert("ram_start".into(), serde_json::Value::from(ram_start));
+        let _ = header.insert("ram_end".into(), serde_json::Value::from(ram_end));
 
         let gprs: Vec<serde_json::Value> = (0u8..32)
             .map(|i| serde_json::Value::from(cpu.hart.regs.read(rvsim_core::common::RegIdx::new(i))))
@@ -642,11 +643,15 @@ impl PyCpu {
         std::io::Write::write_all(&mut w, &header_bytes)
             .map_err(|e| PyRuntimeError::new_err(format!("write error: {e}")))?;
 
-        let ram_size = (cpu.ram_end - cpu.ram_start) as usize;
-        if !cpu.ram_ptr.is_null() && ram_size > 0 {
-            let ram_slice = unsafe { std::slice::from_raw_parts(cpu.ram_ptr, ram_size) };
-            std::io::Write::write_all(&mut w, ram_slice)
-                .map_err(|e| PyRuntimeError::new_err(format!("write error: {e}")))?;
+        if let Some(r) = region {
+            let ram_size = r.size() as usize;
+            if ram_size > 0 {
+                // SAFETY: `r.as_ptr()` is the start of a contiguous DRAM region of
+                // exactly `r.size()` bytes owned by the Memory device on the bus.
+                let ram_slice = unsafe { std::slice::from_raw_parts(r.as_ptr(), ram_size) };
+                std::io::Write::write_all(&mut w, ram_slice)
+                    .map_err(|e| PyRuntimeError::new_err(format!("write error: {e}")))?;
+            }
         }
 
         std::io::Write::flush(&mut w)
@@ -743,7 +748,8 @@ impl PyCpu {
         let ckpt_ram_start = header["ram_start"].as_u64().unwrap_or(0);
         let ckpt_ram_end = header["ram_end"].as_u64().unwrap_or(0);
         let ckpt_ram_size = (ckpt_ram_end - ckpt_ram_start) as usize;
-        let cpu_ram_size = (cpu.ram_end - cpu.ram_start) as usize;
+        let region = cpu.soc.bus.ram_region();
+        let cpu_ram_size = region.map_or(0, |reg| reg.size() as usize);
 
         if ckpt_ram_size != cpu_ram_size {
             return Err(PyRuntimeError::new_err(format!(
@@ -751,8 +757,13 @@ impl PyCpu {
             )));
         }
 
-        if !cpu.ram_ptr.is_null() && ckpt_ram_size > 0 {
-            let ram_slice = unsafe { std::slice::from_raw_parts_mut(cpu.ram_ptr, ckpt_ram_size) };
+        if let Some(reg) = region
+            && ckpt_ram_size > 0
+        {
+            // SAFETY: `reg.as_ptr()` is the start of a contiguous DRAM region of
+            // exactly `reg.size()` bytes owned by the Memory device on the bus.
+            let ram_slice =
+                unsafe { std::slice::from_raw_parts_mut(reg.as_ptr(), ckpt_ram_size) };
             Read::read_exact(&mut r, ram_slice)
                 .map_err(|e| PyRuntimeError::new_err(format!("read error restoring RAM: {e}")))?;
         }
