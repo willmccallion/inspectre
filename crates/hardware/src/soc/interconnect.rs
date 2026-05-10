@@ -4,6 +4,20 @@
 use super::devices::Device;
 use crate::common::PhysAddr;
 
+/// Aggregated interrupt signals returned by [`Bus::tick`] each cycle.
+#[derive(Clone, Copy, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct BusIrqs {
+    /// CLINT machine timer interrupt (`mip.MTIP`).
+    pub timer: bool,
+    /// CLINT machine software interrupt (`mip.MSIP`).
+    pub msip: bool,
+    /// PLIC machine external interrupt (`mip.MEIP`).
+    pub meip: bool,
+    /// PLIC supervisor external interrupt (`mip.SEIP`).
+    pub seip: bool,
+}
+
 /// System bus connecting CPU and devices; routes accesses by physical address.
 ///
 /// Holds a sorted list of devices (RAM, UART, disk, CLINT, PLIC, etc.), bus width and latency
@@ -101,10 +115,10 @@ impl Bus {
         false
     }
 
-    /// Advances all devices by one tick and updates PLIC.
-    /// Returns (`timer_irq`, `msip`, `meip`, `seip`).
-    pub fn tick(&mut self) -> (bool, bool, bool, bool) {
-        let mut timer_irq = false;
+    /// Advances all devices by one tick and updates PLIC. Returns the
+    /// aggregated interrupt vector for this cycle.
+    pub fn tick(&mut self) -> BusIrqs {
+        let mut timer = false;
         let mut active_irqs = 0u64;
 
         for i in 0..self.devices.len() {
@@ -116,7 +130,7 @@ impl Bus {
                     active_irqs |= 1 << id.val();
                 }
                 if dev.name() == "CLINT" {
-                    timer_irq = true;
+                    timer = true;
                 }
             }
         }
@@ -132,7 +146,7 @@ impl Bus {
             plic.check_interrupts()
         });
 
-        (timer_irq, msip, meip, seip)
+        BusIrqs { timer, msip, meip, seip }
     }
 
     /// Returns whether the UART device has detected a kernel panic pattern.

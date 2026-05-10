@@ -74,23 +74,23 @@ impl Cpu {
             self.hart.same_pc_count = 0;
         }
 
-        let (timer_irq, msip, meip, seip) = self.soc.tick();
+        let irqs = self.soc.tick();
 
         let mut mip = self.hart.csrs.mip;
 
-        if timer_irq {
+        if irqs.timer {
             mip |= csr::MIP_MTIP;
         } else {
             mip &= !csr::MIP_MTIP;
         }
 
-        if msip {
+        if irqs.msip {
             mip |= csr::MIP_MSIP;
         } else {
             mip &= !csr::MIP_MSIP;
         }
 
-        if meip {
+        if irqs.meip {
             mip |= csr::MIP_MEIP;
         } else {
             mip &= !csr::MIP_MEIP;
@@ -99,7 +99,7 @@ impl Cpu {
         // software-written bit.  Only clear the hardware component; preserve
         // the software-written bit so M-mode can inject S-mode external
         // interrupts via `csrw mip`.
-        if seip {
+        if irqs.seip {
             mip |= csr::MIP_SEIP;
         } else if !self.hart.sw_seip {
             mip &= !csr::MIP_SEIP;

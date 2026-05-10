@@ -169,8 +169,9 @@ impl Soc {
         self.bus.load_binary_at(data, addr);
     }
 
-    /// Advances all devices by one tick. Returns (`timer_irq`, `msip`, `meip`, `seip`).
-    pub fn tick(&mut self) -> (bool, bool, bool, bool) {
+    /// Advances all devices by one tick and returns this cycle's interrupt
+    /// snapshot.
+    pub fn tick(&mut self) -> crate::soc::interconnect::BusIrqs {
         self.bus.tick()
     }
 

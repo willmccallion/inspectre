@@ -20,9 +20,9 @@ fn bus_tick_propagates_to_clint() {
     bus.write_u64(PhysAddr::new(0x200_0000 + 0x4000), 3);
 
     // Tick 3 times → mtime reaches 3, should trigger timer
-    let (t1, _, _, _) = bus.tick();
-    let (t2, _, _, _) = bus.tick();
-    let (t3, _, _, _) = bus.tick();
+    let t1 = bus.tick().timer;
+    let t2 = bus.tick().timer;
+    let t3 = bus.tick().timer;
 
     assert!(!t1);
     assert!(!t2);
