@@ -99,14 +99,14 @@ impl Ppn {
 ///
 /// Virtual addresses are used by software and must be translated to physical addresses
 /// through the Memory Management Unit (MMU) before accessing memory.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct VirtAddr(pub u64);
 
 /// A physical address in the RISC-V address space.
 ///
 /// Physical addresses represent actual hardware memory locations and are used
 /// after virtual-to-physical address translation has completed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PhysAddr(pub u64);
 
 impl VirtAddr {
@@ -139,5 +139,35 @@ impl PhysAddr {
     #[inline(always)]
     pub const fn val(&self) -> u64 {
         self.0
+    }
+}
+
+/// A cache-line-aligned physical address.
+///
+/// Wraps a [`PhysAddr`] whose low bits (log2 of the cache line size) are zero.
+/// Used as the identifier for a cached line in coherence messages, MSHRs, and
+/// pending-request maps. Distinct from `PhysAddr` so cache routines cannot
+/// compare line-aligned addresses against byte addresses by accident.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct LineAddr(PhysAddr);
+
+impl LineAddr {
+    /// Aligns a physical address down to the cache line boundary. `line_bytes`
+    /// must be a power of two.
+    #[inline(always)]
+    pub const fn from_phys(addr: PhysAddr, line_bytes: u64) -> Self {
+        Self(PhysAddr(addr.0 & !(line_bytes - 1)))
+    }
+
+    /// Returns the underlying physical address.
+    #[inline(always)]
+    pub const fn phys(self) -> PhysAddr {
+        self.0
+    }
+
+    /// Returns the raw 64-bit value.
+    #[inline(always)]
+    pub const fn val(self) -> u64 {
+        self.0.0
     }
 }

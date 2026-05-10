@@ -30,7 +30,7 @@ pub mod sim_error;
 /// Hart and physical-core identifier newtypes.
 pub mod ids;
 
-pub use addr::{Asid, IrqId, PhysAddr, Ppn, VirtAddr, Vpn};
+pub use addr::{Asid, IrqId, LineAddr, PhysAddr, Ppn, VirtAddr, Vpn};
 pub use constants::{PAGE_SHIFT, VPN_MASK};
 pub use csr_addr::CsrAddr;
 pub use data::AccessType;
