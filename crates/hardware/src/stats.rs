@@ -18,8 +18,6 @@ use std::time::Instant;
 #[derive(Clone, Debug)]
 pub struct SimStats {
     start_time: Instant,
-    /// Total simulator cycles elapsed.
-    pub cycles: u64,
     /// Number of instructions committed (retired).
     pub instructions_retired: u64,
 
@@ -192,7 +190,6 @@ impl Default for SimStats {
     fn default() -> Self {
         Self {
             start_time: Instant::now(),
-            cycles: 0,
             instructions_retired: 0,
             inst_load: 0,
             inst_store: 0,
@@ -274,18 +271,7 @@ impl SimStats {
     ///
     /// Each element of `sections` should be one of `"summary"`, `"core"`, `"instruction_mix"`,
     /// `"branch"`, or `"memory"`. Pass an empty slice to print all sections (same as `print()`).
-    ///
-    /// # Arguments
-    ///
-    /// * `sections` - Slice of section names to print, or empty for all.
-    ///
-    /// # Panics
-    ///
-    /// This function will not panic. Division by zero is prevented by:
-    /// - `cyc` is set to `max(cycles, 1)` before any division (line 143)
-    /// - `instr` is set to `max(instructions_retired, 1)` before division (lines 144-148)
-    /// - All floating-point divisions use these protected values
-    pub fn print_sections(&self, sections: &[String]) {
+    pub fn print_sections(&self, cycles: u64, sections: &[String]) {
         let color = std::io::stdout().is_terminal();
         let bold = if color { "\x1b[1m" } else { "" };
         let teal = if color { "\x1b[36m" } else { "" };
@@ -295,7 +281,7 @@ impl SimStats {
         let want = |s: &str| sections.is_empty() || sections.iter().any(|x| x == s);
         let duration = self.start_time.elapsed();
         let seconds = duration.as_secs_f64();
-        let cyc = if self.cycles == 0 { 1 } else { self.cycles };
+        let cyc = if cycles == 0 { 1 } else { cycles };
         let instr = if self.instructions_retired == 0 { 1 } else { self.instructions_retired };
 
         let rule =
@@ -306,7 +292,7 @@ impl SimStats {
             let ipc = self.instructions_retired as f64 / cyc as f64;
             let cpi = cyc as f64 / instr as f64;
             let mips = (self.instructions_retired as f64 / seconds) / 1_000_000.0;
-            let khz = (self.cycles as f64 / seconds) / 1000.0;
+            let khz = (cycles as f64 / seconds) / 1000.0;
             let active_cycles = cyc.saturating_sub(self.cycles_wfi);
             let active_cyc = if active_cycles == 0 { 1 } else { active_cycles };
             let active_ipc = self.instructions_retired as f64 / active_cyc as f64;
@@ -314,7 +300,7 @@ impl SimStats {
             println!("{bold}RISC-V SYSTEM SIMULATION STATISTICS{rst}");
             println!("{rule}");
             println!("host_seconds             {seconds:.4} s");
-            println!("sim_cycles               {}", self.cycles);
+            println!("sim_cycles               {cycles}");
             println!("sim_freq                 {khz:.2} kHz");
             println!("sim_insts                {}", self.instructions_retired);
             println!("sim_ipc                  {ipc:.4}");
@@ -649,8 +635,8 @@ impl SimStats {
 
     /// Prints all statistics sections to stdout.
     ///
-    /// Equivalent to `print_sections(&[])`.
-    pub fn print(&self) {
-        self.print_sections(&[]);
+    /// Equivalent to `print_sections(cycles, &[])`.
+    pub fn print(&self, cycles: u64) {
+        self.print_sections(cycles, &[]);
     }
 }

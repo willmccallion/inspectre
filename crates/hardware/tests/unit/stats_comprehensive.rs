@@ -5,7 +5,6 @@ use rvsim_core::stats::SimStats;
 #[test]
 fn test_stats_default() {
     let stats = SimStats::default();
-    assert_eq!(stats.cycles, 0);
     assert_eq!(stats.instructions_retired, 0);
     assert_eq!(stats.inst_load, 0);
     assert_eq!(stats.inst_store, 0);
@@ -17,18 +16,15 @@ fn test_stats_default() {
 #[test]
 fn test_stats_clone() {
     let mut stats = SimStats::default();
-    stats.cycles = 100;
     stats.instructions_retired = 50;
 
     let cloned = stats.clone();
-    assert_eq!(cloned.cycles, 100);
     assert_eq!(cloned.instructions_retired, 50);
 }
 
 #[test]
 fn test_stats_print_all_sections() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.instructions_retired = 500;
     stats.inst_alu = 200;
     stats.inst_load = 150;
@@ -41,23 +37,20 @@ fn test_stats_print_all_sections() {
     stats.dcache_hits = 200;
     stats.dcache_misses = 50;
 
-    // Should not panic
-    stats.print();
+    stats.print(1000);
 }
 
 #[test]
 fn test_stats_print_summary_section() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.instructions_retired = 500;
 
-    stats.print_sections(&[String::from("summary")]);
+    stats.print_sections(1000, &[String::from("summary")]);
 }
 
 #[test]
 fn test_stats_print_core_section() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.cycles_user = 400;
     stats.cycles_kernel = 300;
     stats.cycles_machine = 300;
@@ -65,7 +58,7 @@ fn test_stats_print_core_section() {
     stats.stalls_control = 30;
     stats.stalls_data = 20;
 
-    stats.print_sections(&[String::from("core")]);
+    stats.print_sections(1000, &[String::from("core")]);
 }
 
 #[test]
@@ -79,7 +72,7 @@ fn test_stats_print_instruction_mix_section() {
     stats.inst_system = 50;
     stats.inst_fp_arith = 50;
 
-    stats.print_sections(&[String::from("instruction_mix")]);
+    stats.print_sections(1000, &[String::from("instruction_mix")]);
 }
 
 #[test]
@@ -88,7 +81,7 @@ fn test_stats_print_branch_section() {
     stats.committed_branch_predictions = 900;
     stats.committed_branch_mispredictions = 100;
 
-    stats.print_sections(&[String::from("branch")]);
+    stats.print_sections(1000, &[String::from("branch")]);
 }
 
 #[test]
@@ -103,55 +96,48 @@ fn test_stats_print_memory_section() {
     stats.l3_hits = 800;
     stats.l3_misses = 200;
 
-    stats.print_sections(&[String::from("memory")]);
+    stats.print_sections(20_000, &[String::from("memory")]);
 }
 
 #[test]
 fn test_stats_print_multiple_sections() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.instructions_retired = 500;
     stats.committed_branch_predictions = 40;
     stats.committed_branch_mispredictions = 10;
 
-    stats.print_sections(&[String::from("summary"), String::from("branch")]);
+    stats.print_sections(1000, &[String::from("summary"), String::from("branch")]);
 }
 
 #[test]
 fn test_stats_zero_cycles_division_safe() {
     let stats = SimStats::default();
-    // Should not panic with zero cycles
-    stats.print();
+    stats.print(0);
 }
 
 #[test]
 fn test_stats_zero_instructions_division_safe() {
-    let mut stats = SimStats::default();
-    stats.cycles = 1000;
-    // instructions_retired is 0
-    stats.print();
+    let stats = SimStats::default();
+    stats.print(1000);
 }
 
 #[test]
 fn test_stats_zero_committed_branch_predictions_safe() {
     let stats = SimStats::default();
-    // committed_branch_predictions and committed_branch_mispredictions are both 0
-    stats.print_sections(&[String::from("branch")]);
+    stats.print_sections(0, &[String::from("branch")]);
 }
 
 #[test]
 fn test_stats_zero_cache_accesses_safe() {
     let stats = SimStats::default();
-    // All cache hits and misses are 0
-    stats.print_sections(&[String::from("memory")]);
+    stats.print_sections(0, &[String::from("memory")]);
 }
 
 #[test]
 fn test_stats_high_values() {
     let mut stats = SimStats::default();
-    stats.cycles = u64::MAX / 2;
     stats.instructions_retired = u64::MAX / 4;
-    stats.print_sections(&[String::from("summary")]);
+    stats.print_sections(u64::MAX / 2, &[String::from("summary")]);
 }
 
 #[test]
@@ -169,29 +155,27 @@ fn test_stats_all_instruction_types() {
     stats.inst_fp_fma = 100;
     stats.inst_fp_div_sqrt = 100;
 
-    stats.print_sections(&[String::from("instruction_mix")]);
+    stats.print_sections(1000, &[String::from("instruction_mix")]);
 }
 
 #[test]
 fn test_stats_all_stall_types() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.stalls_mem = 300;
     stats.stalls_control = 200;
     stats.stalls_data = 100;
 
-    stats.print_sections(&[String::from("core")]);
+    stats.print_sections(1000, &[String::from("core")]);
 }
 
 #[test]
 fn test_stats_all_privilege_modes() {
     let mut stats = SimStats::default();
-    stats.cycles = 900;
     stats.cycles_user = 300;
     stats.cycles_kernel = 300;
     stats.cycles_machine = 300;
 
-    stats.print_sections(&[String::from("core")]);
+    stats.print_sections(900, &[String::from("core")]);
 }
 
 #[test]
@@ -200,7 +184,7 @@ fn test_stats_perfect_branch_prediction() {
     stats.committed_branch_predictions = 1000;
     stats.committed_branch_mispredictions = 0;
 
-    stats.print_sections(&[String::from("branch")]);
+    stats.print_sections(1000, &[String::from("branch")]);
 }
 
 #[test]
@@ -209,7 +193,7 @@ fn test_stats_worst_branch_prediction() {
     stats.committed_branch_predictions = 0;
     stats.committed_branch_mispredictions = 1000;
 
-    stats.print_sections(&[String::from("branch")]);
+    stats.print_sections(1000, &[String::from("branch")]);
 }
 
 #[test]
@@ -219,10 +203,10 @@ fn test_stats_perfect_cache_hits() {
     stats.icache_misses = 0;
     stats.dcache_hits = 10000;
     stats.dcache_misses = 0;
-    stats.l2_hits = 0; // No L2 access if L1 always hits
+    stats.l2_hits = 0;
     stats.l2_misses = 0;
 
-    stats.print_sections(&[String::from("memory")]);
+    stats.print_sections(20_000, &[String::from("memory")]);
 }
 
 #[test]
@@ -237,26 +221,22 @@ fn test_stats_all_cache_misses() {
     stats.l3_hits = 0;
     stats.l3_misses = 1000;
 
-    stats.print_sections(&[String::from("memory")]);
+    stats.print_sections(2000, &[String::from("memory")]);
 }
 
 #[test]
 fn test_stats_empty_sections_list() {
     let mut stats = SimStats::default();
-    stats.cycles = 100;
     stats.instructions_retired = 50;
 
-    // Empty list means print all sections
-    stats.print_sections(&[]);
+    stats.print_sections(100, &[]);
 }
 
 #[test]
 fn test_stats_invalid_section_name() {
-    let mut stats = SimStats::default();
-    stats.cycles = 100;
+    let stats = SimStats::default();
 
-    // Should not panic, just won't match any section
-    stats.print_sections(&[String::from("invalid_section")]);
+    stats.print_sections(100, &[String::from("invalid_section")]);
 }
 
 #[test]
@@ -297,8 +277,6 @@ fn test_stats_fp_counters() {
 fn test_stats_realistic_workload() {
     let mut stats = SimStats::default();
 
-    // Simulate a realistic workload
-    stats.cycles = 10_000_000;
     stats.instructions_retired = 8_000_000;
 
     stats.inst_alu = 4_000_000;
@@ -325,6 +303,5 @@ fn test_stats_realistic_workload() {
     stats.cycles_kernel = 2_000_000;
     stats.cycles_machine = 1_000_000;
 
-    // Should print complete, realistic statistics
-    stats.print();
+    stats.print(10_000_000);
 }

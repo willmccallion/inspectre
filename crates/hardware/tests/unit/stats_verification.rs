@@ -8,7 +8,6 @@ use rvsim_core::stats::SimStats;
 #[test]
 fn default_stats_all_zero() {
     let stats = SimStats::default();
-    assert_eq!(stats.cycles, 0);
     assert_eq!(stats.instructions_retired, 0);
     assert_eq!(stats.inst_load, 0);
     assert_eq!(stats.inst_store, 0);
@@ -41,7 +40,6 @@ fn default_stats_all_zero() {
 #[test]
 fn stats_field_mutation() {
     let mut stats = SimStats::default();
-    stats.cycles = 1000;
     stats.instructions_retired = 500;
     stats.inst_alu = 200;
     stats.inst_load = 100;
@@ -49,7 +47,6 @@ fn stats_field_mutation() {
     stats.inst_branch = 100;
     stats.inst_system = 50;
 
-    assert_eq!(stats.cycles, 1000);
     assert_eq!(stats.instructions_retired, 500);
     assert_eq!(stats.inst_alu, 200);
     assert_eq!(stats.inst_load, 100);
@@ -97,12 +94,9 @@ fn stats_stall_breakdown() {
     stats.stalls_mem = 100;
     stats.stalls_control = 50;
     stats.stalls_data = 30;
-    stats.cycles = 1000;
 
     let total_stalls = stats.stalls_mem + stats.stalls_control + stats.stalls_data;
     assert_eq!(total_stalls, 180);
-    let stall_ratio = total_stalls as f64 / stats.cycles as f64;
-    assert!((stall_ratio - 0.18).abs() < 1e-10);
 }
 
 #[test]
@@ -111,20 +105,17 @@ fn stats_mode_cycle_breakdown() {
     stats.cycles_user = 400;
     stats.cycles_kernel = 500;
     stats.cycles_machine = 100;
-    stats.cycles = 1000;
 
     let total = stats.cycles_user + stats.cycles_kernel + stats.cycles_machine;
-    assert_eq!(total, stats.cycles);
+    assert_eq!(total, 1000);
 }
 
 #[test]
 fn stats_clone() {
     let mut stats = SimStats::default();
-    stats.cycles = 42;
     stats.instructions_retired = 21;
 
     let cloned = stats.clone();
-    assert_eq!(cloned.cycles, 42);
     assert_eq!(cloned.instructions_retired, 21);
 }
 

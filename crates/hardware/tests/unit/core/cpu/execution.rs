@@ -23,12 +23,12 @@ fn test_tick_returns_ok() {
 #[test]
 fn test_tick_increments_cycles() {
     let mut sim = create_test_sim();
-    let initial_cycles = sim.cpu.soc.stats.cycles;
+    let initial_cycles = sim.cpu.soc.cycle;
 
     sim.tick().unwrap();
 
     // Cycles should increase
-    assert!(sim.cpu.soc.stats.cycles >= initial_cycles);
+    assert!(sim.cpu.soc.cycle >= initial_cycles);
 }
 
 #[test]

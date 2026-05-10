@@ -193,7 +193,7 @@ impl Cpu {
         }
 
         // All caches missed — now query the DRAM controller (stateful).
-        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.stats.cycles);
+        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.cycle);
         total_penalty += self.soc.bus.calculate_transit_time(8);
         total_penalty += ram_latency;
         total_penalty += self.soc.bus.calculate_transit_time(64);
@@ -229,7 +229,7 @@ impl Cpu {
 
         // If no cache level is enabled, every access goes directly to DRAM.
         if !l1_enabled && !self.core.l2_cache.enabled && !self.soc.l3_cache.enabled {
-            let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.stats.cycles);
+            let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.cycle);
             return self.soc.bus.calculate_transit_time(8)
                 + ram_latency
                 + self.soc.bus.calculate_transit_time(64);
@@ -344,7 +344,7 @@ impl Cpu {
 
         // Consult the stateful DRAM controller only on full miss so its bank,
         // row-buffer, and refresh state reflects real memory traffic only.
-        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.stats.cycles);
+        let ram_latency = self.soc.mem_controller.access_latency(raw_addr, self.soc.cycle);
         total_penalty += self.soc.bus.calculate_transit_time(8);
         total_penalty += ram_latency;
         total_penalty += self.soc.bus.calculate_transit_time(64);

@@ -81,15 +81,15 @@ impl PyCpu {
 
     /// Runs for up to `limit` cycles, checking Python signals every 10000 cycles.
     fn run_inner(&mut self, py: Python<'_>, limit: Option<u64>) -> PyResult<Option<u64>> {
-        let start = self.inner.cpu.soc.stats.cycles;
+        let start = self.inner.cpu.soc.cycle;
         loop {
             if let Some(max) = limit
-                && self.inner.cpu.soc.stats.cycles.saturating_sub(start) >= max
+                && self.inner.cpu.soc.cycle.saturating_sub(start) >= max
             {
                 let _ = std::io::stdout().flush();
                 return Ok(None);
             }
-            if self.inner.cpu.soc.stats.cycles.is_multiple_of(10_000) {
+            if self.inner.cpu.soc.cycle.is_multiple_of(10_000) {
                 py.check_signals()?;
                 let _ = std::io::stdout().flush();
             }
@@ -143,7 +143,7 @@ impl PyCpu {
             let s = &self.inner.cpu.soc.stats;
             eprint!(
                 "\r\x1b[36m[rvsim]\x1b[0m  {:>14} cycles  {:>14} insns",
-                fmt_commas(s.cycles),
+                fmt_commas(self.inner.cpu.soc.cycle),
                 fmt_commas(s.instructions_retired),
             );
             let _ = std::io::stderr().flush();
@@ -249,7 +249,7 @@ impl PyCpu {
     /// Performance statistics as a dict (read-only).
     #[getter]
     fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let s = PyStats::from(self.inner.cpu.soc.stats.clone());
+        let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
         Ok(s.to_dict(py)?.into_bound(py).into_any().unbind())
     }
 
@@ -343,7 +343,7 @@ impl PyCpu {
                     pc,
                     raw: inst,
                     asm,
-                    cycles: self.inner.cpu.soc.stats.cycles,
+                    cycles: self.inner.cpu.soc.cycle,
                 }));
             }
         }
@@ -374,7 +374,7 @@ impl PyCpu {
         };
 
         if let Some(sections) = stats_sections {
-            let s = PyStats::from(self.inner.cpu.soc.stats.clone());
+            let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
             if sections.is_empty() {
                 s.print();
             } else {
@@ -418,7 +418,7 @@ impl PyCpu {
             let exit = self.run_for_cycles(py, chunk)?;
             cycles_run += chunk;
 
-            let s = PyStats::from(self.inner.cpu.soc.stats.clone());
+            let s = PyStats::from((self.inner.cpu.soc.stats.clone(), self.inner.cpu.soc.cycle));
             snapshots.push(s.to_dict(py)?.into_bound(py).into_any().unbind());
 
             if exit.is_some() {

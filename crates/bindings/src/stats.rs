@@ -11,24 +11,30 @@ use rvsim_core::stats::SimStats;
 #[derive(Clone)]
 pub struct PyStats {
     pub inner: SimStats,
+    pub cycles: u64,
 }
 
 impl PyStats {
+    /// Construct from a stats snapshot and the cycle count at the time of the snapshot.
+    pub const fn new(inner: SimStats, cycles: u64) -> Self {
+        Self { inner, cycles }
+    }
+
     /// Print all stats (full dump).
     pub fn print(&self) {
-        self.inner.print();
+        self.inner.print(self.cycles);
     }
 
     /// Print only the given sections.
     pub fn print_sections(&self, sections: Vec<String>) {
-        self.inner.print_sections(&sections);
+        self.inner.print_sections(self.cycles, &sections);
     }
 
     /// Export all stats as a Python dict (JSON-serializable).
     pub fn to_dict(&self, py: Python<'_>) -> pyo3::PyResult<pyo3::Py<pyo3::types::PyDict>> {
         let d = pyo3::types::PyDict::new(py);
         let s = &self.inner;
-        d.set_item("cycles", s.cycles)?;
+        d.set_item("cycles", self.cycles)?;
         d.set_item("instructions_retired", s.instructions_retired)?;
         d.set_item("icache_hits", s.icache_hits)?;
         d.set_item("icache_misses", s.icache_misses)?;
@@ -79,7 +85,8 @@ impl PyStats {
             0.0
         };
         d.set_item("speculative_branch_accuracy_pct", spec_acc)?;
-        let ipc = if s.cycles > 0 { s.instructions_retired as f64 / s.cycles as f64 } else { 0.0 };
+        let ipc =
+            if self.cycles > 0 { s.instructions_retired as f64 / self.cycles as f64 } else { 0.0 };
         d.set_item("ipc", ipc)?;
 
         d.set_item("inst_load", s.inst_load)?;
@@ -115,8 +122,8 @@ impl PyStats {
     }
 }
 
-impl From<SimStats> for PyStats {
-    fn from(inner: SimStats) -> Self {
-        Self { inner }
+impl From<(SimStats, u64)> for PyStats {
+    fn from((inner, cycles): (SimStats, u64)) -> Self {
+        Self { inner, cycles }
     }
 }

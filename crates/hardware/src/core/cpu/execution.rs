@@ -26,8 +26,8 @@ impl Cpu {
         }
 
         if self.soc.check_kernel_panic() {
-            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.soc.stats.cycles);
-            if self.soc.stats.cycles.saturating_sub(detected_at) >= 10_000 {
+            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.soc.cycle);
+            if self.soc.cycle.saturating_sub(detected_at) >= 10_000 {
                 return Err(SimError::KernelPanic { cycle: detected_at });
             }
         }
@@ -110,7 +110,7 @@ impl Cpu {
         // OpenSBI injects STIP via `csrw mip`), leave STIP entirely under
         // software control so that M-mode timer handlers work correctly.
         if (self.hart.csrs.menvcfg & csr::MENVCFG_STCE) != 0 {
-            let mtime = self.soc.stats.cycles / self.soc.config.system.clint_divider;
+            let mtime = self.soc.cycle / self.soc.config.system.clint_divider;
             if mtime >= self.hart.csrs.stimecmp {
                 mip |= csr::MIP_STIP;
             } else {
@@ -120,7 +120,7 @@ impl Cpu {
 
         self.hart.csrs.mip = mip;
 
-        self.soc.stats.cycles += 1;
+        self.soc.cycle += 1;
         self.track_mode_cycles();
 
         Ok(false)
@@ -141,10 +141,10 @@ impl Cpu {
                 );
             }
 
-            if self.soc.stats.cycles.is_multiple_of(STATUS_UPDATE_INTERVAL) {
+            if self.soc.cycle.is_multiple_of(STATUS_UPDATE_INTERVAL) {
                 ::tracing::debug!(
                     target: "rvsim::cpu",
-                    cycles = self.soc.stats.cycles,
+                    cycles = self.soc.cycle,
                     pc     = %crate::trace::Hex(self.hart.pc),
                     mode   = self.hart.privilege.name(),
                     "CPU status"
