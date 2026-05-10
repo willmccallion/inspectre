@@ -119,6 +119,13 @@ impl Soc {
 
         let l3_cache = CacheSim::new(&config.cache.l3);
 
+        let ram_region = crate::soc::memory::RamRegion::new(
+            ram_buffer.as_mut_ptr(),
+            ram_base,
+            ram_size as u64,
+        );
+        bus.attach_ram(crate::sim::components::MemCtrlId::new(0), ram_region);
+
         Self { cycle: 0, bus, mem_controller, l3_cache }
     }
 
