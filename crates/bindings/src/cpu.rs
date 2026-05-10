@@ -297,7 +297,7 @@ impl PyCpu {
     /// Committed PC trace from the pipeline as a list of ``(pc, raw_inst)`` pairs.
     #[getter]
     fn pc_trace(&self) -> Vec<(u64, u32)> {
-        self.inner.cpu.hart.pc_trace.clone()
+        self.inner.cpu.per_hart_debug[self.inner.cpu.hart.hart_id.as_index()].pc_trace.clone()
     }
 
     /// Open a commit log file. Each retired instruction is written as
@@ -313,7 +313,7 @@ impl PyCpu {
     /// before an instruction could commit.
     #[pyo3(signature = (max_cycles=100_000))]
     fn step(&mut self, py: Python<'_>, max_cycles: u64) -> PyResult<Option<PyInstruction>> {
-        let before_last = self.inner.cpu.hart.pc_trace.last().copied();
+        let before_last = self.inner.cpu.per_hart_debug[self.inner.cpu.hart.hart_id.as_index()].pc_trace.last().copied();
         let mut cycles_run: u64 = 0;
 
         loop {
@@ -333,7 +333,7 @@ impl PyCpu {
             }
             cycles_run += 1;
 
-            let new_last = self.inner.cpu.hart.pc_trace.last().copied();
+            let new_last = self.inner.cpu.per_hart_debug[self.inner.cpu.hart.hart_id.as_index()].pc_trace.last().copied();
             if new_last != before_last
                 && let Some((pc, inst)) = new_last
             {

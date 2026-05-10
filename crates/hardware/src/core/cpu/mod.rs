@@ -24,6 +24,7 @@ use crate::core::hart::HartInit;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::core::{Core, Hart};
+use crate::sim::per_hart_debug::HartDebug;
 use crate::soc::Soc;
 
 /// CPU architectural state: registers, caches, MMU, bus, and statistics.
@@ -31,7 +32,6 @@ use crate::soc::Soc;
 /// The pipeline is owned by `Simulator`, not by `Cpu`. This struct holds only
 /// the architectural state that the pipeline reads and writes.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Cpu {
     /// Per-thread architectural state (registers, CSRs, PC, MMU, PMP, ...).
     pub hart: Hart,
@@ -42,6 +42,11 @@ pub struct Cpu {
     /// System-on-Chip: config, bus, memory controller, shared L3, stats,
     /// devices, exit signal.
     pub soc: Soc,
+
+    /// Sim-side per-hart debug bookkeeping (hang detection, panic timing,
+    /// retire trace). Indexed by `HartId`; transitionally lives here until
+    /// the bench view replaces direct `Cpu` access.
+    pub per_hart_debug: Vec<HartDebug>,
 
     /// Direct mode (no translation, flat memory). Initialised from
     /// `config.general.direct_mode` and runtime-mutable (the ELF loader
@@ -54,9 +59,6 @@ pub struct Cpu {
     /// redirects when the target happens to equal the current fetch PC.
     pub redirect_pending: bool,
 }
-
-/// Maximum number of (pc, inst) entries kept for invalid-PC debug trace.
-pub const PC_TRACE_MAX: usize = 32;
 
 unsafe impl Send for Cpu {}
 unsafe impl Sync for Cpu {}
@@ -195,6 +197,7 @@ impl Cpu {
             hart,
             core: Core::new(CoreId::new(0), config),
             soc,
+            per_hart_debug: vec![HartDebug::default()],
             direct_mode,
             redirect_pending: false,
         }

@@ -16,7 +16,7 @@ use crate::core::Cpu;
 use crate::core::arch::csr;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::arch::trap::TrapHandler;
-use crate::core::cpu::PC_TRACE_MAX;
+use crate::sim::per_hart_debug::PC_TRACE_MAX;
 use crate::core::pipeline::checkpoint::CheckpointTable;
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::load_queue::LoadQueue;
@@ -221,9 +221,11 @@ pub fn commit_stage(
             }
         };
 
-        cpu.hart.pc_trace.push((entry.pc, entry.inst));
-        if cpu.hart.pc_trace.len() > PC_TRACE_MAX {
-            let _ = cpu.hart.pc_trace.remove(0);
+        let hart_idx = cpu.hart.hart_id.as_index();
+        let pc_trace = &mut cpu.per_hart_debug[hart_idx].pc_trace;
+        pc_trace.push((entry.pc, entry.inst));
+        if pc_trace.len() > PC_TRACE_MAX {
+            let _ = pc_trace.remove(0);
         }
 
         if entry.inst != 0 && entry.inst != 0x13 {

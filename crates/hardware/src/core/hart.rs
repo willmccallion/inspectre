@@ -16,7 +16,6 @@ use crate::core::units::mmu::pmp::Pmp;
 
 /// Per-thread RISC-V architectural state.
 #[derive(Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Hart {
     /// Globally unique hardware-thread identifier; reported by `mhartid`.
     pub hart_id: HartId,
@@ -34,10 +33,6 @@ pub struct Hart {
     pub mmu: Mmu,
     /// Physical Memory Protection unit.
     pub pmp: Pmp,
-    /// Last PC observed by the hang detector.
-    pub last_pc: u64,
-    /// Number of consecutive cycles `pc` has been equal to `last_pc`.
-    pub same_pc_count: u64,
     /// True when the hart has executed `WFI` and is waiting for an interrupt.
     pub wfi_waiting: bool,
     /// PC at which `WFI` was entered.
@@ -48,15 +43,6 @@ pub struct Hart {
     /// the EPC for interrupts when the ROB is empty, because `pc` is the
     /// fetch PC and may be far ahead of the commit point.
     pub committed_next_pc: u64,
-    /// Ring buffer of `(pc, inst)` for the last N retired instructions; used
-    /// by the invalid-PC debug trace.
-    pub pc_trace: Vec<(u64, u32)>,
-    /// Last invalid PC the debug trace printed (deduplicates dumps).
-    pub last_invalid_pc_debug: Option<u64>,
-    /// Cycle at which a kernel panic was first detected (`None` if not yet).
-    /// The simulator runs for some additional cycles after detection so the
-    /// full panic message can print before exit.
-    pub panic_detected_at_cycle: Option<u64>,
     /// Software-written SEIP bit. The `mip` SEIP bit is the OR of this and
     /// the PLIC hardware signal, so the software component is tracked here.
     pub sw_seip: bool,
@@ -96,14 +82,9 @@ impl Hart {
             load_reservation: None,
             mmu: init.mmu,
             pmp: init.pmp,
-            last_pc: 0,
-            same_pc_count: 0,
             wfi_waiting: false,
             wfi_pc: 0,
             committed_next_pc: 0,
-            pc_trace: Vec::with_capacity(super::cpu::PC_TRACE_MAX),
-            last_invalid_pc_debug: None,
-            panic_detected_at_cycle: None,
             sw_seip: false,
         }
     }

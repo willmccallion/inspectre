@@ -60,15 +60,14 @@ fn test_last_pc_updates() {
 #[test]
 fn test_same_pc_counter() {
     let mut sim = create_test_sim();
-    let initial_count = sim.cpu.hart.same_pc_count;
-    sim.cpu.hart.same_pc_count = 0;
+    let idx = sim.cpu.hart.hart_id.as_index();
+    let initial_count = sim.cpu.per_hart_debug[idx].same_pc_count;
+    sim.cpu.per_hart_debug[idx].same_pc_count = 0;
 
-    // After execution, counter might increment if PC doesn't change
     sim.tick().unwrap();
 
-    // Counter should be valid (either stayed same or changed)
-    let _ = sim.cpu.hart.same_pc_count;
-    assert!(sim.cpu.hart.same_pc_count != initial_count || sim.cpu.hart.same_pc_count == 0);
+    let count = sim.cpu.per_hart_debug[idx].same_pc_count;
+    assert!(count != initial_count || count == 0);
 }
 
 #[test]

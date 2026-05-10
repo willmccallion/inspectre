@@ -25,16 +25,19 @@ impl Cpu {
             return Ok(true);
         }
 
+        let hart_idx = self.hart.hart_id.as_index();
         if self.soc.check_kernel_panic() {
-            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.soc.cycle);
+            let detected_at =
+                *self.per_hart_debug[hart_idx].panic_detected_at_cycle.get_or_insert(self.soc.cycle);
             if self.soc.cycle.saturating_sub(detected_at) >= 10_000 {
                 return Err(SimError::KernelPanic { cycle: detected_at });
             }
         }
 
-        if self.hart.pc == self.hart.last_pc {
-            self.hart.same_pc_count += 1;
-            if self.hart.same_pc_count == HANG_DETECTION_THRESHOLD {
+        let debug = &mut self.per_hart_debug[hart_idx];
+        if self.hart.pc == debug.last_pc {
+            debug.same_pc_count += 1;
+            if debug.same_pc_count == HANG_DETECTION_THRESHOLD {
                 let asid = Asid::new(
                     ((self.hart.csrs.satp >> csr::SATP_ASID_SHIFT) & csr::SATP_ASID_MASK) as u16,
                 );
@@ -70,8 +73,8 @@ impl Cpu {
                 }
             }
         } else {
-            self.hart.last_pc = self.hart.pc;
-            self.hart.same_pc_count = 0;
+            debug.last_pc = self.hart.pc;
+            debug.same_pc_count = 0;
         }
 
         let irqs = self.soc.tick();

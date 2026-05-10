@@ -6,4 +6,5 @@
 
 pub mod dtb;
 pub mod loader;
+pub mod per_hart_debug;
 pub mod simulator;
