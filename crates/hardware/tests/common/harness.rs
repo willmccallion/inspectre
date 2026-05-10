@@ -69,18 +69,18 @@ impl TestContext {
             let offset = addr + (i as u64) * 4;
             self.sim.cpu.soc.bus.write_u32(PhysAddr::new(offset), *inst);
         }
-        self.sim.cpu.pc = addr;
+        self.sim.cpu.hart.pc = addr;
         self
     }
 
     /// Set a general-purpose register value.
     pub fn set_reg(&mut self, reg: usize, val: u64) {
-        self.sim.cpu.regs.write(RegIdx::new(reg as u8), val);
+        self.sim.cpu.hart.regs.write(RegIdx::new(reg as u8), val);
     }
 
     /// Read a general-purpose register value.
     pub fn get_reg(&self, reg: usize) -> u64 {
-        self.sim.cpu.regs.read(RegIdx::new(reg as u8))
+        self.sim.cpu.hart.regs.read(RegIdx::new(reg as u8))
     }
 
     /// Run the CPU for a specific number of cycles.

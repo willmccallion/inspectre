@@ -212,20 +212,20 @@ impl O3Engine {
         use crate::core::pipeline::prf::PhysReg;
         use crate::core::units::vpu::types::VRegIdx;
         for i in 1u8..32 {
-            let val = cpu.regs.read(RegIdx::new(i));
+            let val = cpu.hart.regs.read(RegIdx::new(i));
             if val != 0 {
                 self.prf.write(PhysReg(i as u16), val);
             }
         }
         for i in 0u8..32 {
-            let val = cpu.regs.read_f(RegIdx::new(i));
+            let val = cpu.hart.regs.read_f(RegIdx::new(i));
             if val != 0 {
                 self.prf.write(PhysReg((32 + i) as u16), val);
             }
         }
         for i in 0u8..32 {
             let vreg = VRegIdx::new(i);
-            let bytes = cpu.regs.vpr().read_bytes(vreg);
+            let bytes = cpu.hart.regs.vpr().read_bytes(vreg);
             self.vec_prf.write_bytes(VecPhysReg::new(i as u16), bytes);
         }
     }
@@ -297,7 +297,7 @@ impl ExecutionEngine for O3Engine {
             cpu.stats.stalls_squash += 1;
         }
 
-        let pc_before_commit = cpu.pc;
+        let pc_before_commit = cpu.hart.pc;
 
         let trap_event = commit::commit_stage(
             cpu,
@@ -322,11 +322,11 @@ impl ExecutionEngine for O3Engine {
             self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
             cpu.redirect_pending = true;
             cpu.trap(&trap, pc);
-            cpu.committed_next_pc = cpu.pc;
+            cpu.hart.committed_next_pc = cpu.hart.pc;
             return;
         }
 
-        if cpu.pc != pc_before_commit {
+        if cpu.hart.pc != pc_before_commit {
             let squashed = self.rob.len();
             self.flush(cpu);
             self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
@@ -448,7 +448,7 @@ impl ExecutionEngine for O3Engine {
         }
 
         if let Some((violating_tag, store_pc)) = mem_violation {
-            let violation_pc = self.rob.find_entry(violating_tag).map_or(cpu.pc, |e| e.pc);
+            let violation_pc = self.rob.find_entry(violating_tag).map_or(cpu.hart.pc, |e| e.pc);
 
             self.mdp.violation(violation_pc, store_pc);
 
@@ -527,7 +527,7 @@ impl ExecutionEngine for O3Engine {
                 self.checkpoints.flush_all();
             }
 
-            cpu.pc = violation_pc;
+            cpu.hart.pc = violation_pc;
             cpu.redirect_pending = true;
             rename_output.clear();
             return;
@@ -1203,11 +1203,11 @@ impl ExecutionEngine for O3Engine {
             if self.checkpoints.capacity() > 0 {
                 if let Some(ckpt) = self.checkpoints.find_by_tag(keep_tag) {
                     self.rename_map = ckpt.rename_map.clone();
-                    cpu.csrs.vtype = ckpt.vtype;
-                    cpu.csrs.vl = ckpt.vl;
-                    cpu.csrs.frm = ckpt.frm;
-                    cpu.csrs.vxrm = ckpt.vxrm;
-                    cpu.csrs.vstart = ckpt.vstart;
+                    cpu.hart.csrs.vtype = ckpt.vtype;
+                    cpu.hart.csrs.vl = ckpt.vl;
+                    cpu.hart.csrs.frm = ckpt.frm;
+                    cpu.hart.csrs.vxrm = ckpt.vxrm;
+                    cpu.hart.csrs.vstart = ckpt.vstart;
                     self.squash_stall_remaining = self.compute_squash_stall(squashed, 0);
                 } else {
                     self.rebuild_rename_map();
@@ -1424,7 +1424,7 @@ mod tests {
         let mut cpu = Cpu::new(soc, &config);
         let mut engine = O3Engine::new(&config);
 
-        cpu.regs.write(RegIdx::new(1), 42);
+        cpu.hart.regs.write(RegIdx::new(1), 42);
         engine.sync_arch_regs(&cpu);
 
         assert_eq!(engine.prf.read(crate::core::pipeline::prf::PhysReg(1)), 42);

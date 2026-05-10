@@ -62,7 +62,7 @@ impl Simulator {
     ///
     /// Returns [`SimError::KernelPanic`] if the guest OS panic sentinel fires.
     pub fn tick(&mut self) -> Result<(), SimError> {
-        let prev_priv = self.cpu.privilege;
+        let prev_priv = self.cpu.hart.privilege;
         let skip = self.cpu.pre_tick()?;
         if !skip {
             self.pipeline.tick(&mut self.cpu);

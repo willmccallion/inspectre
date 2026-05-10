@@ -59,35 +59,35 @@ pub fn commit_stage(
 
     // Always check, even with empty ROB (timer firing during a stall).
     {
-        let epc = if cpu.wfi_waiting {
-            cpu.wfi_pc
+        let epc = if cpu.hart.wfi_waiting {
+            cpu.hart.wfi_pc
         } else if let Some(head) = rob.peek_head() {
             head.pc
         } else {
-            cpu.committed_next_pc
+            cpu.hart.committed_next_pc
         };
 
         let interrupt = check_interrupts(cpu);
         if let Some(interrupt_trap) = interrupt {
-            cpu.wfi_waiting = false;
+            cpu.hart.wfi_waiting = false;
             trace_trap!(cpu.trace;
                 event      = "interrupt",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?interrupt_trap,
-                mip        = %crate::trace::Hex(cpu.csrs.mip),
-                mie        = %crate::trace::Hex(cpu.csrs.mie),
-                mstatus    = %crate::trace::Hex(cpu.csrs.mstatus),
-                priv_mode  = ?cpu.privilege,
+                mip        = %crate::trace::Hex(cpu.hart.csrs.mip),
+                mie        = %crate::trace::Hex(cpu.hart.csrs.mie),
+                mstatus    = %crate::trace::Hex(cpu.hart.csrs.mstatus),
+                priv_mode  = ?cpu.hart.privilege,
                 "CM: interrupt detected — flushing pipeline"
             );
             trap_event = Some((interrupt_trap, epc));
-        } else if cpu.wfi_waiting {
+        } else if cpu.hart.wfi_waiting {
             // Block commit while WFI is active so wrong-path post-WFI ops can't retire.
-            let pending = cpu.csrs.mip;
-            let enabled = cpu.csrs.mie;
+            let pending = cpu.hart.csrs.mip;
+            let enabled = cpu.hart.csrs.mie;
             if (pending & enabled) != 0 {
-                cpu.wfi_waiting = false;
-                cpu.pc = cpu.wfi_pc;
+                cpu.hart.wfi_waiting = false;
+                cpu.hart.pc = cpu.hart.wfi_pc;
                 cpu.redirect_pending = true;
             } else {
                 cpu.stats.cycles_wfi += 1;
@@ -145,8 +145,8 @@ pub fn commit_stage(
                     pc        = %crate::trace::Hex(entry.pc),
                     rob_tag   = entry.tag.0,
                     cause     = ?the_trap,
-                    priv_mode = ?cpu.privilege,
-                    mstatus   = %crate::trace::Hex(cpu.csrs.mstatus),
+                    priv_mode = ?cpu.hart.privilege,
+                    mstatus   = %crate::trace::Hex(cpu.hart.csrs.mstatus),
                     "CM: synchronous exception at commit"
                 );
                 // Faulting entry was popped before the post-trap flush, so reclaim its phys_dst here.
@@ -184,7 +184,7 @@ pub fn commit_stage(
         retired_count += 1;
 
         // For taken branches/jumps, committed_next_pc must be the target so interrupt EPC is correct.
-        cpu.committed_next_pc = match entry.ctrl.control_flow {
+        cpu.hart.committed_next_pc = match entry.ctrl.control_flow {
             ControlFlow::Jump => {
                 entry.bp_target.unwrap_or_else(|| entry.pc.wrapping_add(entry.inst_size.as_u64()))
             }
@@ -221,9 +221,9 @@ pub fn commit_stage(
             }
         };
 
-        cpu.pc_trace.push((entry.pc, entry.inst));
-        if cpu.pc_trace.len() > PC_TRACE_MAX {
-            let _ = cpu.pc_trace.remove(0);
+        cpu.hart.pc_trace.push((entry.pc, entry.inst));
+        if cpu.hart.pc_trace.len() > PC_TRACE_MAX {
+            let _ = cpu.hart.pc_trace.remove(0);
         }
 
         if entry.inst != 0 && entry.inst != 0x13 {
@@ -262,14 +262,14 @@ pub fn commit_stage(
         );
         let val = entry.result.unwrap_or(0);
         if entry.ctrl.fp_reg_write {
-            cpu.regs.write_f(entry.rd, val);
+            cpu.hart.regs.write_f(entry.rd, val);
             scoreboard.clear_if_match(entry.rd, true, entry.tag);
             if entry.old_phys_dst.0 != entry.phys_dst.0 {
                 free_list.reclaim(entry.old_phys_dst);
             }
             committed_rename_map.set(entry.rd, true, entry.phys_dst);
-            cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
-            cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
+            cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
+            cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
             trace_commit!(cpu.trace;
                 pc       = %crate::trace::Hex(entry.pc),
                 rob_tag  = entry.tag.0,
@@ -281,7 +281,7 @@ pub fn commit_stage(
                 "CM: FP register write"
             );
         } else if entry.ctrl.reg_write && !entry.rd.is_zero() {
-            cpu.regs.write(entry.rd, val);
+            cpu.hart.regs.write(entry.rd, val);
             scoreboard.clear_if_match(entry.rd, false, entry.tag);
             if entry.old_phys_dst.0 != entry.phys_dst.0 {
                 free_list.reclaim(entry.old_phys_dst);
@@ -305,7 +305,7 @@ pub fn commit_stage(
                 let vreg = VRegIdx::new(vd_base + i as u8);
                 if let Some(ref mut vprf) = vec_prf {
                     let bytes = vprf.read_bytes(entry.vec_phys_dst[i]);
-                    cpu.regs.vpr_mut().write_bytes(vreg, bytes);
+                    cpu.hart.regs.vpr_mut().write_bytes(vreg, bytes);
                 }
                 if let Some(ref mut vfl) = vec_free_list
                     && entry.vec_old_phys_dst[i] != entry.vec_phys_dst[i]
@@ -315,9 +315,9 @@ pub fn commit_stage(
                 committed_rename_map.set_vec(vreg, entry.vec_phys_dst[i]);
                 scoreboard.clear_vec_if_match(vreg, entry.tag);
             }
-            cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
-            cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
-            cpu.csrs.vstart = 0;
+            cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
+            cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !csr::MSTATUS_VS) | csr::MSTATUS_VS_DIRTY;
+            cpu.hart.csrs.vstart = 0;
         }
 
         #[cfg(feature = "commit-log")]
@@ -338,13 +338,13 @@ pub fn commit_stage(
 
         // Apply fp_flags before CSR writes to keep execute-time CSR reads of fflags consistent.
         if entry.fp_flags != 0 {
-            cpu.csrs.fflags |= entry.fp_flags as u64;
-            cpu.csrs.mstatus = (cpu.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
-            cpu.csrs.sstatus = (cpu.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
+            cpu.hart.csrs.fflags |= entry.fp_flags as u64;
+            cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
+            cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !csr::MSTATUS_FS) | csr::MSTATUS_FS_DIRTY;
         }
 
         if entry.vxsat {
-            cpu.csrs.vxsat = 1;
+            cpu.hart.csrs.vxsat = 1;
         }
 
         if let Some(csr_update) = entry.csr_update {
@@ -366,9 +366,9 @@ pub fn commit_stage(
                 deferred = !csr_update.applied,
                 "CM: CSR write applied at commit"
             );
-            // SATP redirect: post-execute fetches used old tables; reset cpu.pc to next inst.
+            // SATP redirect: post-execute fetches used old tables; reset cpu.hart.pc to next inst.
             if csr_update.addr == csr::SATP {
-                cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+                cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
                 cpu.redirect_pending = true;
             }
             break;
@@ -376,45 +376,45 @@ pub fn commit_stage(
 
         if entry.ctrl.system_op == SystemOp::Mret {
             cpu.do_mret();
-            cpu.committed_next_pc = cpu.pc;
+            cpu.hart.committed_next_pc = cpu.hart.pc;
             trace_trap!(cpu.trace;
                 event      = "return",
                 insn       = "MRET",
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.tag.0,
-                return_pc  = %crate::trace::Hex(cpu.pc),
-                mstatus    = %crate::trace::Hex(cpu.csrs.mstatus),
-                priv_mode  = ?cpu.privilege,
+                return_pc  = %crate::trace::Hex(cpu.hart.pc),
+                mstatus    = %crate::trace::Hex(cpu.hart.csrs.mstatus),
+                priv_mode  = ?cpu.hart.privilege,
                 "CM: MRET committed — privilege restored"
             );
             break;
         }
         if entry.ctrl.system_op == SystemOp::Sret {
             cpu.do_sret();
-            cpu.committed_next_pc = cpu.pc;
+            cpu.hart.committed_next_pc = cpu.hart.pc;
             trace_trap!(cpu.trace;
                 event      = "return",
                 insn       = "SRET",
                 pc         = %crate::trace::Hex(entry.pc),
                 rob_tag    = entry.tag.0,
-                return_pc  = %crate::trace::Hex(cpu.pc),
-                mstatus    = %crate::trace::Hex(cpu.csrs.mstatus),
-                priv_mode  = ?cpu.privilege,
+                return_pc  = %crate::trace::Hex(cpu.hart.pc),
+                mstatus    = %crate::trace::Hex(cpu.hart.csrs.mstatus),
+                priv_mode  = ?cpu.hart.privilege,
                 "CM: SRET committed — privilege restored"
             );
             break;
         }
 
         if entry.ctrl.system_op == SystemOp::Wfi {
-            if cpu.csrs.mie != 0 || cpu.csrs.mip != 0 {
-                cpu.wfi_waiting = true;
-                cpu.wfi_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+            if cpu.hart.csrs.mie != 0 || cpu.hart.csrs.mip != 0 {
+                cpu.hart.wfi_waiting = true;
+                cpu.hart.wfi_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             } else {
                 // Nothing enabled or pending — treat as NOP to avoid OpenSBI early-boot deadlock.
-                cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+                cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
                 cpu.redirect_pending = true;
             }
-            cpu.committed_next_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+            cpu.hart.committed_next_pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             break;
         }
 
@@ -431,13 +431,13 @@ pub fn commit_stage(
                         // SC failure: undo Memory2's optimistic success (rd=0) and re-fetch.
                         store_buffer.cancel(entry.tag);
                         if entry.ctrl.reg_write && !entry.rd.is_zero() {
-                            cpu.regs.write(entry.rd, 1);
+                            cpu.hart.regs.write(entry.rd, 1);
                             // Patch PRF too so post-flush rename sees rd=1, not optimistic 0.
                             if let Some(ref mut prf) = prf {
                                 prf.write(entry.phys_dst, 1);
                             }
                         }
-                        cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+                        cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
                         cpu.redirect_pending = true;
                         break;
                     }
@@ -483,7 +483,7 @@ pub fn commit_stage(
             drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
             // I-cache flush after drain so refills see new data; force a fresh redirect.
             let _ = cpu.l1_i_cache.invalidate_all();
-            cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+            cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             cpu.redirect_pending = true;
             // FENCE.I serializes: break so younger insts fetched pre-drain don't retire here.
             break;
@@ -501,7 +501,7 @@ pub fn commit_stage(
         if let Some(info) = entry.sfence_vma {
             sfence_vma_commit(cpu, &info);
             cpu.clear_reservation();
-            cpu.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
+            cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
             cpu.redirect_pending = true;
             break;
         }
@@ -521,7 +521,7 @@ pub fn commit_stage(
             }
         }
 
-        cpu.regs.write(RegIdx::new(0), 0);
+        cpu.hart.regs.write(RegIdx::new(0), 0);
     }
 
     if retired_count == 0 && rob_empty_at_start {
@@ -626,22 +626,22 @@ fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> 
 
     let (effective_op, access) = match op {
         SystemOp::CboZero => {
-            if !cboz_allowed(cpu.csrs.menvcfg, cpu.csrs.senvcfg, cpu.privilege) {
+            if !cboz_allowed(cpu.hart.csrs.menvcfg, cpu.hart.csrs.senvcfg, cpu.hart.privilege) {
                 return Some(Trap::IllegalInstruction(inst));
             }
             (SystemOp::CboZero, AccessType::Write)
         }
         SystemOp::CboInval => match cbo_inval_action(
-            cpu.csrs.menvcfg,
-            cpu.csrs.senvcfg,
-            cpu.privilege,
+            cpu.hart.csrs.menvcfg,
+            cpu.hart.csrs.senvcfg,
+            cpu.hart.privilege,
         ) {
             CboInvalAction::Illegal => return Some(Trap::IllegalInstruction(inst)),
             CboInvalAction::Flush => (SystemOp::CboFlush, AccessType::Read),
             CboInvalAction::Invalidate => (SystemOp::CboInval, AccessType::Write),
         },
         SystemOp::CboClean | SystemOp::CboFlush => {
-            if !cbocf_allowed(cpu.csrs.menvcfg, cpu.csrs.senvcfg, cpu.privilege) {
+            if !cbocf_allowed(cpu.hart.csrs.menvcfg, cpu.hart.csrs.senvcfg, cpu.hart.privilege) {
                 return Some(Trap::IllegalInstruction(inst));
             }
             (op, AccessType::Read)
@@ -727,9 +727,9 @@ fn write_store_to_memory(
 
 /// Checks for pending interrupts. Returns the trap if one should be taken.
 fn check_interrupts(cpu: &Cpu) -> Option<Trap> {
-    let mip = cpu.csrs.mip;
-    let mie = cpu.csrs.mie;
-    let mstatus = cpu.csrs.mstatus;
+    let mip = cpu.hart.csrs.mip;
+    let mie = cpu.hart.csrs.mie;
+    let mstatus = cpu.hart.csrs.mstatus;
 
     let m_global_ie = (mstatus & csr::MSTATUS_MIE) != 0;
     let s_global_ie = (mstatus & csr::MSTATUS_SIE) != 0;
@@ -741,14 +741,14 @@ fn check_interrupts(cpu: &Cpu) -> Option<Trap> {
             return None;
         }
 
-        let delegated = (cpu.csrs.mideleg & deleg_bit) != 0;
+        let delegated = (cpu.hart.csrs.mideleg & deleg_bit) != 0;
         let target_priv =
             if delegated { PrivilegeMode::Supervisor } else { PrivilegeMode::Machine };
 
-        if cpu.privilege.to_u8() < target_priv.to_u8() {
+        if cpu.hart.privilege.to_u8() < target_priv.to_u8() {
             return Some(TrapHandler::irq_to_trap(bit));
         }
-        if cpu.privilege == target_priv {
+        if cpu.hart.privilege == target_priv {
             if target_priv == PrivilegeMode::Machine && m_global_ie {
                 return Some(TrapHandler::irq_to_trap(bit));
             }
@@ -1071,30 +1071,30 @@ const fn update_vec_instruction_stats(cpu: &mut Cpu, op: VectorOp) {
 fn sfence_vma_commit(cpu: &mut Cpu, info: &SfenceVmaInfo) {
     match (!info.rs1_idx.is_zero(), !info.rs2_idx.is_zero()) {
         (false, false) => {
-            cpu.mmu.dtlb.flush();
-            cpu.mmu.itlb.flush();
-            cpu.mmu.l2_tlb.flush();
+            cpu.hart.mmu.dtlb.flush();
+            cpu.hart.mmu.itlb.flush();
+            cpu.hart.mmu.l2_tlb.flush();
             let _ = cpu.l1_d_cache.flush();
             let _ = cpu.l1_i_cache.invalidate_all();
         }
         (true, false) => {
             let vpn = Vpn::new((info.rs1_val >> PAGE_SHIFT) & VPN_MASK);
-            cpu.mmu.dtlb.flush_vaddr(vpn);
-            cpu.mmu.itlb.flush_vaddr(vpn);
-            cpu.mmu.l2_tlb.flush_vaddr(vpn);
+            cpu.hart.mmu.dtlb.flush_vaddr(vpn);
+            cpu.hart.mmu.itlb.flush_vaddr(vpn);
+            cpu.hart.mmu.l2_tlb.flush_vaddr(vpn);
         }
         (false, true) => {
             let asid = Asid::new(info.rs2_val as u16);
-            cpu.mmu.dtlb.flush_asid(asid);
-            cpu.mmu.itlb.flush_asid(asid);
-            cpu.mmu.l2_tlb.flush_asid(asid);
+            cpu.hart.mmu.dtlb.flush_asid(asid);
+            cpu.hart.mmu.itlb.flush_asid(asid);
+            cpu.hart.mmu.l2_tlb.flush_asid(asid);
         }
         (true, true) => {
             let vpn = Vpn::new((info.rs1_val >> PAGE_SHIFT) & VPN_MASK);
             let asid = Asid::new(info.rs2_val as u16);
-            cpu.mmu.dtlb.flush_vaddr_asid(vpn, asid);
-            cpu.mmu.itlb.flush_vaddr_asid(vpn, asid);
-            cpu.mmu.l2_tlb.flush_vaddr_asid(vpn, asid);
+            cpu.hart.mmu.dtlb.flush_vaddr_asid(vpn, asid);
+            cpu.hart.mmu.itlb.flush_vaddr_asid(vpn, asid);
+            cpu.hart.mmu.l2_tlb.flush_vaddr_asid(vpn, asid);
         }
     }
 }
@@ -1123,10 +1123,10 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.mip = csr::MIP_MEIP;
-        cpu.csrs.mie = csr::MIE_MEIP;
-        cpu.csrs.mstatus |= csr::MSTATUS_MIE;
-        cpu.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mip = csr::MIP_MEIP;
+        cpu.hart.csrs.mie = csr::MIE_MEIP;
+        cpu.hart.csrs.mstatus |= csr::MSTATUS_MIE;
+        cpu.hart.privilege = PrivilegeMode::Machine;
 
         assert_eq!(check_interrupts(&cpu), Some(Trap::MachineExternalInterrupt));
     }
@@ -1137,11 +1137,11 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.mip = csr::MIP_SEIP;
-        cpu.csrs.mie = csr::MIE_SEIP;
-        cpu.csrs.mstatus |= csr::MSTATUS_SIE;
-        cpu.csrs.mideleg |= 1 << DELEG_SEIP_BIT;
-        cpu.privilege = PrivilegeMode::Supervisor;
+        cpu.hart.csrs.mip = csr::MIP_SEIP;
+        cpu.hart.csrs.mie = csr::MIE_SEIP;
+        cpu.hart.csrs.mstatus |= csr::MSTATUS_SIE;
+        cpu.hart.csrs.mideleg |= 1 << DELEG_SEIP_BIT;
+        cpu.hart.privilege = PrivilegeMode::Supervisor;
 
         assert_eq!(check_interrupts(&cpu), Some(Trap::SupervisorExternalInterrupt));
     }
@@ -1193,6 +1193,6 @@ mod tests {
             None,
         );
         assert!(trap.is_none());
-        assert_eq!(cpu.regs.read(RegIdx::new(1)), 42);
+        assert_eq!(cpu.hart.regs.read(RegIdx::new(1)), 42);
     }
 }

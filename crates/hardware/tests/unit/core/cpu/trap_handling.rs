@@ -19,11 +19,11 @@ fn create_test_cpu() -> Cpu {
 #[test]
 fn test_trap_clears_load_reservation() {
     let mut cpu = create_test_cpu();
-    cpu.load_reservation = Some(PhysAddr::new(0x8000_0000));
+    cpu.hart.load_reservation = Some(PhysAddr::new(0x8000_0000));
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
-    assert_eq!(cpu.load_reservation, None);
+    assert_eq!(cpu.hart.load_reservation, None);
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn test_trap_direct_mode_illegal_instruction_zero_exits() {
     cpu.direct_mode = true;
     cpu.exit_code = None;
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     assert_eq!(cpu.exit_code, Some(0));
 }
@@ -43,7 +43,7 @@ fn test_trap_direct_mode_other_exceptions_set_exit_code_1() {
     cpu.direct_mode = true;
     cpu.exit_code = None;
 
-    cpu.trap(&Trap::LoadAddressMisaligned(0x8000_0001), cpu.pc);
+    cpu.trap(&Trap::LoadAddressMisaligned(0x8000_0001), cpu.hart.pc);
 
     assert_eq!(cpu.exit_code, Some(1));
 }
@@ -52,12 +52,12 @@ fn test_trap_direct_mode_other_exceptions_set_exit_code_1() {
 fn test_trap_direct_mode_ecall_from_umode_processed() {
     let mut cpu = create_test_cpu();
     cpu.direct_mode = true;
-    cpu.privilege = PrivilegeMode::User;
+    cpu.hart.privilege = PrivilegeMode::User;
     cpu.exit_code = None;
-    cpu.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
 
     // ECALL in direct mode should be processed normally (not treated as fatal)
-    cpu.trap(&Trap::EnvironmentCallFromUMode, cpu.pc);
+    cpu.trap(&Trap::EnvironmentCallFromUMode, cpu.hart.pc);
 
     // Exit code should remain None (trap is processed, not fatal)
 }
@@ -65,12 +65,12 @@ fn test_trap_direct_mode_ecall_from_umode_processed() {
 #[test]
 fn test_trap_sets_mcause_without_interrupt_bit_for_exceptions() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
-    let mcause = cpu.csrs.mcause;
+    let mcause = cpu.hart.csrs.mcause;
     // Exceptions should not have interrupt bit set (bit 63)
     assert_eq!(mcause & (1u64 << 63), 0);
 }
@@ -93,13 +93,13 @@ fn test_trap_exceptions_dont_set_interrupt_bit() {
 
     for exception in exceptions {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
 
-        cpu.trap(&exception, cpu.pc);
+        cpu.trap(&exception, cpu.hart.pc);
 
         // Exceptions should not have interrupt bit set
-        assert_eq!(cpu.csrs.mcause & (1u64 << 63), 0);
+        assert_eq!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
     }
 }
 
@@ -113,13 +113,13 @@ fn test_trap_ecall_from_all_modes() {
 
     for ecall in ecalls {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
 
-        cpu.trap(&ecall, cpu.pc);
+        cpu.trap(&ecall, cpu.hart.pc);
 
         // Should not have interrupt bit set (ECALL is an exception, not interrupt)
-        assert_eq!(cpu.csrs.mcause & (1u64 << 63), 0);
+        assert_eq!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
     }
 }
 
@@ -133,27 +133,27 @@ fn test_trap_page_faults() {
 
     for fault_trap in page_faults {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
 
-        cpu.trap(&fault_trap, cpu.pc);
+        cpu.trap(&fault_trap, cpu.hart.pc);
 
         // Should not have interrupt bit set (page faults are exceptions)
-        assert_eq!(cpu.csrs.mcause & (1u64 << 63), 0);
+        assert_eq!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
     }
 }
 
 #[test]
 fn test_trap_double_fault_detection() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
+    cpu.hart.privilege = PrivilegeMode::Machine;
     let handler_pc = 0x8000_0000;
-    cpu.csrs.mtvec = handler_pc;
+    cpu.hart.csrs.mtvec = handler_pc;
 
     // A trap whose EPC equals the handler address is legitimate (not a double fault).
     cpu.trap(&Trap::IllegalInstruction(0), handler_pc);
     assert_eq!(cpu.exit_code, None);
-    assert_eq!(cpu.pc, handler_pc); // dispatched to M-mode handler
+    assert_eq!(cpu.hart.pc, handler_pc); // dispatched to M-mode handler
 }
 
 #[test]
@@ -171,106 +171,106 @@ fn test_trap_interrupts_set_interrupt_bit() {
 
     for interrupt in interrupts {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
-        cpu.pc = 0x8000_1000; // Different from trap handler
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
+        cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-        cpu.trap(&interrupt, cpu.pc);
+        cpu.trap(&interrupt, cpu.hart.pc);
 
         // Interrupts should have interrupt bit set (bit 63)
-        assert_ne!(cpu.csrs.mcause & (1u64 << 63), 0);
+        assert_ne!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
     }
 }
 
 #[test]
 fn test_trap_machine_timer_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::MachineTimerInterrupt, cpu.pc);
+    cpu.trap(&Trap::MachineTimerInterrupt, cpu.hart.pc);
 
     // Should have interrupt bit set
-    assert_ne!(cpu.csrs.mcause & (1u64 << 63), 0);
+    assert_ne!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
 }
 
 #[test]
 fn test_trap_supervisor_timer_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.mideleg = 1 << 5; // Delegate supervisor timer interrupts
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.mideleg = 1 << 5; // Delegate supervisor timer interrupts
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::SupervisorTimerInterrupt, cpu.pc);
+    cpu.trap(&Trap::SupervisorTimerInterrupt, cpu.hart.pc);
 
     // Should have delegated to S-mode
-    assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
 }
 
 #[test]
 fn test_trap_machine_software_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::MachineSoftwareInterrupt, cpu.pc);
+    cpu.trap(&Trap::MachineSoftwareInterrupt, cpu.hart.pc);
 
     // Should have interrupt bit set
-    assert_ne!(cpu.csrs.mcause & (1u64 << 63), 0);
+    assert_ne!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
 }
 
 #[test]
 fn test_trap_supervisor_software_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.mideleg = 1 << 1; // Delegate supervisor software interrupts
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.mideleg = 1 << 1; // Delegate supervisor software interrupts
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::SupervisorSoftwareInterrupt, cpu.pc);
+    cpu.trap(&Trap::SupervisorSoftwareInterrupt, cpu.hart.pc);
 
-    assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
 }
 
 #[test]
 fn test_trap_machine_external_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::MachineExternalInterrupt, cpu.pc);
+    cpu.trap(&Trap::MachineExternalInterrupt, cpu.hart.pc);
 
     // Should have interrupt bit set
-    assert_ne!(cpu.csrs.mcause & (1u64 << 63), 0);
+    assert_ne!(cpu.hart.csrs.mcause & (1u64 << 63), 0);
 }
 
 #[test]
 fn test_trap_supervisor_external_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.mideleg = 1 << 9; // Delegate supervisor external interrupts
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.mideleg = 1 << 9; // Delegate supervisor external interrupts
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::SupervisorExternalInterrupt, cpu.pc);
+    cpu.trap(&Trap::SupervisorExternalInterrupt, cpu.hart.pc);
 
-    assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
 }
 
 #[test]
 fn test_trap_user_software_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_0000;
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_0000;
 
-    cpu.trap(&Trap::UserSoftwareInterrupt, cpu.pc);
+    cpu.trap(&Trap::UserSoftwareInterrupt, cpu.hart.pc);
 
     // User mode traps typically get handled at higher privilege
 }
@@ -278,10 +278,10 @@ fn test_trap_user_software_interrupt() {
 #[test]
 fn test_trap_user_external_interrupt() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_0000;
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_0000;
 
-    cpu.trap(&Trap::UserExternalInterrupt, cpu.pc);
+    cpu.trap(&Trap::UserExternalInterrupt, cpu.hart.pc);
 
     // User mode external interrupt handling
 }
@@ -289,283 +289,283 @@ fn test_trap_user_external_interrupt() {
 #[test]
 fn test_trap_delegation_to_supervisor_with_medeleg() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
     // Delegate instruction page faults (exception code 12) to S-mode
-    cpu.csrs.medeleg = 1 << 12;
+    cpu.hart.csrs.medeleg = 1 << 12;
 
-    let old_pc = cpu.pc;
+    let old_pc = cpu.hart.pc;
     cpu.trap(&Trap::InstructionPageFault(0x1000), old_pc);
 
     // Should have delegated to S-mode
-    assert_eq!(cpu.csrs.scause & !CAUSE_INTERRUPT_BIT, 12);
-    assert_eq!(cpu.csrs.sepc, old_pc);
+    assert_eq!(cpu.hart.csrs.scause & !CAUSE_INTERRUPT_BIT, 12);
+    assert_eq!(cpu.hart.csrs.sepc, old_pc);
 }
 
 #[test]
 fn test_trap_delegation_to_supervisor_with_mideleg() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
     // Delegate supervisor software interrupts (interrupt code 1) to S-mode
-    cpu.csrs.mideleg = 1 << 1;
+    cpu.hart.csrs.mideleg = 1 << 1;
 
-    cpu.trap(&Trap::SupervisorSoftwareInterrupt, cpu.pc);
+    cpu.trap(&Trap::SupervisorSoftwareInterrupt, cpu.hart.pc);
 
     // Should have delegated to S-mode
-    assert_ne!(cpu.csrs.scause & CAUSE_INTERRUPT_BIT, 0);
+    assert_ne!(cpu.hart.csrs.scause & CAUSE_INTERRUPT_BIT, 0);
 }
 
 #[test]
 fn test_trap_no_delegation_when_medeleg_not_set() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0; // STVEC not set
-    cpu.csrs.medeleg = 0; // No delegation
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0; // STVEC not set
+    cpu.hart.csrs.medeleg = 0; // No delegation
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // Should NOT have delegated to S-mode, stays in M-mode
-    assert_eq!(cpu.privilege, PrivilegeMode::Machine);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Machine);
 }
 
 #[test]
 fn test_trap_delegation_only_from_lower_privilege() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000;
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000;
     // Enable delegation
-    cpu.csrs.medeleg = 1 << 2; // Delegate illegal instruction
+    cpu.hart.csrs.medeleg = 1 << 2; // Delegate illegal instruction
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // Machine mode traps should NOT delegate even with medeleg set
-    assert_eq!(cpu.privilege, PrivilegeMode::Machine);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Machine);
 }
 
 #[test]
 fn test_trap_user_mode_no_delegation_without_medeleg() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.csrs.stvec = 0x8000_1000; // STVEC is set but irrelevant
-    cpu.csrs.medeleg = 0; // No delegation in medeleg
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.csrs.stvec = 0x8000_1000; // STVEC is set but irrelevant
+    cpu.hart.csrs.medeleg = 0; // No delegation in medeleg
 
     // Without medeleg bit set, trap must go to M-mode per spec
-    cpu.trap(&Trap::LoadAddressMisaligned(0x1001), cpu.pc);
+    cpu.trap(&Trap::LoadAddressMisaligned(0x1001), cpu.hart.pc);
 
-    assert_eq!(cpu.privilege, PrivilegeMode::Machine);
-    assert_eq!(cpu.pc, 0x8000_0000);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Machine);
+    assert_eq!(cpu.hart.pc, 0x8000_0000);
 }
 
 #[test]
 fn test_trap_vectored_mode_direct_for_exceptions() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
+    cpu.hart.privilege = PrivilegeMode::Machine;
     let base = 0x8000_0000;
-    cpu.csrs.mtvec = base | 1; // Vectored mode (bit 0 = 1)
+    cpu.hart.csrs.mtvec = base | 1; // Vectored mode (bit 0 = 1)
 
-    let old_pc = cpu.pc;
+    let old_pc = cpu.hart.pc;
     cpu.trap(&Trap::IllegalInstruction(0), old_pc);
 
     // Exceptions should use base address (no offset)
-    assert_eq!(cpu.pc, base);
+    assert_eq!(cpu.hart.pc, base);
 }
 
 #[test]
 fn test_trap_vectored_mode_offset_for_interrupts() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
+    cpu.hart.privilege = PrivilegeMode::Machine;
     let base = 0x8000_0000;
-    cpu.csrs.mtvec = base | 1; // Vectored mode
+    cpu.hart.csrs.mtvec = base | 1; // Vectored mode
 
-    cpu.trap(&Trap::MachineTimerInterrupt, cpu.pc);
+    cpu.trap(&Trap::MachineTimerInterrupt, cpu.hart.pc);
 
     // Machine timer interrupt (code 7) should offset by 4*7 = 28
-    assert_eq!(cpu.pc, base + 28);
+    assert_eq!(cpu.hart.pc, base + 28);
 }
 
 #[test]
 fn test_trap_direct_mode_no_offset() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
+    cpu.hart.privilege = PrivilegeMode::Machine;
     let base = 0x8000_0000;
-    cpu.csrs.mtvec = base; // Direct mode (bit 0 = 0)
+    cpu.hart.csrs.mtvec = base; // Direct mode (bit 0 = 0)
 
-    cpu.trap(&Trap::MachineTimerInterrupt, cpu.pc);
+    cpu.trap(&Trap::MachineTimerInterrupt, cpu.hart.pc);
 
     // Direct mode should use base address (no offset)
-    assert_eq!(cpu.pc, base);
+    assert_eq!(cpu.hart.pc, base);
 }
 
 #[test]
 fn test_trap_supervisor_vectored_mode() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.mtvec = 0x8000_0000;
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
     let base = 0x8000_1000;
-    cpu.csrs.stvec = base | 1; // Vectored mode
-    cpu.csrs.mideleg = 1 << 5; // Delegate supervisor timer interrupts
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.csrs.stvec = base | 1; // Vectored mode
+    cpu.hart.csrs.mideleg = 1 << 5; // Delegate supervisor timer interrupts
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::SupervisorTimerInterrupt, cpu.pc);
+    cpu.trap(&Trap::SupervisorTimerInterrupt, cpu.hart.pc);
 
     // Supervisor timer interrupt (code 5) should offset by 4*5 = 20
-    assert_eq!(cpu.pc, base + 20);
+    assert_eq!(cpu.hart.pc, base + 20);
 }
 
 #[test]
 fn test_trap_tval_for_address_exceptions() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
     let fault_addr = 0x1234_5678;
-    cpu.trap(&Trap::LoadAddressMisaligned(fault_addr), cpu.pc);
+    cpu.trap(&Trap::LoadAddressMisaligned(fault_addr), cpu.hart.pc);
 
-    assert_eq!(cpu.csrs.mtval, fault_addr);
+    assert_eq!(cpu.hart.csrs.mtval, fault_addr);
 }
 
 #[test]
 fn test_trap_tval_for_page_faults() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
     let fault_addr = 0xdead_beef;
-    cpu.trap(&Trap::StorePageFault(fault_addr), cpu.pc);
+    cpu.trap(&Trap::StorePageFault(fault_addr), cpu.hart.pc);
 
-    assert_eq!(cpu.csrs.mtval, fault_addr);
+    assert_eq!(cpu.hart.csrs.mtval, fault_addr);
 }
 
 #[test]
 fn test_trap_tval_for_illegal_instruction() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
     let bad_instr = 0xdeadbeef;
-    cpu.trap(&Trap::IllegalInstruction(bad_instr), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(bad_instr), cpu.hart.pc);
 
-    assert_eq!(cpu.csrs.mtval, bad_instr as u64);
+    assert_eq!(cpu.hart.csrs.mtval, bad_instr as u64);
 }
 
 #[test]
 fn test_trap_tval_zero_for_ecall() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::EnvironmentCallFromMMode, cpu.pc);
+    cpu.trap(&Trap::EnvironmentCallFromMMode, cpu.hart.pc);
 
     // ECALL should set tval to 0
-    assert_eq!(cpu.csrs.mtval, 0);
+    assert_eq!(cpu.hart.csrs.mtval, 0);
 }
 
 #[test]
 fn test_trap_stval_on_delegation() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.medeleg = 1 << 13; // Delegate load page faults
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.medeleg = 1 << 13; // Delegate load page faults
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
     let fault_addr = 0xcafe_babe;
-    cpu.trap(&Trap::LoadPageFault(fault_addr), cpu.pc);
+    cpu.trap(&Trap::LoadPageFault(fault_addr), cpu.hart.pc);
 
-    assert_eq!(cpu.csrs.stval, fault_addr);
+    assert_eq!(cpu.hart.csrs.stval, fault_addr);
 }
 
 #[test]
 fn test_trap_saves_previous_privilege_in_mpp() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Supervisor;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Supervisor;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // mstatus.MPP should be set to Supervisor (0b01)
-    assert_eq!(cpu.csrs.mstatus >> 11 & 0b11, 1);
+    assert_eq!(cpu.hart.csrs.mstatus >> 11 & 0b11, 1);
 }
 
 #[test]
 fn test_trap_disables_mie_and_saves_to_mpie() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
     // Enable MIE (bit 3)
-    cpu.csrs.mstatus = 1 << 3;
+    cpu.hart.csrs.mstatus = 1 << 3;
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // MIE should be disabled
-    assert_eq!(cpu.csrs.mstatus & (1 << 3), 0);
+    assert_eq!(cpu.hart.csrs.mstatus & (1 << 3), 0);
     // MPIE (bit 7) should be set from MIE
-    assert_ne!(cpu.csrs.mstatus & (1 << 7), 0);
+    assert_ne!(cpu.hart.csrs.mstatus & (1 << 7), 0);
 }
 
 #[test]
 fn test_trap_saves_previous_privilege_in_spp_on_delegation() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.medeleg = 1 << 2; // Delegate illegal instruction
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.medeleg = 1 << 2; // Delegate illegal instruction
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // mstatus.SPP should be cleared for User (bit 8 = 0)
-    assert_eq!(cpu.csrs.mstatus >> 8 & 1, 0);
+    assert_eq!(cpu.hart.csrs.mstatus >> 8 & 1, 0);
 }
 
 #[test]
 fn test_trap_disables_sie_on_delegation() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.medeleg = 1 << 2; // Delegate illegal instruction
-    cpu.pc = 0x8000_2000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.medeleg = 1 << 2; // Delegate illegal instruction
+    cpu.hart.pc = 0x8000_2000; // Different from trap handler
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // Should have delegated to S-mode
-    assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
     // SEPC should be set
-    assert_eq!(cpu.csrs.sepc, 0x8000_2000);
+    assert_eq!(cpu.hart.csrs.sepc, 0x8000_2000);
 }
 
 #[test]
 fn test_trap_requested_trap_custom_code() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
     let custom_code = 42;
-    cpu.trap(&Trap::RequestedTrap(custom_code), cpu.pc);
+    cpu.trap(&Trap::RequestedTrap(custom_code), cpu.hart.pc);
 
-    assert_eq!(cpu.csrs.mcause, custom_code);
+    assert_eq!(cpu.hart.csrs.mcause, custom_code);
 }
 
 #[test]
 fn test_trap_double_fault_trap_variant() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::DoubleFault(0x1234), cpu.pc);
+    cpu.trap(&Trap::DoubleFault(0x1234), cpu.hart.pc);
 
     // DoubleFault should map to hardware error exception
 }
@@ -573,14 +573,14 @@ fn test_trap_double_fault_trap_variant() {
 #[test]
 fn test_trap_breakpoint() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-    cpu.trap(&Trap::Breakpoint(0), cpu.pc);
+    cpu.trap(&Trap::Breakpoint(0), cpu.hart.pc);
 
     // Breakpoint should be handled as exception
-    assert_eq!(cpu.csrs.mcause & !CAUSE_INTERRUPT_BIT, 3);
+    assert_eq!(cpu.hart.csrs.mcause & !CAUSE_INTERRUPT_BIT, 3);
 }
 
 #[test]
@@ -593,13 +593,13 @@ fn test_trap_all_access_faults() {
 
     for (fault, expected_code) in faults {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
-        cpu.pc = 0x8000_1000; // Different from trap handler
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
+        cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-        cpu.trap(&fault, cpu.pc);
+        cpu.trap(&fault, cpu.hart.pc);
 
-        assert_eq!(cpu.csrs.mcause, expected_code);
+        assert_eq!(cpu.hart.csrs.mcause, expected_code);
     }
 }
 
@@ -613,57 +613,57 @@ fn test_trap_all_misaligned() {
 
     for (trap, expected_code) in misaligned {
         let mut cpu = create_test_cpu();
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.csrs.mtvec = 0x8000_0000;
-        cpu.pc = 0x8000_1000; // Different from trap handler
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.csrs.mtvec = 0x8000_0000;
+        cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
-        cpu.trap(&trap, cpu.pc);
+        cpu.trap(&trap, cpu.hart.pc);
 
-        assert_eq!(cpu.csrs.mcause, expected_code);
+        assert_eq!(cpu.hart.csrs.mcause, expected_code);
     }
 }
 
 #[test]
 fn test_trap_preserves_registers() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
-    cpu.pc = 0x8000_1000; // Different from trap handler
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
+    cpu.hart.pc = 0x8000_1000; // Different from trap handler
 
     // Set up some register state
-    cpu.regs.write(RegIdx::new(1), 0x1234);
-    cpu.regs.write(RegIdx::new(2), 0x5678);
+    cpu.hart.regs.write(RegIdx::new(1), 0x1234);
+    cpu.hart.regs.write(RegIdx::new(2), 0x5678);
 
-    cpu.trap(&Trap::IllegalInstruction(0), cpu.pc);
+    cpu.trap(&Trap::IllegalInstruction(0), cpu.hart.pc);
 
     // Registers should be preserved across trap
-    assert_eq!(cpu.regs.read(RegIdx::new(1)), 0x1234);
-    assert_eq!(cpu.regs.read(RegIdx::new(2)), 0x5678);
+    assert_eq!(cpu.hart.regs.read(RegIdx::new(1)), 0x1234);
+    assert_eq!(cpu.hart.regs.read(RegIdx::new(2)), 0x5678);
 }
 
 #[test]
 fn test_trap_updates_mepc_correctly() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::Machine;
-    cpu.csrs.mtvec = 0x8000_0000;
+    cpu.hart.privilege = PrivilegeMode::Machine;
+    cpu.hart.csrs.mtvec = 0x8000_0000;
     let trap_pc = 0x8000_1234;
 
     cpu.trap(&Trap::IllegalInstruction(0), trap_pc);
 
-    assert_eq!(cpu.csrs.mepc, trap_pc);
+    assert_eq!(cpu.hart.csrs.mepc, trap_pc);
 }
 
 #[test]
 fn test_trap_updates_sepc_on_delegation() {
     let mut cpu = create_test_cpu();
-    cpu.privilege = PrivilegeMode::User;
-    cpu.csrs.stvec = 0x8000_1000;
-    cpu.csrs.medeleg = 1 << 2; // Delegate illegal instruction
+    cpu.hart.privilege = PrivilegeMode::User;
+    cpu.hart.csrs.stvec = 0x8000_1000;
+    cpu.hart.csrs.medeleg = 1 << 2; // Delegate illegal instruction
     let trap_pc = 0x8000_5678;
 
     cpu.trap(&Trap::IllegalInstruction(0), trap_pc);
 
-    assert_eq!(cpu.csrs.sepc, trap_pc);
+    assert_eq!(cpu.hart.csrs.sepc, trap_pc);
 }
 
 use rvsim_core::common::constants::CAUSE_INTERRUPT_BIT;

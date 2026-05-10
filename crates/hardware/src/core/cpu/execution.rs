@@ -27,27 +27,27 @@ impl Cpu {
         }
 
         if self.soc.check_kernel_panic() {
-            let detected_at = *self.panic_detected_at_cycle.get_or_insert(self.stats.cycles);
+            let detected_at = *self.hart.panic_detected_at_cycle.get_or_insert(self.stats.cycles);
             if self.stats.cycles.saturating_sub(detected_at) >= 10_000 {
                 return Err(SimError::KernelPanic { cycle: detected_at });
             }
         }
 
-        if self.pc == self.last_pc {
-            self.same_pc_count += 1;
-            if self.same_pc_count == HANG_DETECTION_THRESHOLD {
+        if self.hart.pc == self.hart.last_pc {
+            self.hart.same_pc_count += 1;
+            if self.hart.same_pc_count == HANG_DETECTION_THRESHOLD {
                 let asid = Asid::new(
-                    ((self.csrs.satp >> csr::SATP_ASID_SHIFT) & csr::SATP_ASID_MASK) as u16,
+                    ((self.hart.csrs.satp >> csr::SATP_ASID_SHIFT) & csr::SATP_ASID_MASK) as u16,
                 );
                 let inst = if let Some(hit) =
-                    self.mmu.dtlb.lookup(Vpn::new((self.pc >> PAGE_SHIFT) & VPN_MASK), asid)
+                    self.hart.mmu.dtlb.lookup(Vpn::new((self.hart.pc >> PAGE_SHIFT) & VPN_MASK), asid)
                 {
                     let paddr = crate::common::PhysAddr::new(
-                        hit.ppn.to_addr() | (self.pc & PAGE_OFFSET_MASK),
+                        hit.ppn.to_addr() | (self.hart.pc & PAGE_OFFSET_MASK),
                     );
                     self.soc.bus.read_u32(paddr)
                 } else {
-                    let paddr = crate::common::PhysAddr::new(self.pc);
+                    let paddr = crate::common::PhysAddr::new(self.hart.pc);
                     if self.soc.bus.is_valid_address(paddr) {
                         self.soc.bus.read_u32(paddr)
                     } else {
@@ -58,26 +58,26 @@ impl Cpu {
                 if inst == WFI_INSTRUCTION {
                     trace_trap!(self.trace;
                         event = "wfi-wait",
-                        pc    = %crate::trace::Hex(self.pc),
+                        pc    = %crate::trace::Hex(self.hart.pc),
                         "CPU stuck in WFI — waiting for interrupt"
                     );
                 } else {
                     trace_trap!(self.trace;
                         event = "potential-hang",
-                        pc    = %crate::trace::Hex(self.pc),
+                        pc    = %crate::trace::Hex(self.hart.pc),
                         inst  = inst,
                         "CPU potential hang detected"
                     );
                 }
             }
         } else {
-            self.last_pc = self.pc;
-            self.same_pc_count = 0;
+            self.hart.last_pc = self.hart.pc;
+            self.hart.same_pc_count = 0;
         }
 
         let (timer_irq, msip, meip, seip) = self.soc.tick();
 
-        let mut mip = self.csrs.mip;
+        let mut mip = self.hart.csrs.mip;
 
         if timer_irq {
             mip |= csr::MIP_MTIP;
@@ -102,7 +102,7 @@ impl Cpu {
         // interrupts via `csrw mip`.
         if seip {
             mip |= csr::MIP_SEIP;
-        } else if !self.sw_seip {
+        } else if !self.hart.sw_seip {
             mip &= !csr::MIP_SEIP;
         }
 
@@ -110,16 +110,16 @@ impl Cpu {
         // against stimecmp.  When Sstc is NOT active (the common case —
         // OpenSBI injects STIP via `csrw mip`), leave STIP entirely under
         // software control so that M-mode timer handlers work correctly.
-        if (self.csrs.menvcfg & csr::MENVCFG_STCE) != 0 {
+        if (self.hart.csrs.menvcfg & csr::MENVCFG_STCE) != 0 {
             let mtime = self.stats.cycles / self.clint_divider;
-            if mtime >= self.csrs.stimecmp {
+            if mtime >= self.hart.csrs.stimecmp {
                 mip |= csr::MIP_STIP;
             } else {
                 mip &= !csr::MIP_STIP;
             }
         }
 
-        self.csrs.mip = mip;
+        self.hart.csrs.mip = mip;
 
         self.stats.cycles += 1;
         self.track_mode_cycles();
@@ -129,15 +129,15 @@ impl Cpu {
 
     /// Post-tick: zero x0, privilege tracing, status printing.
     pub fn post_tick(&mut self, prev_priv: PrivilegeMode) {
-        self.regs.write(abi::REG_ZERO, 0);
+        self.hart.regs.write(abi::REG_ZERO, 0);
 
         if self.trace {
-            if self.privilege != prev_priv {
+            if self.hart.privilege != prev_priv {
                 trace_trap!(self.trace;
                     event      = "mode-switch",
                     from_mode  = prev_priv.name(),
-                    to_mode    = self.privilege.name(),
-                    pc         = %crate::trace::Hex(self.pc),
+                    to_mode    = self.hart.privilege.name(),
+                    pc         = %crate::trace::Hex(self.hart.pc),
                     "CPU privilege mode switch"
                 );
             }
@@ -146,8 +146,8 @@ impl Cpu {
                 ::tracing::debug!(
                     target: "rvsim::cpu",
                     cycles = self.stats.cycles,
-                    pc     = %crate::trace::Hex(self.pc),
-                    mode   = self.privilege.name(),
+                    pc     = %crate::trace::Hex(self.hart.pc),
+                    mode   = self.hart.privilege.name(),
                     "CPU status"
                 );
             }
@@ -156,7 +156,7 @@ impl Cpu {
 
     /// Tracks cycles spent in each privilege mode for statistics.
     const fn track_mode_cycles(&mut self) {
-        match self.privilege {
+        match self.hart.privilege {
             PrivilegeMode::User => self.stats.cycles_user += 1,
             PrivilegeMode::Supervisor => self.stats.cycles_kernel += 1,
             PrivilegeMode::Machine => self.stats.cycles_machine += 1,
@@ -175,15 +175,15 @@ mod tests {
         let soc = crate::soc::builder::Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.privilege = PrivilegeMode::User;
+        cpu.hart.privilege = PrivilegeMode::User;
         cpu.track_mode_cycles();
         assert_eq!(cpu.stats.cycles_user, 1);
 
-        cpu.privilege = PrivilegeMode::Supervisor;
+        cpu.hart.privilege = PrivilegeMode::Supervisor;
         cpu.track_mode_cycles();
         assert_eq!(cpu.stats.cycles_kernel, 1);
 
-        cpu.privilege = PrivilegeMode::Machine;
+        cpu.hart.privilege = PrivilegeMode::Machine;
         cpu.track_mode_cycles();
         assert_eq!(cpu.stats.cycles_machine, 1);
     }
@@ -194,8 +194,8 @@ mod tests {
         let soc = crate::soc::builder::Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.regs.write(abi::REG_ZERO, 42);
+        cpu.hart.regs.write(abi::REG_ZERO, 42);
         cpu.post_tick(PrivilegeMode::Machine);
-        assert_eq!(cpu.regs.read(abi::REG_ZERO), 0);
+        assert_eq!(cpu.hart.regs.read(abi::REG_ZERO), 0);
     }
 }

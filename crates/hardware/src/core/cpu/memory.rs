@@ -20,8 +20,8 @@ impl Cpu {
             // translation (RISC-V Privileged Spec §3.7).  M-mode with no
             // matching entries gets full access, so this is transparent to
             // programs that do not configure PMP.
-            let is_machine = self.privilege == crate::core::arch::mode::PrivilegeMode::Machine;
-            let pmp_result = self.pmp.check(
+            let is_machine = self.hart.privilege == crate::core::arch::mode::PrivilegeMode::Machine;
+            let pmp_result = self.hart.pmp.check(
                 paddr.val(),
                 size,
                 matches!(access, AccessType::Read),
@@ -51,23 +51,23 @@ impl Cpu {
 
         // MPRV: when set and access is not Fetch, use MPP as effective privilege.
         let effective_priv = if access != AccessType::Fetch
-            && (self.csrs.mstatus & crate::core::arch::csr::MSTATUS_MPRV) != 0
+            && (self.hart.csrs.mstatus & crate::core::arch::csr::MSTATUS_MPRV) != 0
         {
             use crate::core::arch::csr::{MSTATUS_MPP_MASK, MSTATUS_MPP_SHIFT};
             use crate::core::arch::mode::PrivilegeMode;
-            let mpp = ((self.csrs.mstatus >> MSTATUS_MPP_SHIFT) & MSTATUS_MPP_MASK) as u8;
+            let mpp = ((self.hart.csrs.mstatus >> MSTATUS_MPP_SHIFT) & MSTATUS_MPP_MASK) as u8;
             PrivilegeMode::from_u8(mpp)
         } else {
-            self.privilege
+            self.hart.privilege
         };
 
-        let result = self.mmu.translate_with_pmp(
+        let result = self.hart.mmu.translate_with_pmp(
             vaddr,
             access,
             effective_priv,
-            &self.csrs,
+            &self.hart.csrs,
             &mut self.soc.bus,
-            Some(&self.pmp),
+            Some(&self.hart.pmp),
         );
 
         // PMP check on the translated physical address.
@@ -76,7 +76,7 @@ impl Cpu {
         if result.trap.is_none() {
             let paddr = result.paddr.val();
             let is_machine = effective_priv == crate::core::arch::mode::PrivilegeMode::Machine;
-            let pmp_result = self.pmp.check(
+            let pmp_result = self.hart.pmp.check(
                 paddr,
                 size,
                 matches!(access, AccessType::Read),
@@ -382,10 +382,10 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.pmp.set_addr(0, 0x9000_0000u64 >> 2);
-        cpu.pmp.set_cfg(0, 0x88);
+        cpu.hart.pmp.set_addr(0, 0x9000_0000u64 >> 2);
+        cpu.hart.pmp.set_cfg(0, 0x88);
 
-        cpu.privilege = PrivilegeMode::Supervisor;
+        cpu.hart.privilege = PrivilegeMode::Supervisor;
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
         assert!(result.trap.is_some(), "PMP should deny the access");

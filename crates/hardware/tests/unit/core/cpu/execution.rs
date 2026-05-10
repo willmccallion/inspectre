@@ -54,21 +54,21 @@ fn test_last_pc_updates() {
     sim.tick().unwrap();
 
     // PC is always set to a valid address
-    let _ = sim.cpu.pc;
+    let _ = sim.cpu.hart.pc;
 }
 
 #[test]
 fn test_same_pc_counter() {
     let mut sim = create_test_sim();
-    let initial_count = sim.cpu.same_pc_count;
-    sim.cpu.same_pc_count = 0;
+    let initial_count = sim.cpu.hart.same_pc_count;
+    sim.cpu.hart.same_pc_count = 0;
 
     // After execution, counter might increment if PC doesn't change
     sim.tick().unwrap();
 
     // Counter should be valid (either stayed same or changed)
-    let _ = sim.cpu.same_pc_count;
-    assert!(sim.cpu.same_pc_count != initial_count || sim.cpu.same_pc_count == 0);
+    let _ = sim.cpu.hart.same_pc_count;
+    assert!(sim.cpu.hart.same_pc_count != initial_count || sim.cpu.hart.same_pc_count == 0);
 }
 
 #[test]
@@ -79,9 +79,9 @@ fn test_privilege_preserved_across_tick() {
 
     // Privilege should be set to something valid
     assert!(
-        sim.cpu.privilege == PrivilegeMode::User
-            || sim.cpu.privilege == PrivilegeMode::Supervisor
-            || sim.cpu.privilege == PrivilegeMode::Machine
+        sim.cpu.hart.privilege == PrivilegeMode::User
+            || sim.cpu.hart.privilege == PrivilegeMode::Supervisor
+            || sim.cpu.hart.privilege == PrivilegeMode::Machine
     );
 }
 
@@ -108,11 +108,11 @@ fn test_stats_updated() {
 #[test]
 fn test_tick_does_not_corrupt_state() {
     let mut sim = create_test_sim();
-    sim.cpu.regs.write(RegIdx::new(5), 0x1234_5678);
+    sim.cpu.hart.regs.write(RegIdx::new(5), 0x1234_5678);
 
     sim.tick().unwrap();
 
-    let _ = sim.cpu.regs.read(RegIdx::new(5));
+    let _ = sim.cpu.hart.regs.read(RegIdx::new(5));
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn test_rapid_ticks() {
 fn test_tick_with_different_privileges() {
     for priv_level in [PrivilegeMode::Machine, PrivilegeMode::Supervisor, PrivilegeMode::User] {
         let mut sim = create_test_sim();
-        sim.cpu.privilege = priv_level;
+        sim.cpu.hart.privilege = priv_level;
 
         let result = sim.tick();
         assert!(result.is_ok());

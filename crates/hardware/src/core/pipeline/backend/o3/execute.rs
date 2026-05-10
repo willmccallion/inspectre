@@ -131,7 +131,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
         if matches!(id.ctrl.vec_op, VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl) {
             match crate::core::units::vpu::execute::execute_vec_op(cpu, &id) {
                 Ok(scalar_result) => {
-                    cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
+                    cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                     cpu.redirect_pending = true;
                     let result = ExMem1Entry {
                         rob_tag: id.rob_tag,
@@ -153,7 +153,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
                 }
                 Err(trap) => {
                     rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
-                    cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
+                    cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
                     cpu.redirect_pending = true;
                     let result = ExMem1Entry {
                         rob_tag: id.rob_tag,
@@ -198,12 +198,12 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
     // I-cache flush deferred to commit so prior stores are visible before refill.
     if id.ctrl.system_op == SystemOp::FenceI {
-        cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
+        cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
         cpu.redirect_pending = true;
         trace_execute!(cpu.trace;
             rob_tag = id.rob_tag.0,
             pc      = %crate::trace::Hex(id.pc),
-            next_pc = %crate::trace::Hex(cpu.pc),
+            next_pc = %crate::trace::Hex(cpu.hart.pc),
             "EX: FENCE.I — pipeline flush, I-cache invalidation deferred to commit"
         );
 
@@ -233,7 +233,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
 
     // When mstatus.FS == OFF, all FP instructions trap as illegal.
     {
-        let fs = (cpu.csrs.mstatus & crate::core::arch::csr::MSTATUS_FS) >> 13;
+        let fs = (cpu.hart.csrs.mstatus & crate::core::arch::csr::MSTATUS_FS) >> 13;
         let is_fp = id.ctrl.fp_reg_write || id.ctrl.rs1_fp || id.ctrl.rs2_fp || id.ctrl.rs3_fp;
         if fs == 0 && is_fp {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
@@ -258,7 +258,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
     }
 
     // Resolve FP rounding mode: instruction-specified or dynamic from fcsr.frm.
-    let fp_rm = id.ctrl.fp_rm.or_else(|| RoundingMode::from_bits(cpu.csrs.frm as u8));
+    let fp_rm = id.ctrl.fp_rm.or_else(|| RoundingMode::from_bits(cpu.hart.csrs.frm as u8));
     let (alu_out, fp_flags) =
         compute_alu(id.ctrl.alu, op_a, op_b, op_c, id.ctrl.is_f16, id.ctrl.is_rv32, fp_rm);
     trace_execute!(cpu.trace;
@@ -317,7 +317,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.branch_predictor.speculate(id.pc, taken);
             cpu.branch_predictor.restore_ras(id.ras_snapshot);
             cpu.stats.speculative_branch_mispredictions += 1;
-            cpu.pc = actual_next_pc;
+            cpu.hart.pc = actual_next_pc;
             cpu.redirect_pending = true;
             needs_flush = true;
         } else {
@@ -366,7 +366,7 @@ pub fn execute_one(cpu: &mut Cpu, id: RenameIssueEntry, rob: &mut Rob) -> (ExMem
             cpu.branch_predictor.repair_history(&id.ghr_snapshot);
             cpu.branch_predictor.restore_ras(id.ras_snapshot);
             cpu.stats.speculative_branch_mispredictions += 1;
-            cpu.pc = actual_target;
+            cpu.hart.pc = actual_target;
             cpu.redirect_pending = true;
             needs_flush = true;
         } else {
@@ -432,7 +432,7 @@ fn execute_system(
         };
 
     if id.ctrl.system_op == SystemOp::Mret {
-        if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine {
+        if cpu.hart.privilege != crate::core::arch::mode::PrivilegeMode::Machine {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
             return (make_result(0, id.ctrl), true);
         }
@@ -441,21 +441,21 @@ fn execute_system(
             pc          = %crate::trace::Hex(id.pc),
             rob_tag     = id.rob_tag.0,
             insn        = "MRET",
-            priv_mode   = ?cpu.privilege,
-            mepc        = %crate::trace::Hex(cpu.csrs.mepc),
-            mstatus     = %crate::trace::Hex(cpu.csrs.mstatus),
+            priv_mode   = ?cpu.hart.privilege,
+            mepc        = %crate::trace::Hex(cpu.hart.csrs.mepc),
+            mstatus     = %crate::trace::Hex(cpu.hart.csrs.mstatus),
             "EX: MRET queued (privilege restore deferred to commit)"
         );
         return (make_result(0, id.ctrl), true);
     }
 
     if id.ctrl.system_op == SystemOp::Sret {
-        if cpu.privilege == crate::core::arch::mode::PrivilegeMode::User {
+        if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::User {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
             return (make_result(0, id.ctrl), true);
         }
-        let tsr = (cpu.csrs.mstatus >> 22) & 1;
-        if cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tsr != 0 {
+        let tsr = (cpu.hart.csrs.mstatus >> 22) & 1;
+        if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tsr != 0 {
             trace_trap!(cpu.trace;
                 event   = "illegal",
                 pc      = %crate::trace::Hex(id.pc),
@@ -472,18 +472,18 @@ fn execute_system(
             pc        = %crate::trace::Hex(id.pc),
             rob_tag   = id.rob_tag.0,
             insn      = "SRET",
-            priv_mode = ?cpu.privilege,
-            sepc      = %crate::trace::Hex(cpu.csrs.sepc),
-            mstatus   = %crate::trace::Hex(cpu.csrs.mstatus),
+            priv_mode = ?cpu.hart.privilege,
+            sepc      = %crate::trace::Hex(cpu.hart.csrs.sepc),
+            mstatus   = %crate::trace::Hex(cpu.hart.csrs.mstatus),
             "EX: SRET queued (privilege restore deferred to commit)"
         );
         return (make_result(0, id.ctrl), true);
     }
 
     if id.ctrl.system_op == SystemOp::Wfi {
-        let tw = (cpu.csrs.mstatus >> 21) & 1;
-        if cpu.privilege == crate::core::arch::mode::PrivilegeMode::User
-            || (cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tw != 0)
+        let tw = (cpu.hart.csrs.mstatus >> 21) & 1;
+        if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::User
+            || (cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tw != 0)
         {
             trace_trap!(cpu.trace;
                 event   = "illegal",
@@ -500,8 +500,8 @@ fn execute_system(
     // SFENCE.VMA: do nothing at execute. Operands flow to commit which drains
     // the store buffer first, then performs the TLB flush and pipeline squash.
     if id.ctrl.system_op == SystemOp::SfenceVma {
-        let tvm = (cpu.csrs.mstatus >> 20) & 1;
-        if cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tvm != 0 {
+        let tvm = (cpu.hart.csrs.mstatus >> 20) & 1;
+        if cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor && tvm != 0 {
             rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
             return (
                 ExMem1Entry {
@@ -563,7 +563,7 @@ fn execute_system(
 
     if id.inst == sys_ops::ECALL {
         use crate::core::arch::mode::PrivilegeMode;
-        let trap = match cpu.privilege {
+        let trap = match cpu.hart.privilege {
             PrivilegeMode::User => Trap::EnvironmentCallFromUMode,
             PrivilegeMode::Supervisor => Trap::EnvironmentCallFromSMode,
             PrivilegeMode::Machine => Trap::EnvironmentCallFromMMode,
@@ -573,9 +573,9 @@ fn execute_system(
             pc        = %crate::trace::Hex(id.pc),
             rob_tag   = id.rob_tag.0,
             cause     = "ECALL",
-            priv_mode = ?cpu.privilege,
-            a7        = %crate::trace::Hex(cpu.regs.read(crate::isa::abi::REG_A7)),
-            a0        = %crate::trace::Hex(cpu.regs.read(crate::isa::abi::REG_A0)),
+            priv_mode = ?cpu.hart.privilege,
+            a7        = %crate::trace::Hex(cpu.hart.regs.read(crate::isa::abi::REG_A7)),
+            a0        = %crate::trace::Hex(cpu.hart.regs.read(crate::isa::abi::REG_A0)),
             "EX: ECALL"
         );
         rob.fault(id.rob_tag, trap, ExceptionStage::Execute);
@@ -599,8 +599,8 @@ fn execute_csr(
     store_data: u64,
 ) -> (ExMem1Entry, bool) {
     if id.ctrl.csr_addr == crate::core::arch::csr::SATP
-        && cpu.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor
-        && ((cpu.csrs.mstatus >> 20) & 1) != 0
+        && cpu.hart.privilege == crate::core::arch::mode::PrivilegeMode::Supervisor
+        && ((cpu.hart.csrs.mstatus >> 20) & 1) != 0
     {
         rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
         return (
@@ -639,10 +639,10 @@ fn execute_csr(
         };
         if let Some(bit) = counter_bit {
             let mask = 1u64 << bit;
-            let denied = match cpu.privilege {
-                PrivilegeMode::Supervisor => (cpu.csrs.mcounteren & mask) == 0,
+            let denied = match cpu.hart.privilege {
+                PrivilegeMode::Supervisor => (cpu.hart.csrs.mcounteren & mask) == 0,
                 PrivilegeMode::User => {
-                    (cpu.csrs.mcounteren & mask) == 0 || (cpu.csrs.scounteren & mask) == 0
+                    (cpu.hart.csrs.mcounteren & mask) == 0 || (cpu.hart.csrs.scounteren & mask) == 0
                 }
                 PrivilegeMode::Machine => false,
             };
@@ -695,7 +695,7 @@ fn execute_csr(
     }
 
     let csr_priv = id.ctrl.csr_addr.privilege_level() as u32;
-    if (cpu.privilege.to_u8() as u32) < csr_priv {
+    if (cpu.hart.privilege.to_u8() as u32) < csr_priv {
         rob.fault(id.rob_tag, Trap::IllegalInstruction(id.inst), ExceptionStage::Execute);
         return (
             ExMem1Entry {
@@ -758,7 +758,7 @@ fn execute_csr(
             || id.ctrl.csr_addr == csr_addrs::FRM
         {
             let acc = rob.drain_fp_flags_before(id.rob_tag);
-            cpu.csrs.fflags |= acc as u64;
+            cpu.hart.csrs.fflags |= acc as u64;
         }
     }
     let old = cpu.csr_read(id.ctrl.csr_addr);
@@ -801,7 +801,7 @@ fn execute_csr(
     // Only CSR writes need a flush; pure reads stay serialized at issue time.
     let needs_flush = would_write;
     if needs_flush {
-        cpu.pc = id.pc.wrapping_add(id.inst_size.as_u64());
+        cpu.hart.pc = id.pc.wrapping_add(id.inst_size.as_u64());
         cpu.redirect_pending = true;
     }
 
@@ -1187,7 +1187,7 @@ mod tests {
         let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
         assert!(flush);
         assert!(cpu.redirect_pending);
-        assert_eq!(cpu.pc, 0x1004);
+        assert_eq!(cpu.hart.pc, 0x1004);
     }
 
     #[test]
@@ -1197,7 +1197,7 @@ mod tests {
         let mut cpu = Cpu::new(soc, &config);
         let mut rob = Rob::new(4);
 
-        cpu.csrs.mstatus &= !crate::core::arch::csr::MSTATUS_FS; // Clear FS bits
+        cpu.hart.csrs.mstatus &= !crate::core::arch::csr::MSTATUS_FS; // Clear FS bits
 
         let tag = rob
             .allocate(
@@ -1336,7 +1336,7 @@ mod tests {
         let (_result, flush) = execute_one(&mut cpu, issue, &mut rob);
         assert!(flush);
         assert!(cpu.redirect_pending);
-        assert_eq!(cpu.pc, 0x1008); // Mispredicted, redirect to actual target
+        assert_eq!(cpu.hart.pc, 0x1008); // Mispredicted, redirect to actual target
         let entry = rob.find_entry(tag).unwrap();
         assert!(entry.bp_outcome.mispredicted);
     }
@@ -1410,6 +1410,6 @@ mod tests {
         assert!(cpu.redirect_pending);
 
         let expected_target = (0x2000 + 0x15) & !1;
-        assert_eq!(cpu.pc, expected_target);
+        assert_eq!(cpu.hart.pc, expected_target);
     }
 }

@@ -13,9 +13,9 @@ use crate::trace_trap;
 impl Cpu {
     /// Handles a trap (exception or interrupt).
     pub fn trap(&mut self, cause: &Trap, epc: u64) {
-        self.load_reservation = None;
+        self.hart.load_reservation = None;
 
-        if self.direct_mode && self.csrs.mtvec == 0 {
+        if self.direct_mode && self.hart.csrs.mtvec == 0 {
             // In direct mode with no trap handler installed (mtvec == 0),
             // handle traps directly: ecall triggers SYS_EXIT and everything
             // else is fatal.  When mtvec has been written (e.g. by arch-test
@@ -27,14 +27,14 @@ impl Cpu {
                     | Trap::EnvironmentCallFromSMode
                     | Trap::EnvironmentCallFromMMode
             ) {
-                let val_a7 = self.regs.read(abi::REG_A7);
-                let val_a0 = self.regs.read(abi::REG_A0);
+                let val_a7 = self.hart.regs.read(abi::REG_A7);
+                let val_a0 = self.hart.regs.read(abi::REG_A0);
 
                 if val_a7 == sys_ops::SYS_EXIT {
                     self.exit_code = Some(val_a0);
                     return;
                 } else if val_a0 == sys_ops::SYS_EXIT {
-                    let val_a1 = self.regs.read(abi::REG_A1);
+                    let val_a1 = self.hart.regs.read(abi::REG_A1);
                     self.exit_code = Some(val_a1);
                     return;
                 }
@@ -69,9 +69,9 @@ impl Cpu {
                 event      = "taken",
                 epc        = %crate::trace::Hex(epc),
                 cause      = ?cause,
-                priv_mode  = ?self.privilege,
-                stvec      = %crate::trace::Hex(self.csrs.stvec),
-                mtvec      = %crate::trace::Hex(self.csrs.mtvec),
+                priv_mode  = ?self.hart.privilege,
+                stvec      = %crate::trace::Hex(self.hart.csrs.stvec),
+                mtvec      = %crate::trace::Hex(self.hart.csrs.mtvec),
                 "trap taken"
             );
         }
@@ -115,9 +115,9 @@ impl Cpu {
             Trap::DoubleFault(_) => (false, exception::HARDWARE_ERROR),
         };
 
-        let deleg_mask = if is_interrupt { self.csrs.mideleg } else { self.csrs.medeleg };
+        let deleg_mask = if is_interrupt { self.hart.csrs.mideleg } else { self.hart.csrs.medeleg };
         let delegate_to_s =
-            (self.privilege <= PrivilegeMode::Supervisor) && ((deleg_mask >> code) & 1) != 0;
+            (self.hart.privilege <= PrivilegeMode::Supervisor) && ((deleg_mask >> code) & 1) != 0;
 
         let tval = match *cause {
             Trap::InstructionAddressMisaligned(a)
@@ -135,55 +135,55 @@ impl Cpu {
         };
 
         if delegate_to_s {
-            self.csrs.scause = if is_interrupt { CAUSE_INTERRUPT_BIT | code } else { code };
+            self.hart.csrs.scause = if is_interrupt { CAUSE_INTERRUPT_BIT | code } else { code };
 
-            self.csrs.sepc = epc;
-            self.csrs.stval = tval;
+            self.hart.csrs.sepc = epc;
+            self.hart.csrs.stval = tval;
 
-            let mut sstatus = self.csrs.sstatus;
+            let mut sstatus = self.hart.csrs.sstatus;
             if (sstatus & csr::MSTATUS_SIE) != 0 {
                 sstatus |= csr::MSTATUS_SPIE;
             } else {
                 sstatus &= !csr::MSTATUS_SPIE;
             }
-            if self.privilege == PrivilegeMode::Supervisor {
+            if self.hart.privilege == PrivilegeMode::Supervisor {
                 sstatus |= csr::MSTATUS_SPP;
             } else {
                 sstatus &= !csr::MSTATUS_SPP;
             }
             sstatus &= !csr::MSTATUS_SIE;
-            self.csrs.sstatus = sstatus;
+            self.hart.csrs.sstatus = sstatus;
 
             let sstatus_mask = csr::MSTATUS_SIE | csr::MSTATUS_SPIE | csr::MSTATUS_SPP;
-            self.csrs.mstatus = (self.csrs.mstatus & !sstatus_mask) | (sstatus & sstatus_mask);
+            self.hart.csrs.mstatus = (self.hart.csrs.mstatus & !sstatus_mask) | (sstatus & sstatus_mask);
 
-            self.privilege = PrivilegeMode::Supervisor;
-            let stvec_base = self.csrs.stvec & !3;
+            self.hart.privilege = PrivilegeMode::Supervisor;
+            let stvec_base = self.hart.csrs.stvec & !3;
             let trap_handler_pc = stvec_base
-                + (if (self.csrs.stvec & 1) != 0 && is_interrupt { 4 * code } else { 0 });
+                + (if (self.hart.csrs.stvec & 1) != 0 && is_interrupt { 4 * code } else { 0 });
 
-            self.pc = trap_handler_pc;
+            self.hart.pc = trap_handler_pc;
         } else {
-            self.csrs.mcause = if is_interrupt { CAUSE_INTERRUPT_BIT | code } else { code };
-            self.csrs.mepc = epc;
-            self.csrs.mtval = tval;
+            self.hart.csrs.mcause = if is_interrupt { CAUSE_INTERRUPT_BIT | code } else { code };
+            self.hart.csrs.mepc = epc;
+            self.hart.csrs.mtval = tval;
 
-            let mut mstatus = self.csrs.mstatus;
+            let mut mstatus = self.hart.csrs.mstatus;
             if (mstatus & csr::MSTATUS_MIE) != 0 {
                 mstatus |= csr::MSTATUS_MPIE;
             } else {
                 mstatus &= !csr::MSTATUS_MPIE;
             }
             mstatus &= !csr::MSTATUS_MPP;
-            mstatus |= (self.privilege.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
+            mstatus |= (self.hart.privilege.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
             mstatus &= !csr::MSTATUS_MIE;
-            self.csrs.mstatus = mstatus;
+            self.hart.csrs.mstatus = mstatus;
 
-            self.privilege = PrivilegeMode::Machine;
-            let mtvec_base = self.csrs.mtvec & !3;
+            self.hart.privilege = PrivilegeMode::Machine;
+            let mtvec_base = self.hart.csrs.mtvec & !3;
             let target_pc = mtvec_base
-                + (if (self.csrs.mtvec & 1) != 0 && is_interrupt { 4 * code } else { 0 });
-            self.pc = target_pc;
+                + (if (self.hart.csrs.mtvec & 1) != 0 && is_interrupt { 4 * code } else { 0 });
+            self.hart.pc = target_pc;
         }
 
         self.stats.traps_taken += 1;
@@ -192,12 +192,12 @@ impl Cpu {
     /// Executes the `MRET` instruction (Return from Machine Mode).
     pub(crate) const fn do_mret(&mut self) {
         self.clear_reservation();
-        self.pc = self.csrs.mepc & !1;
-        let mstatus = self.csrs.mstatus;
+        self.hart.pc = self.hart.csrs.mepc & !1;
+        let mstatus = self.hart.csrs.mstatus;
         let mpp = (mstatus >> csr::MSTATUS_MPP_SHIFT) & csr::MSTATUS_MPP_MASK;
         let mpie = (mstatus & csr::MSTATUS_MPIE) != 0;
 
-        self.privilege = PrivilegeMode::from_u8(mpp as u8);
+        self.hart.privilege = PrivilegeMode::from_u8(mpp as u8);
         let mut new_mstatus = mstatus;
         if mpie {
             new_mstatus |= csr::MSTATUS_MIE;
@@ -211,18 +211,18 @@ impl Cpu {
             new_mstatus &= !csr::MSTATUS_MPRV;
         }
 
-        self.csrs.mstatus = new_mstatus;
+        self.hart.csrs.mstatus = new_mstatus;
     }
 
     /// Executes the `SRET` instruction (Return from Supervisor Mode).
     pub(crate) const fn do_sret(&mut self) {
         self.clear_reservation();
-        self.pc = self.csrs.sepc & !1;
-        let sstatus = self.csrs.sstatus;
+        self.hart.pc = self.hart.csrs.sepc & !1;
+        let sstatus = self.hart.csrs.sstatus;
         let spp = (sstatus & csr::MSTATUS_SPP) != 0;
         let spie = (sstatus & csr::MSTATUS_SPIE) != 0;
 
-        self.privilege = if spp { PrivilegeMode::Supervisor } else { PrivilegeMode::User };
+        self.hart.privilege = if spp { PrivilegeMode::Supervisor } else { PrivilegeMode::User };
         let mut new_sstatus = sstatus;
         if spie {
             new_sstatus |= csr::MSTATUS_SIE;
@@ -232,12 +232,12 @@ impl Cpu {
         new_sstatus |= csr::MSTATUS_SPIE;
         new_sstatus &= !csr::MSTATUS_SPP;
 
-        self.csrs.sstatus = new_sstatus;
+        self.hart.csrs.sstatus = new_sstatus;
         let mask = csr::MSTATUS_SIE | csr::MSTATUS_SPIE | csr::MSTATUS_SPP;
-        let mut new_mstatus = (self.csrs.mstatus & !mask) | (new_sstatus & mask);
+        let mut new_mstatus = (self.hart.csrs.mstatus & !mask) | (new_sstatus & mask);
         // Per spec 3.1.6.1: SRET returns to S or U (never M), so always clear MPRV
         new_mstatus &= !csr::MSTATUS_MPRV;
-        self.csrs.mstatus = new_mstatus;
+        self.hart.csrs.mstatus = new_mstatus;
     }
 }
 
@@ -254,8 +254,8 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.regs.write(abi::REG_A7, sys_ops::SYS_EXIT);
-        cpu.regs.write(abi::REG_A0, 42);
+        cpu.hart.regs.write(abi::REG_A7, sys_ops::SYS_EXIT);
+        cpu.hart.regs.write(abi::REG_A0, 42);
 
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x1000);
         assert_eq!(cpu.exit_code, Some(42));
@@ -279,14 +279,14 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.mtvec = 0x8000_1000;
+        cpu.hart.csrs.mtvec = 0x8000_1000;
         cpu.trap(&Trap::Breakpoint(0x400), 0x400);
 
         assert!(cpu.exit_code.is_none(), "should not be fatal when mtvec is set");
-        assert_eq!(cpu.csrs.mepc, 0x400);
-        assert_eq!(cpu.csrs.mcause, 3);
-        assert_eq!(cpu.csrs.mtval, 0x400);
-        assert_eq!(cpu.pc, 0x8000_1000);
+        assert_eq!(cpu.hart.csrs.mepc, 0x400);
+        assert_eq!(cpu.hart.csrs.mcause, 3);
+        assert_eq!(cpu.hart.csrs.mtval, 0x400);
+        assert_eq!(cpu.hart.pc, 0x8000_1000);
     }
 
     #[test]
@@ -307,12 +307,12 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.mtvec = 0x8000_2000;
+        cpu.hart.csrs.mtvec = 0x8000_2000;
         cpu.trap(&Trap::EnvironmentCallFromMMode, 0x500);
 
         assert!(cpu.exit_code.is_none());
-        assert_eq!(cpu.csrs.mepc, 0x500);
-        assert_eq!(cpu.pc, 0x8000_2000);
+        assert_eq!(cpu.hart.csrs.mepc, 0x500);
+        assert_eq!(cpu.hart.pc, 0x8000_2000);
     }
 
     #[test]
@@ -321,15 +321,15 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.mepc = 0x2000;
-        cpu.csrs.mstatus = (PrivilegeMode::Supervisor.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
-        cpu.csrs.mstatus |= csr::MSTATUS_MPIE;
+        cpu.hart.csrs.mepc = 0x2000;
+        cpu.hart.csrs.mstatus = (PrivilegeMode::Supervisor.to_u8() as u64) << csr::MSTATUS_MPP_SHIFT;
+        cpu.hart.csrs.mstatus |= csr::MSTATUS_MPIE;
 
         cpu.do_mret();
 
-        assert_eq!(cpu.pc, 0x2000);
-        assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
-        assert_eq!(cpu.csrs.mstatus & csr::MSTATUS_MIE, csr::MSTATUS_MIE);
+        assert_eq!(cpu.hart.pc, 0x2000);
+        assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
+        assert_eq!(cpu.hart.csrs.mstatus & csr::MSTATUS_MIE, csr::MSTATUS_MIE);
     }
 
     #[test]
@@ -338,13 +338,13 @@ mod tests {
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
 
-        cpu.csrs.sepc = 0x3000;
-        cpu.csrs.sstatus = csr::MSTATUS_SPP | csr::MSTATUS_SPIE;
+        cpu.hart.csrs.sepc = 0x3000;
+        cpu.hart.csrs.sstatus = csr::MSTATUS_SPP | csr::MSTATUS_SPIE;
 
         cpu.do_sret();
 
-        assert_eq!(cpu.pc, 0x3000);
-        assert_eq!(cpu.privilege, PrivilegeMode::Supervisor);
-        assert_eq!(cpu.csrs.sstatus & csr::MSTATUS_SIE, csr::MSTATUS_SIE);
+        assert_eq!(cpu.hart.pc, 0x3000);
+        assert_eq!(cpu.hart.privilege, PrivilegeMode::Supervisor);
+        assert_eq!(cpu.hart.csrs.sstatus & csr::MSTATUS_SIE, csr::MSTATUS_SIE);
     }
 }

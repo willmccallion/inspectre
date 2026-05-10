@@ -1403,7 +1403,7 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
         if ctrl.vec_op != VectorOp::None
             && !matches!(ctrl.vec_op, VectorOp::Vsetvli | VectorOp::Vsetivli | VectorOp::Vsetvl)
         {
-            let vtype = crate::core::units::vpu::types::parse_vtype(cpu.csrs.vtype);
+            let vtype = crate::core::units::vpu::types::parse_vtype(cpu.hart.csrs.vtype);
             if !vtype.vill {
                 let lmul = vtype.vlmul.group_regs().regs();
                 ctrl.vec_lmul_regs = lmul;
@@ -1486,9 +1486,9 @@ pub fn decode_stage(cpu: &mut Cpu, input: &mut Vec<IfIdEntry>, output: &mut Vec<
             bundle_writes.push((d.rd, true));
         }
 
-        let rv1 = if ctrl.rs1_fp { cpu.regs.read_f(d.rs1) } else { cpu.regs.read(d.rs1) };
-        let rv2 = if ctrl.rs2_fp { cpu.regs.read_f(d.rs2) } else { cpu.regs.read(d.rs2) };
-        let rv3 = if ctrl.rs3_fp { cpu.regs.read_f(rs3_idx) } else { 0 };
+        let rv1 = if ctrl.rs1_fp { cpu.hart.regs.read_f(d.rs1) } else { cpu.hart.regs.read(d.rs1) };
+        let rv2 = if ctrl.rs2_fp { cpu.hart.regs.read_f(d.rs2) } else { cpu.hart.regs.read(d.rs2) };
+        let rv3 = if ctrl.rs3_fp { cpu.hart.regs.read_f(rs3_idx) } else { 0 };
 
         let has_trap = trap.is_some();
 

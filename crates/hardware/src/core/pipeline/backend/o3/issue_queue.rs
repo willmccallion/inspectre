@@ -663,7 +663,7 @@ fn resolve_operand_legacy(
 
     tag.map_or_else(
         || {
-            let value = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
+            let value = if is_fp { cpu.hart.regs.read_f(reg) } else { cpu.hart.regs.read(reg) };
             OperandState::ready(PhysReg(0), None, value)
         },
         |t| match rob.find_entry(t) {
@@ -673,7 +673,7 @@ fn resolve_operand_legacy(
             Some(_) => OperandState::not_ready(PhysReg(0), Some(t)),
             None => {
                 // ROB entry already committed — read from register file.
-                let value = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
+                let value = if is_fp { cpu.hart.regs.read_f(reg) } else { cpu.hart.regs.read(reg) };
                 OperandState::ready(PhysReg(0), None, value)
             }
         },

@@ -31,9 +31,9 @@ use crate::trace_fetch;
 pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_out: &mut u64) {
     output.clear();
 
-    let mut current_pc = cpu.pc;
+    let mut current_pc = cpu.hart.pc;
     // When MISA[C]=0, compressed instructions are disabled; require 4-byte alignment.
-    let c_enabled = (cpu.csrs.misa & csr::MISA_EXT_C) != 0;
+    let c_enabled = (cpu.hart.csrs.misa & csr::MISA_EXT_C) != 0;
     let align_mask: u64 = if c_enabled { 1 } else { 3 };
 
     // A real frontend fetches one cache line per cycle; bound the burst by line_end.
@@ -152,7 +152,7 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
                         ghr_snapshot: Ghr::default(),
                         ras_snapshot,
                     });
-                    cpu.pc = next_pc_calc;
+                    cpu.hart.pc = next_pc_calc;
                     break;
                 }
                 result.paddr
@@ -270,5 +270,5 @@ pub fn fetch1_stage(cpu: &mut Cpu, output: &mut Vec<Fetch1Fetch2Entry>, stall_ou
         }
     }
 
-    cpu.pc = current_pc;
+    cpu.hart.pc = current_pc;
 }

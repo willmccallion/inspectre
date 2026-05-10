@@ -41,9 +41,9 @@ const fn csr_addr_to_name(addr: u64) -> Option<&'static str> {
     }
 }
 
-/// Subscript register access returned by `cpu.regs`.
+/// Subscript register access returned by `cpu.hart.regs`.
 ///
-/// ``cpu.regs[10]`` reads x10. ``cpu.regs[10] = v`` writes x10.
+/// ``cpu.hart.regs[10]`` reads x10. ``cpu.hart.regs[10] = v`` writes x10.
 #[pyclass(name = "Registers")]
 pub struct Registers {
     pub cpu: Py<PyCpu>,
@@ -55,14 +55,14 @@ impl Registers {
         if idx >= 32 {
             return Err(PyIndexError::new_err(format!("register index {idx} out of range (0–31)")));
         }
-        Ok(self.cpu.borrow(py).inner.cpu.regs.read(RegIdx::new(idx as u8)))
+        Ok(self.cpu.borrow(py).inner.cpu.hart.regs.read(RegIdx::new(idx as u8)))
     }
 
     fn __setitem__(&self, py: Python<'_>, idx: usize, value: u64) -> PyResult<()> {
         if idx >= 32 {
             return Err(PyIndexError::new_err(format!("register index {idx} out of range (0–31)")));
         }
-        self.cpu.borrow_mut(py).inner.cpu.regs.write(RegIdx::new(idx as u8), value);
+        self.cpu.borrow_mut(py).inner.cpu.hart.regs.write(RegIdx::new(idx as u8), value);
         Ok(())
     }
 
@@ -70,7 +70,7 @@ impl Registers {
         let cpu = self.cpu.borrow(py);
         let vals: Vec<String> = (0u8..32)
             .filter_map(|i| {
-                let v = cpu.inner.cpu.regs.read(RegIdx::new(i));
+                let v = cpu.inner.cpu.hart.regs.read(RegIdx::new(i));
                 if v != 0 { Some(format!("x{i}={v:#x}")) } else { None }
             })
             .collect();
@@ -78,9 +78,9 @@ impl Registers {
     }
 }
 
-/// Subscript CSR access returned by `cpu.csrs`.
+/// Subscript CSR access returned by `cpu.hart.csrs`.
 ///
-/// ``cpu.csrs["mstatus"]`` or ``cpu.csrs[0x300]``.
+/// ``cpu.hart.csrs["mstatus"]`` or ``cpu.hart.csrs[0x300]``.
 #[pyclass(name = "Csrs")]
 pub struct Csrs {
     pub cpu: Py<PyCpu>,

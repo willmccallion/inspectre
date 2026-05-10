@@ -140,12 +140,12 @@ pub struct Pipeline<E: ExecutionEngine> {
 impl<E: ExecutionEngine> Pipeline<E> {
     /// Run one cycle of the entire pipeline.
     pub fn tick(&mut self, cpu: &mut crate::core::Cpu) {
-        let pc_before = cpu.pc;
+        let pc_before = cpu.hart.pc;
 
         self.engine.tick(cpu, &mut self.rename_output);
 
         // PC compare catches commit-stage redirects (MRET/SRET) that bypass execute's flush path.
-        let needs_frontend_flush = cpu.redirect_pending || cpu.pc != pc_before;
+        let needs_frontend_flush = cpu.redirect_pending || cpu.hart.pc != pc_before;
         if cpu.redirect_pending {
             cpu.redirect_pending = false;
         }
@@ -154,7 +154,7 @@ impl<E: ExecutionEngine> Pipeline<E> {
             self.rename_output.clear();
         }
 
-        if cpu.exit_code.is_none() && !cpu.wfi_waiting {
+        if cpu.exit_code.is_none() && !cpu.hart.wfi_waiting {
             self.frontend.tick(cpu, &mut self.engine, &mut self.rename_output);
         }
     }

@@ -184,7 +184,7 @@ fn read_operand_by_tag(
 
     tag.map_or_else(
         || {
-            let val = if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) };
+            let val = if is_fp { cpu.hart.regs.read_f(reg) } else { cpu.hart.regs.read(reg) };
             Some(val)
         },
         |t| match rob.find_entry(t) {
@@ -192,7 +192,7 @@ fn read_operand_by_tag(
             Some(_) => None,
             None => {
                 // ROB entry already committed — value is in the register file.
-                Some(if is_fp { cpu.regs.read_f(reg) } else { cpu.regs.read(reg) })
+                Some(if is_fp { cpu.hart.regs.read_f(reg) } else { cpu.hart.regs.read(reg) })
             }
         },
     )

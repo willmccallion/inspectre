@@ -110,7 +110,7 @@ impl ExecutionEngine for InOrderEngine {
         // Drain MSHRs first so parked loads re-enter the mem1→mem2 latch.
         drain_mshr_completions(cpu, &mut self.mem1_mem2, self.cycle);
 
-        let pc_before_commit = cpu.pc;
+        let pc_before_commit = cpu.hart.pc;
 
         let trap_event = commit::commit_stage(
             cpu,
@@ -132,12 +132,12 @@ impl ExecutionEngine for InOrderEngine {
             self.flush(cpu);
             cpu.redirect_pending = true;
             cpu.trap(&trap, pc);
-            cpu.committed_next_pc = cpu.pc;
+            cpu.hart.committed_next_pc = cpu.hart.pc;
             return;
         }
 
         // MRET/SRET changed the PC; flush so post-redirect stale fetches don't proceed.
-        if cpu.pc != pc_before_commit {
+        if cpu.hart.pc != pc_before_commit {
             self.flush(cpu);
             rename_output.clear();
             return;

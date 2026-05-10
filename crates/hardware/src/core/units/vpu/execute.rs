@@ -48,12 +48,12 @@ pub fn execute_vec_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap>
 
 /// Execute a vector crypto instruction (Zvkn*/Zvks*/Zvkg).
 fn execute_vec_crypto(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
-    let vstart = cpu.csrs.vstart as usize;
-    let vl = cpu.csrs.vl as usize;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    let vstart = cpu.hart.csrs.vstart as usize;
+    let vl = cpu.hart.csrs.vl as usize;
     crypto::execute_crypto(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         id.ctrl.vs1,
@@ -62,7 +62,7 @@ fn execute_vec_crypto(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap>
         id.inst,
         id.ctrl.vec_broadcast_vs2,
     );
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(0)
 }
@@ -73,14 +73,14 @@ fn execute_vsetvl_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> u64 {
     let requested_vtype = v_enc::zimm_vsetvli(id.inst);
     let rd_is_zero = id.rd.is_zero();
     let rs1_is_zero = id.rs1.is_zero();
-    let vlen = cpu.regs.vpr().vlen();
-    let current_vl = cpu.csrs.vl;
+    let vlen = cpu.hart.regs.vpr().vlen();
+    let current_vl = cpu.hart.csrs.vl;
 
     let (new_vl, new_vtype) =
         execute_vsetvl(avl, requested_vtype, rd_is_zero, rs1_is_zero, vlen, current_vl);
-    cpu.csrs.vl = new_vl;
-    cpu.csrs.vtype = new_vtype;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vl = new_vl;
+    cpu.hart.csrs.vtype = new_vtype;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     new_vl
 }
@@ -90,15 +90,15 @@ fn execute_vsetivli_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> u64 {
     let avl = v_enc::uimm_vsetivli(id.inst);
     let requested_vtype = v_enc::zimm_vsetivli(id.inst);
     let rd_is_zero = id.rd.is_zero();
-    let vlen = cpu.regs.vpr().vlen();
-    let current_vl = cpu.csrs.vl;
+    let vlen = cpu.hart.regs.vpr().vlen();
+    let current_vl = cpu.hart.csrs.vl;
 
     // vsetivli: rs1_is_zero is always false (uimm provides AVL)
     let (new_vl, new_vtype) =
         execute_vsetvl(avl, requested_vtype, rd_is_zero, false, vlen, current_vl);
-    cpu.csrs.vl = new_vl;
-    cpu.csrs.vtype = new_vtype;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vl = new_vl;
+    cpu.hart.csrs.vtype = new_vtype;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     new_vl
 }
@@ -109,31 +109,31 @@ fn execute_vsetvl_rs2_op(cpu: &mut Cpu, id: &RenameIssueEntry) -> u64 {
     let requested_vtype = id.rv2;
     let rd_is_zero = id.rd.is_zero();
     let rs1_is_zero = id.rs1.is_zero();
-    let vlen = cpu.regs.vpr().vlen();
-    let current_vl = cpu.csrs.vl;
+    let vlen = cpu.hart.regs.vpr().vlen();
+    let current_vl = cpu.hart.csrs.vl;
 
     let (new_vl, new_vtype) =
         execute_vsetvl(avl, requested_vtype, rd_is_zero, rs1_is_zero, vlen, current_vl);
-    cpu.csrs.vl = new_vl;
-    cpu.csrs.vtype = new_vtype;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vl = new_vl;
+    cpu.hart.csrs.vtype = new_vtype;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     new_vl
 }
 
 /// Build the common execution context from CPU state.
 const fn build_ctx(cpu: &Cpu) -> VecExecCtx {
-    let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
     VecExecCtx {
         sew: vtype.vsew,
-        vl: cpu.csrs.vl as usize,
-        vstart: cpu.csrs.vstart as usize,
+        vl: cpu.hart.csrs.vl as usize,
+        vstart: cpu.hart.csrs.vstart as usize,
         vma: vtype.vma,
         vta: vtype.vta,
         vlmul: vtype.vlmul,
         vm: true, // overridden per-instruction
-        vxrm: Vxrm::from_bits(cpu.csrs.vxrm as u8),
-        frm: match RoundingMode::from_bits(cpu.csrs.frm as u8) {
+        vxrm: Vxrm::from_bits(cpu.hart.csrs.vxrm as u8),
+        frm: match RoundingMode::from_bits(cpu.hart.csrs.frm as u8) {
             Some(rm) => rm,
             None => RoundingMode::Rne,
         },
@@ -191,9 +191,9 @@ const fn build_operand1(id: &RenameIssueEntry) -> VecOperand {
 
 /// Mark `mstatus.VS` and `sstatus.VS` as dirty.
 const fn mark_vs_dirty(cpu: &mut Cpu) {
-    cpu.csrs.mstatus = (cpu.csrs.mstatus & !crate::core::arch::csr::MSTATUS_VS)
+    cpu.hart.csrs.mstatus = (cpu.hart.csrs.mstatus & !crate::core::arch::csr::MSTATUS_VS)
         | crate::core::arch::csr::MSTATUS_VS_DIRTY;
-    cpu.csrs.sstatus = (cpu.csrs.sstatus & !crate::core::arch::csr::MSTATUS_VS)
+    cpu.hart.csrs.sstatus = (cpu.hart.csrs.sstatus & !crate::core::arch::csr::MSTATUS_VS)
         | crate::core::arch::csr::MSTATUS_VS_DIRTY;
 }
 
@@ -254,8 +254,8 @@ const fn check_widening_lmul(inst: u32, op: VectorOp, vlmul: Vlmul) -> Result<()
 
 /// Execute a vector integer arithmetic operation on the VPR.
 fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
-    let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
     check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -263,7 +263,7 @@ fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> 
 
     let result = vec_execute(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         operand1,
@@ -278,17 +278,17 @@ fn execute_vec_arith(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> 
     );
 
     if result.vxsat {
-        cpu.csrs.vxsat = 1;
+        cpu.hart.csrs.vxsat = 1;
     }
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result.scalar_result.unwrap_or(0))
 }
 
 /// Execute a vector floating-point operation.
 fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
-    let vtype = parse_vtype_with_elen(cpu.csrs.vtype, cpu.elen);
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
+    let vtype = parse_vtype_with_elen(cpu.hart.csrs.vtype, cpu.elen);
     check_widening_lmul(id.inst, id.ctrl.vec_op, vtype.vlmul)?;
 
     let mut ctx = build_ctx(cpu);
@@ -297,22 +297,22 @@ fn execute_vec_fp(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
 
     let result = fpu::vec_fp_execute(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         operand1,
         &ctx,
     );
 
-    cpu.csrs.fflags |= result.fp_flags.bits() as u64;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.fflags |= result.fp_flags.bits() as u64;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result.scalar_result.unwrap_or(0))
 }
 
 /// Execute a vector reduction operation.
 fn execute_vec_reduction(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -320,22 +320,22 @@ fn execute_vec_reduction(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Tr
     let operand1 = VecOperand::Vector(id.ctrl.vs1);
     let result = reduction::vec_reduce(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         &operand1,
         &ctx,
     );
 
-    cpu.csrs.fflags |= result.fp_flags.bits() as u64;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.fflags |= result.fp_flags.bits() as u64;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result.scalar_result.unwrap_or(0))
 }
 
 /// Execute a vector mask operation.
 fn execute_vec_mask(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -343,21 +343,21 @@ fn execute_vec_mask(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
 
     let result = mask::vec_mask_execute(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         &operand1,
         &ctx,
     );
 
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result.scalar_result.unwrap_or(0))
 }
 
 /// Execute a vector permutation operation.
 fn execute_vec_permute(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
-    check_vill(id.inst, cpu.csrs.vtype, cpu.elen)?;
+    check_vill(id.inst, cpu.hart.csrs.vtype, cpu.elen)?;
 
     let mut ctx = build_ctx(cpu);
     ctx.vm = id.ctrl.vm;
@@ -365,14 +365,14 @@ fn execute_vec_permute(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap
 
     let result = permute::vec_permute_execute(
         id.ctrl.vec_op,
-        cpu.regs.vpr_mut(),
+        cpu.hart.regs.vpr_mut(),
         id.ctrl.vd,
         id.ctrl.vs2,
         &operand1,
         &ctx,
     );
 
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result.scalar_result.unwrap_or(0))
 }
@@ -380,7 +380,7 @@ fn execute_vec_permute(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap
 /// Execute a vector load operation through the memory subsystem.
 fn execute_vec_load(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
     let result = mem::execute_vec_load(cpu, id)?;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result)
 }
@@ -388,7 +388,7 @@ fn execute_vec_load(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
 /// Execute a vector store operation through the memory subsystem.
 fn execute_vec_store(cpu: &mut Cpu, id: &RenameIssueEntry) -> Result<u64, Trap> {
     let result = mem::execute_vec_store(cpu, id)?;
-    cpu.csrs.vstart = 0;
+    cpu.hart.csrs.vstart = 0;
     mark_vs_dirty(cpu);
     Ok(result)
 }

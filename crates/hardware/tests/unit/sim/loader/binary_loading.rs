@@ -74,18 +74,18 @@ fn test_setup_kernel_load_without_opensbi() {
     loader::setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
 
     // Verify PC is set to RAM base
-    assert_eq!(cpu.pc, config.system.ram_base);
+    assert_eq!(cpu.hart.pc, config.system.ram_base);
 
     // Verify privilege mode is Machine
-    assert_eq!(cpu.privilege, PrivilegeMode::Machine);
+    assert_eq!(cpu.hart.privilege, PrivilegeMode::Machine);
 
     // Verify MEPC is set to kernel load address
     let expected_mepc = config.system.ram_base + config.system.kernel_offset;
     assert_eq!(cpu.csr_read(csr::MEPC), expected_mepc);
 
     // Verify registers are set up
-    assert_eq!(cpu.regs.read(abi::REG_A0), 0);
-    assert_eq!(cpu.regs.read(abi::REG_A1), config.system.ram_base + 0x2200000);
+    assert_eq!(cpu.hart.regs.read(abi::REG_A0), 0);
+    assert_eq!(cpu.hart.regs.read(abi::REG_A1), config.system.ram_base + 0x2200000);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_setup_kernel_load_dtb_address() {
 
     // DTB should be loaded at RAM base + 0x2200000
     let expected_dtb_addr = config.system.ram_base + 0x2200000;
-    assert_eq!(cpu.regs.read(abi::REG_A1), expected_dtb_addr);
+    assert_eq!(cpu.hart.regs.read(abi::REG_A1), expected_dtb_addr);
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_setup_kernel_load_register_a2_is_zero() {
     loader::setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
 
     // a2 register should be 0
-    assert_eq!(cpu.regs.read(abi::REG_A2), 0);
+    assert_eq!(cpu.hart.regs.read(abi::REG_A2), 0);
 }
 
 #[test]
@@ -165,11 +165,11 @@ fn test_setup_kernel_load_multiple_calls() {
 
     // First setup
     loader::setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
-    let pc_first = cpu.pc;
+    let pc_first = cpu.hart.pc;
 
     // Second setup (should overwrite)
     loader::setup_kernel_load(&mut cpu, &config, "", None, None).unwrap();
-    let pc_second = cpu.pc;
+    let pc_second = cpu.hart.pc;
 
     // Both should set the same PC
     assert_eq!(pc_first, pc_second);
@@ -193,8 +193,8 @@ fn test_setup_kernel_load_different_ram_bases() {
     loader::setup_kernel_load(&mut cpu2, &config2, "", None, None).unwrap();
 
     // PC should match the respective RAM bases
-    assert_eq!(cpu1.pc, 0x80000000);
-    assert_eq!(cpu2.pc, 0x90000000);
+    assert_eq!(cpu1.hart.pc, 0x80000000);
+    assert_eq!(cpu2.hart.pc, 0x90000000);
 }
 
 #[test]

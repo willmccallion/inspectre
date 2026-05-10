@@ -293,7 +293,7 @@ fn memwb_builder() {
 #[test]
 fn harness_boot_default_pc() {
     let ctx = TestContext::new();
-    assert_eq!(ctx.cpu().pc, 0x8000_0000, "CPU should start at RAM base");
+    assert_eq!(ctx.cpu().hart.pc, 0x8000_0000, "CPU should start at RAM base");
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn harness_load_program_writes_instructions_and_sets_pc() {
 
     let mut ctx = TestContext::new().with_memory(4096, 0x1000).load_program(0x1000, &program);
 
-    assert_eq!(ctx.cpu().pc, 0x1000, "PC should be set to program base");
+    assert_eq!(ctx.cpu().hart.pc, 0x1000, "PC should be set to program base");
     assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1000)), nop);
     assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1004)), addi);
 }

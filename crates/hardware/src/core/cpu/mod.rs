@@ -16,9 +16,11 @@ pub mod memory;
 /// Trap and exception handling logic.
 pub mod trap;
 
-use crate::common::{PhysAddr, RegisterFile};
+use crate::common::{HartId, PhysAddr, RegisterFile};
 use crate::config::{Config, InclusionPolicy};
+use crate::core::Hart;
 use crate::core::arch::csr::Csrs;
+use crate::core::hart::HartInit;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::pipeline::write_buffer::WriteCombiningBuffer;
 use crate::core::units::bru::BranchPredictorWrapper;
@@ -37,23 +39,11 @@ use crate::stats::SimStats;
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Cpu {
-    /// General Purpose and Floating Point Registers.
-    pub regs: RegisterFile,
-    /// Program Counter.
-    pub pc: u64,
-    /// Control and Status Registers.
-    pub csrs: Csrs,
-    /// Current Privilege Mode (M, S, U).
-    pub privilege: PrivilegeMode,
-    /// Load Reservation address (for LR/SC).
-    pub load_reservation: Option<PhysAddr>,
+    /// Per-thread architectural state (registers, CSRs, PC, MMU, PMP, ...).
+    pub hart: Hart,
 
     /// System-on-Chip: bus, memory controller, devices, exit signal.
     pub soc: Soc,
-    /// Memory Management Unit.
-    pub mmu: Mmu,
-    /// Physical Memory Protection unit.
-    pub pmp: Pmp,
     /// L1 Instruction Cache.
     pub l1_i_cache: CacheSim,
     /// L1 Data Cache.
@@ -98,19 +88,6 @@ pub struct Cpu {
     pub direct_mode: bool,
     /// CLINT time divider.
     pub clint_divider: u64,
-    /// Last PC (for hang detection).
-    pub last_pc: u64,
-    /// Hang detection counter.
-    pub same_pc_count: u64,
-    /// WFI state.
-    pub wfi_waiting: bool,
-    /// PC when WFI was entered.
-    pub wfi_pc: u64,
-    /// The PC that the next committed instruction should start at.
-    /// Updated after every commit to `entry.pc + entry.inst_size`.
-    /// Used as the EPC for interrupts when the ROB is empty, because
-    /// `cpu.pc` is the *fetch* PC, which can be far ahead of the commit point.
-    pub committed_next_pc: u64,
     /// Raw pointer to the start of simulated RAM.
     ///
     /// # Safety
@@ -128,32 +105,11 @@ pub struct Cpu {
     /// RAM fast-path and go through the bus so the HTIF device can intercept them.
     pub htif_range: Option<(u64, u64)>,
 
-    /// Ring buffer of (pc, inst) for last N retired instructions (for invalid-PC debug trace).
-    pub pc_trace: Vec<(u64, u32)>,
-    /// Last invalid PC we printed debug for (avoid duplicate dumps).
-    pub last_invalid_pc_debug: Option<u64>,
-
     /// Set by the backend when a PC redirect occurs (branch misprediction,
     /// trap, FENCE.I, etc.). The pipeline uses this to flush the frontend,
-    /// rather than relying solely on `cpu.pc != pc_before` which can miss
+    /// rather than relying solely on `cpu.hart.pc != pc_before` which can miss
     /// redirects when the target happens to equal the current fetch PC.
     pub redirect_pending: bool,
-
-    /// Software-managed A/D bits: PTW faults on A=0 or D=0 instead of
-    /// auto-setting them (matches spike's behavior for log comparison).
-    pub software_ad_bits: bool,
-
-    /// Trap on misaligned memory accesses instead of handling them natively.
-    pub misaligned_access_trap: bool,
-
-    /// Cycle at which a kernel panic was first detected (None if not yet detected).
-    /// The simulator runs for 100k more cycles after detection to allow the full
-    /// panic message to be printed before exiting.
-    pub panic_detected_at_cycle: Option<u64>,
-
-    /// Software-written SEIP bit. SEIP in mip is the OR of this and the PLIC
-    /// hardware signal, so we must track the software component separately.
-    pub sw_seip: bool,
 
     /// Optional buffered writer for the commit log (enabled by the `commit-log` feature).
     #[cfg(feature = "commit-log")]
@@ -179,13 +135,13 @@ impl Cpu {
     /// Sets a load reservation at the given address (cache-line aligned)
     #[inline]
     pub(crate) const fn set_reservation(&mut self, addr: PhysAddr) {
-        self.load_reservation = Some(Self::align_reservation_address(addr));
+        self.hart.load_reservation = Some(Self::align_reservation_address(addr));
     }
 
     /// Checks if a reservation exists for the given address
     #[inline]
     pub(crate) const fn check_reservation(&self, addr: PhysAddr) -> bool {
-        if let Some(reserved_addr) = self.load_reservation {
+        if let Some(reserved_addr) = self.hart.load_reservation {
             reserved_addr.0 == Self::align_reservation_address(addr).0
         } else {
             false
@@ -195,7 +151,7 @@ impl Cpu {
     /// Clears the load reservation
     #[inline]
     pub(crate) const fn clear_reservation(&mut self) {
-        self.load_reservation = None;
+        self.hart.load_reservation = None;
     }
 
     /// Creates a new CPU instance with the specified `SoC` and configuration.
@@ -280,14 +236,33 @@ impl Cpu {
         // via their own trap handlers; bare-metal binaries need M-mode too.
         let privilege = PrivilegeMode::Machine;
 
-        Self {
+        let mmu = Mmu::new(
+            config.memory.tlb_size,
+            config.memory.l2_tlb_size,
+            config.memory.l2_tlb_ways,
+            config.memory.l2_tlb_latency,
+            config.memory.software_ad_bits,
+            config.memory.paging_mode_max,
+        );
+
+        let mut hart = Hart::new(HartInit {
+            hart_id: HartId::new(0),
             regs,
             pc: config.general.start_pc,
+            csrs,
+            privilege,
+            mmu,
+            pmp: Pmp::new(),
+            software_ad_bits: config.memory.software_ad_bits,
+            misaligned_access_trap: config.memory.misaligned_access_trap,
+        });
+        hart.committed_next_pc = config.general.start_pc;
+
+        Self {
+            hart,
             trace: config.general.trace_instructions,
             soc,
             exit_code: None,
-            csrs,
-            privilege,
             direct_mode,
             cache_base: config.system.ram_base,
             stats: SimStats::default(),
@@ -309,16 +284,6 @@ impl Cpu {
             ),
             l2_cache: CacheSim::new(&config.cache.l2),
             l3_cache: CacheSim::new(&config.cache.l3),
-            mmu: Mmu::new(
-                config.memory.tlb_size,
-                config.memory.l2_tlb_size,
-                config.memory.l2_tlb_ways,
-                config.memory.l2_tlb_latency,
-                config.memory.software_ad_bits,
-                config.memory.paging_mode_max,
-            ),
-            pmp: Pmp::new(),
-            load_reservation: None,
             pipeline_width: config.pipeline.width,
             elen: config.pipeline.elen,
             zvfh: config.pipeline.zvfh,
@@ -326,22 +291,11 @@ impl Cpu {
                 == crate::core::pipeline::engine::BackendType::OutOfOrder,
             i_cache_line_bytes: config.cache.l1_i.line_bytes.max(1),
             clint_divider: config.system.clint_divider,
-            last_pc: 0,
-            same_pc_count: 0,
-            wfi_waiting: false,
-            wfi_pc: 0,
-            committed_next_pc: config.general.start_pc,
             ram_ptr,
             ram_start,
             ram_end,
             htif_range: None,
-            pc_trace: Vec::with_capacity(PC_TRACE_MAX),
-            last_invalid_pc_debug: None,
             redirect_pending: false,
-            software_ad_bits: config.memory.software_ad_bits,
-            misaligned_access_trap: config.memory.misaligned_access_trap,
-            panic_detected_at_cycle: None,
-            sw_seip: false,
             #[cfg(feature = "commit-log")]
             commit_log: None,
         }
@@ -374,8 +328,8 @@ impl Cpu {
 
     /// Dumps the current CPU state (PC and registers) to stdout.
     pub fn dump_state(&self) {
-        println!("PC = {:#018x}", self.pc);
-        self.regs.dump();
+        println!("PC = {:#018x}", self.hart.pc);
+        self.hart.regs.dump();
     }
 }
 

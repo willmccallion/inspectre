@@ -89,7 +89,7 @@ pub fn memory1_stage(
             let size = unaligned::width_to_bytes(ex.ctrl.width);
             let is_atomic = ex.ctrl.atomic_op != AtomicOp::None;
             if !unaligned::is_aligned(ex.alu, size) {
-                if cpu.misaligned_access_trap || is_atomic {
+                if cpu.hart.misaligned_access_trap || is_atomic {
                     let trap = if ex.ctrl.mem_write {
                         unaligned::store_misaligned_trap(ex.alu)
                     } else {
@@ -224,7 +224,7 @@ pub fn memory1_stage(
             }
 
             // S/U-mode trap on unmapped paddr; M-mode firmware probing expects bus default.
-            if cpu.privilege != crate::core::arch::mode::PrivilegeMode::Machine
+            if cpu.hart.privilege != crate::core::arch::mode::PrivilegeMode::Machine
                 && !cpu.soc.bus.is_valid_address(paddr)
             {
                 let fault = if ex.ctrl.mem_write {
@@ -240,7 +240,7 @@ pub fn memory1_stage(
                     vaddr     = %crate::trace::Hex(ex.alu),
                     paddr     = %crate::trace::Hex(paddr.val()),
                     is_write  = ex.ctrl.mem_write,
-                    priv_mode = ?cpu.privilege,
+                    priv_mode = ?cpu.hart.privilege,
                     "M1: unmapped physical address access fault"
                 );
                 output.push(Mem1Mem2Entry {
@@ -619,7 +619,7 @@ mod tests {
         let config = Config::default(); // RAM usually starts at 0x8000_0000.
         let soc = Soc::new(&config, "");
         let mut cpu = Cpu::new(soc, &config);
-        cpu.privilege = crate::core::arch::mode::PrivilegeMode::Supervisor; // S-mode traps on unmapped
+        cpu.hart.privilege = crate::core::arch::mode::PrivilegeMode::Supervisor; // S-mode traps on unmapped
 
         // Ensure translation succeeds (direct mode by default), but paddr is invalid
         let ctrl = ControlSignals { mem_read: true, ..Default::default() };

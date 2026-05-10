@@ -39,7 +39,7 @@ pub struct PyCpu {
 
 impl PyCpu {
     pub(crate) const fn privilege_str(&self) -> &'static str {
-        match self.inner.cpu.privilege {
+        match self.inner.cpu.hart.privilege {
             PrivilegeMode::Machine => "M",
             PrivilegeMode::Supervisor => "S",
             PrivilegeMode::User => "U",
@@ -47,7 +47,7 @@ impl PyCpu {
     }
 
     pub(crate) fn read_csr_by_name(&self, name: &str) -> Option<u64> {
-        let c = &self.inner.cpu.csrs;
+        let c = &self.inner.cpu.hart.csrs;
         match name {
             "mstatus" => Some(c.mstatus),
             "misa" => Some(c.misa),
@@ -197,12 +197,12 @@ impl PyCpu {
         let mut sim = Simulator::new(soc, &config);
 
         if let Some(entry) = elf_entry {
-            sim.cpu.pc = entry;
+            sim.cpu.hart.pc = entry;
         }
 
         if let Some(tohost) = tohost_addr {
             sim.cpu.direct_mode = false;
-            sim.cpu.privilege = PrivilegeMode::Machine;
+            sim.cpu.hart.privilege = PrivilegeMode::Machine;
             sim.cpu.htif_range = Some((tohost, tohost + 16));
         }
 
@@ -221,12 +221,12 @@ impl PyCpu {
     /// Program counter (read/write).
     #[getter]
     const fn pc(&self) -> u64 {
-        self.inner.cpu.pc
+        self.inner.cpu.hart.pc
     }
 
     #[setter]
     const fn set_pc(&mut self, value: u64) {
-        self.inner.cpu.pc = value;
+        self.inner.cpu.hart.pc = value;
     }
 
     /// Current privilege level: ``"M"``, ``"S"``, or ``"U"`` (read-only).
@@ -253,13 +253,13 @@ impl PyCpu {
         Ok(s.to_dict(py)?.into_bound(py).into_any().unbind())
     }
 
-    /// Register file — ``cpu.regs[10]``, ``cpu.regs[10] = v``.
+    /// Register file — ``cpu.hart.regs[10]``, ``cpu.hart.regs[10] = v``.
     #[getter]
     fn regs(slf: Bound<'_, Self>) -> Registers {
         Registers { cpu: slf.unbind() }
     }
 
-    /// CSR access — ``cpu.csrs["mstatus"]`` or ``cpu.csrs[0x300]``.
+    /// CSR access — ``cpu.hart.csrs["mstatus"]`` or ``cpu.hart.csrs[0x300]``.
     #[getter]
     fn csrs(slf: Bound<'_, Self>) -> Csrs {
         Csrs { cpu: slf.unbind() }
@@ -298,7 +298,7 @@ impl PyCpu {
     /// Committed PC trace from the pipeline as a list of ``(pc, raw_inst)`` pairs.
     #[getter]
     fn pc_trace(&self) -> Vec<(u64, u32)> {
-        self.inner.cpu.pc_trace.clone()
+        self.inner.cpu.hart.pc_trace.clone()
     }
 
     /// Open a commit log file. Each retired instruction is written as
@@ -314,7 +314,7 @@ impl PyCpu {
     /// before an instruction could commit.
     #[pyo3(signature = (max_cycles=100_000))]
     fn step(&mut self, py: Python<'_>, max_cycles: u64) -> PyResult<Option<PyInstruction>> {
-        let before_last = self.inner.cpu.pc_trace.last().copied();
+        let before_last = self.inner.cpu.hart.pc_trace.last().copied();
         let mut cycles_run: u64 = 0;
 
         loop {
@@ -334,7 +334,7 @@ impl PyCpu {
             }
             cycles_run += 1;
 
-            let new_last = self.inner.cpu.pc_trace.last().copied();
+            let new_last = self.inner.cpu.hart.pc_trace.last().copied();
             if new_last != before_last
                 && let Some((pc, inst)) = new_last
             {
@@ -480,7 +480,7 @@ impl PyCpu {
 
             let stop = {
                 let cpu = slf_py.borrow(py);
-                pc.is_some_and(|p| cpu.inner.cpu.pc == p)
+                pc.is_some_and(|p| cpu.inner.cpu.hart.pc == p)
                     || privilege.as_deref().is_some_and(|priv_str| cpu.privilege_str() == priv_str)
             };
             if stop {
@@ -581,26 +581,26 @@ impl PyCpu {
         let mut header = serde_json::Map::new();
         let _ = header.insert("magic".into(), serde_json::Value::from("rvsim-checkpoint"));
         let _ = header.insert("version".into(), serde_json::Value::from(1u64));
-        let _ = header.insert("pc".into(), serde_json::Value::from(cpu.pc));
-        let _ = header.insert("privilege".into(), serde_json::Value::from(cpu.privilege.to_u8()));
+        let _ = header.insert("pc".into(), serde_json::Value::from(cpu.hart.pc));
+        let _ = header.insert("privilege".into(), serde_json::Value::from(cpu.hart.privilege.to_u8()));
         let _ = header.insert("direct_mode".into(), serde_json::Value::from(cpu.direct_mode));
         let _ = header.insert("trace".into(), serde_json::Value::from(cpu.trace));
-        let _ = header.insert("wfi_waiting".into(), serde_json::Value::from(cpu.wfi_waiting));
-        let _ = header.insert("wfi_pc".into(), serde_json::Value::from(cpu.wfi_pc));
+        let _ = header.insert("wfi_waiting".into(), serde_json::Value::from(cpu.hart.wfi_waiting));
+        let _ = header.insert("wfi_pc".into(), serde_json::Value::from(cpu.hart.wfi_pc));
         let _ = header.insert("ram_start".into(), serde_json::Value::from(cpu.ram_start));
         let _ = header.insert("ram_end".into(), serde_json::Value::from(cpu.ram_end));
 
         let gprs: Vec<serde_json::Value> = (0u8..32)
-            .map(|i| serde_json::Value::from(cpu.regs.read(rvsim_core::common::RegIdx::new(i))))
+            .map(|i| serde_json::Value::from(cpu.hart.regs.read(rvsim_core::common::RegIdx::new(i))))
             .collect();
         let _ = header.insert("gpr".into(), serde_json::Value::Array(gprs));
 
         let fprs: Vec<serde_json::Value> = (0u8..32)
-            .map(|i| serde_json::Value::from(cpu.regs.read_f(rvsim_core::common::RegIdx::new(i))))
+            .map(|i| serde_json::Value::from(cpu.hart.regs.read_f(rvsim_core::common::RegIdx::new(i))))
             .collect();
         let _ = header.insert("fpr".into(), serde_json::Value::Array(fprs));
 
-        let c = &cpu.csrs;
+        let c = &cpu.hart.csrs;
         let mut csrs = serde_json::Map::new();
         let _ = csrs.insert("mstatus".into(), c.mstatus.into());
         let _ = csrs.insert("misa".into(), c.misa.into());
@@ -680,27 +680,27 @@ impl PyCpu {
 
         let cpu = &mut self.inner.cpu;
 
-        cpu.pc = header["pc"].as_u64().unwrap_or(0);
-        cpu.privilege = PrivilegeMode::from_u8(header["privilege"].as_u64().unwrap_or(3) as u8);
+        cpu.hart.pc = header["pc"].as_u64().unwrap_or(0);
+        cpu.hart.privilege = PrivilegeMode::from_u8(header["privilege"].as_u64().unwrap_or(3) as u8);
         cpu.direct_mode = header["direct_mode"].as_bool().unwrap_or(false);
         cpu.trace = header["trace"].as_bool().unwrap_or(false);
-        cpu.wfi_waiting = header["wfi_waiting"].as_bool().unwrap_or(false);
-        cpu.wfi_pc = header["wfi_pc"].as_u64().unwrap_or(0);
+        cpu.hart.wfi_waiting = header["wfi_waiting"].as_bool().unwrap_or(false);
+        cpu.hart.wfi_pc = header["wfi_pc"].as_u64().unwrap_or(0);
 
         if let Some(gprs) = header["gpr"].as_array() {
             for (i, v) in gprs.iter().enumerate().take(32) {
-                cpu.regs.write(rvsim_core::common::RegIdx::new(i as u8), v.as_u64().unwrap_or(0));
+                cpu.hart.regs.write(rvsim_core::common::RegIdx::new(i as u8), v.as_u64().unwrap_or(0));
             }
         }
 
         if let Some(fprs) = header["fpr"].as_array() {
             for (i, v) in fprs.iter().enumerate().take(32) {
-                cpu.regs.write_f(rvsim_core::common::RegIdx::new(i as u8), v.as_u64().unwrap_or(0));
+                cpu.hart.regs.write_f(rvsim_core::common::RegIdx::new(i as u8), v.as_u64().unwrap_or(0));
             }
         }
 
         if let Some(csrs) = header.get("csrs") {
-            let c = &mut cpu.csrs;
+            let c = &mut cpu.hart.csrs;
             macro_rules! restore_csr {
                 ($field:ident) => {
                     if let Some(v) = csrs.get(stringify!($field)).and_then(|v| v.as_u64()) {
@@ -761,9 +761,9 @@ impl PyCpu {
         let _ = cpu.l1_d_cache.flush();
         let _ = cpu.l2_cache.flush();
         let _ = cpu.l3_cache.flush();
-        cpu.mmu.dtlb.flush();
-        cpu.mmu.itlb.flush();
-        cpu.mmu.l2_tlb.flush();
+        cpu.hart.mmu.dtlb.flush();
+        cpu.hart.mmu.itlb.flush();
+        cpu.hart.mmu.l2_tlb.flush();
 
         Ok(())
     }

@@ -71,10 +71,10 @@ pub fn setup_kernel_load(
             println!("[Loader] WARNING: Linux Image not found at {kernel_path}");
         }
 
-        cpu.pc = opensbi_addr;
-        cpu.privilege = PrivilegeMode::Machine;
-        cpu.regs.write(abi::REG_A0, 0);
-        cpu.regs.write(abi::REG_A1, dtb_addr);
+        cpu.hart.pc = opensbi_addr;
+        cpu.hart.privilege = PrivilegeMode::Machine;
+        cpu.hart.regs.write(abi::REG_A0, 0);
+        cpu.hart.regs.write(abi::REG_A1, dtb_addr);
 
         if sbi_path == sbi_dynamic_path {
             // fw_dynamic_info struct: magic, version, next_addr, next_mode,
@@ -97,19 +97,19 @@ pub fn setup_kernel_load(
                 info_bytes.extend_from_slice(&field.to_le_bytes());
             }
             cpu.soc.load_binary_at(&info_bytes, PhysAddr::new(info_addr));
-            cpu.regs.write(abi::REG_A2, info_addr);
+            cpu.hart.regs.write(abi::REG_A2, info_addr);
         } else {
-            cpu.regs.write(abi::REG_A2, 0);
+            cpu.hart.regs.write(abi::REG_A2, 0);
         }
     } else {
         let load_addr = ram_base + config.system.kernel_offset;
 
         cpu.soc.load_binary_at(&sys_ops::MRET.to_le_bytes(), PhysAddr::new(ram_base));
-        cpu.pc = ram_base;
-        cpu.privilege = PrivilegeMode::Machine;
+        cpu.hart.pc = ram_base;
+        cpu.hart.privilege = PrivilegeMode::Machine;
         cpu.csr_write(csr::MEPC, load_addr);
-        cpu.regs.write(abi::REG_A0, 0);
-        cpu.regs.write(abi::REG_A1, dtb_addr);
+        cpu.hart.regs.write(abi::REG_A0, 0);
+        cpu.hart.regs.write(abi::REG_A1, dtb_addr);
     }
 
     Ok(())
@@ -217,10 +217,10 @@ mod tests {
         let ram_base = config.system.ram_base;
         let load_addr = ram_base + config.system.kernel_offset;
 
-        assert_eq!(cpu.pc, ram_base);
-        assert_eq!(cpu.privilege, PrivilegeMode::Machine);
+        assert_eq!(cpu.hart.pc, ram_base);
+        assert_eq!(cpu.hart.privilege, PrivilegeMode::Machine);
         assert_eq!(cpu.csr_read(csr::MEPC), load_addr);
-        assert_eq!(cpu.regs.read(abi::REG_A0), 0);
-        assert_eq!(cpu.regs.read(abi::REG_A1), ram_base + 0x2200000);
+        assert_eq!(cpu.hart.regs.read(abi::REG_A0), 0);
+        assert_eq!(cpu.hart.regs.read(abi::REG_A1), ram_base + 0x2200000);
     }
 }

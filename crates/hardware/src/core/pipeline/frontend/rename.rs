@@ -76,7 +76,7 @@ pub fn rename_stage<E: ExecutionEngine>(
             // operand_groups doesn't have EEW/SEW for vec mem; override grp.vd / grp.vs2 here.
             let is_mem = is_vec_load(id.ctrl.vec_op) || is_vec_store(id.ctrl.vec_op);
             if is_mem {
-                let vtype = parse_vtype(cpu.csrs.vtype);
+                let vtype = parse_vtype(cpu.hart.csrs.vtype);
                 if !vtype.vill {
                     grp.vd = vec_mem_dst_count(
                         id.ctrl.vec_op,
@@ -217,11 +217,11 @@ pub fn rename_stage<E: ExecutionEngine>(
                 let Some(ckpt_id) = engine.checkpoint_table_mut().allocate(
                     rob_tag,
                     &map_snapshot,
-                    cpu.csrs.vtype,
-                    cpu.csrs.vl,
-                    cpu.csrs.frm,
-                    cpu.csrs.vxrm,
-                    cpu.csrs.vstart,
+                    cpu.hart.csrs.vtype,
+                    cpu.hart.csrs.vl,
+                    cpu.hart.csrs.frm,
+                    cpu.hart.csrs.vxrm,
+                    cpu.hart.csrs.vstart,
                 ) else {
                     unreachable!("checkpoint table full after stall check");
                 };
@@ -269,11 +269,11 @@ pub fn rename_stage<E: ExecutionEngine>(
                     VecPhysReg::ZERO
                 },
                 // Snapshot vector CSRs so execute uses dispatch-time context even after vsetvl.
-                vec_vtype: cpu.csrs.vtype,
-                vec_vl: cpu.csrs.vl,
-                vec_vstart: cpu.csrs.vstart,
-                vec_vxrm: cpu.csrs.vxrm,
-                vec_frm: cpu.csrs.frm,
+                vec_vtype: cpu.hart.csrs.vtype,
+                vec_vl: cpu.hart.csrs.vl,
+                vec_vstart: cpu.hart.csrs.vstart,
+                vec_vxrm: cpu.hart.csrs.vxrm,
+                vec_frm: cpu.hart.csrs.frm,
             };
 
             trace_rename!(cpu.trace;
@@ -361,11 +361,11 @@ pub fn rename_stage<E: ExecutionEngine>(
                 vec_src2_count: 0,
                 vec_src3_count: 0,
                 mask_phys: VecPhysReg::ZERO,
-                vec_vtype: cpu.csrs.vtype,
-                vec_vl: cpu.csrs.vl,
-                vec_vstart: cpu.csrs.vstart,
-                vec_vxrm: cpu.csrs.vxrm,
-                vec_frm: cpu.csrs.frm,
+                vec_vtype: cpu.hart.csrs.vtype,
+                vec_vl: cpu.hart.csrs.vl,
+                vec_vstart: cpu.hart.csrs.vstart,
+                vec_vxrm: cpu.hart.csrs.vxrm,
+                vec_frm: cpu.hart.csrs.frm,
             };
 
             trace_rename!(cpu.trace;
