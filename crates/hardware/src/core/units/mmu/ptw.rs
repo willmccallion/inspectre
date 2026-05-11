@@ -1,8 +1,11 @@
 //! Hardware Page Table Walker (PTW) for RISC-V Sv39 / Sv48 / Sv57.
 //!
-//! This module implements the hardware page table walking algorithm. The PTE
-//! format and 9-bit-per-level VPN slicing are identical across modes; only the
-//! number of levels differs and is passed in by the caller.
+//! The walker is a state machine. The caller (pipeline LSU or front-end)
+//! starts a walk via [`start_walk`], stashes the returned [`WalkState`] in
+//! its outstanding-walks table, and issues a `MemReq` for the requested
+//! `pte_addr`. When the matching `MemResp` arrives, the caller hands the
+//! raw PTE back to [`continue_walk`], which either completes translation
+//! or returns the next PTE to read.
 
 use crate::common::{
     AccessType, Asid, PAGE_SHIFT, PhysAddr, Ppn, TranslationResult, Trap, VPN_MASK, VirtAddr, Vpn,
@@ -11,33 +14,33 @@ use crate::core::arch::csr::{Csrs, PagingMode, SATP_ASID_MASK, SATP_ASID_SHIFT, 
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::{Pmp, PmpResult};
-use crate::soc::interconnect::Bus;
 
 /// Page Table Entry valid bit (bit 0).
 const PTE_VALID_BIT: u64 = 1;
-
 /// Page Table Entry read permission bit (bit 1).
 const PTE_READ_BIT: u64 = 1 << 1;
-
 /// Page Table Entry write permission bit (bit 2).
 const PTE_WRITE_BIT: u64 = 1 << 2;
-
 /// Page Table Entry execute permission bit (bit 3).
 const PTE_EXEC_BIT: u64 = 1 << 3;
-
 /// Page Table Entry user mode access bit (bit 4).
 const PTE_USER_BIT: u64 = 1 << 4;
-
 /// Page Table Entry accessed bit (bit 6).
 const PTE_ACCESSED_BIT: u64 = 1 << 6;
-
 /// Page Table Entry dirty bit (bit 7).
 const PTE_DIRTY_BIT: u64 = 1 << 7;
-
 /// Bit shift to extract Physical Page Number from PTE (bits 10-53).
 const PTE_PPN_SHIFT: u64 = 10;
+/// Number of bits used for VPN indexing at each level (9 bits per level).
+const VPN_BITS_PER_LEVEL: u64 = 9;
+/// Bit mask to extract VPN index from virtual address (9 bits: 0x1FF).
+const VPN_ENTRY_MASK: u64 = 0x1FF;
+/// Size of a Page Table Entry in bytes.
+const PTE_SIZE: u64 = 8;
+/// Cycles required to update a PTE's accessed/dirty bits in memory.
+const PTE_UPDATE_CYCLES: u64 = 10;
 
-/// A strongly-typed wrapper around a raw 64-bit SV39 Page Table Entry.
+/// A strongly-typed wrapper around a raw 64-bit Page Table Entry.
 #[derive(Clone, Copy, Debug)]
 struct PageTableEntry(u64);
 
@@ -115,179 +118,223 @@ impl PageTableEntry {
     }
 }
 
-/// Per-walk inputs that travel together: what is being accessed, by whom, and
-/// under which paging mode. Bundled into one struct so the PTW signature stays
-/// below the clippy too-many-arguments threshold.
+/// Per-walk inputs that travel together.
 #[derive(Clone, Copy, Debug)]
 pub struct WalkRequest {
     /// Type of memory access being attempted (fetch/read/write).
     pub access: AccessType,
     /// Privilege mode of the processor at the time of access.
     pub privilege: PrivilegeMode,
-    /// Active paging mode (drives the level count and canonical-VA width).
+    /// Active paging mode.
     pub mode: PagingMode,
 }
 
-/// Performs a hardware page table walk for the given paging mode.
+/// In-flight page-table walk state.
 ///
-/// Traverses the page table tree starting from the root PPN in the SATP register.
-/// Supports 4KB pages plus all superpage sizes the mode allows
-/// (Sv39: 2 MiB / 1 GiB; Sv48 adds 512 GiB; Sv57 adds 256 TiB).
-pub fn page_table_walk(
-    mmu: &mut Mmu,
-    vaddr: VirtAddr,
-    request: WalkRequest,
-    csrs: &Csrs,
-    bus: &mut Bus,
-) -> TranslationResult {
-    page_table_walk_inner(mmu, vaddr, request, csrs, bus, None)
+/// Each step issues a [`MemReq`](crate::sim::packet::Packet::MemReq) for the
+/// PTE at `pte_addr`. The pipeline stashes the [`WalkState`] until the
+/// matching `MemResp` arrives, then calls [`continue_walk`] with the raw
+/// 64-bit PTE value to advance.
+#[derive(Clone, Debug)]
+pub struct WalkState {
+    /// Virtual address being translated.
+    pub vaddr: VirtAddr,
+    /// Type of access.
+    pub access: AccessType,
+    /// Privilege mode at the start of the walk.
+    pub privilege: PrivilegeMode,
+    /// Paging mode (drives level count).
+    pub mode: PagingMode,
+    /// Current page-table level being read (counting down to 0).
+    pub level: u32,
+    /// PPN of the current page table.
+    pub ppn_raw: u64,
+    /// ASID captured from SATP at walk start.
+    pub asid: Asid,
+    /// Cumulative cycle cost of the walk so far.
+    pub cycles: u64,
 }
 
-/// Page table walk with optional PMP checking on PTE reads.
-pub fn page_table_walk_with_pmp(
-    mmu: &mut Mmu,
-    vaddr: VirtAddr,
-    request: WalkRequest,
-    csrs: &Csrs,
-    bus: &mut Bus,
-    pmp: &Pmp,
-) -> TranslationResult {
-    page_table_walk_inner(mmu, vaddr, request, csrs, bus, Some(pmp))
+/// Output of [`start_walk`] or [`continue_walk`].
+#[derive(Clone, Debug)]
+pub enum WalkStep {
+    /// Walk is finished (success or fault).
+    Done(TranslationResult),
+    /// Next PTE to read. The caller must issue a `MemReq` for `pte_addr`,
+    /// stash the `state`, and call [`continue_walk`] with the resulting
+    /// PTE value when the response arrives.
+    NeedPte {
+        /// Physical address of the next PTE to load.
+        pte_addr: PhysAddr,
+        /// Walk state to stash until the response arrives.
+        state: WalkState,
+    },
 }
 
-fn page_table_walk_inner(
-    mmu: &mut Mmu,
-    vaddr: VirtAddr,
+/// Begins a hardware page-table walk for the given virtual address.
+///
+/// Returns either an immediate [`WalkStep::Done`] (PMP fault before the first
+/// PTE read) or [`WalkStep::NeedPte`] with the address of the first PTE.
+pub fn start_walk(
     request: WalkRequest,
+    vaddr: VirtAddr,
     csrs: &Csrs,
-    bus: &mut Bus,
     pmp: Option<&Pmp>,
-) -> TranslationResult {
-    /// Number of bits used for VPN indexing at each level (9 bits per level).
-    const VPN_BITS_PER_LEVEL: u64 = 9;
-
-    /// Bit mask to extract VPN index from virtual address (9 bits: 0x1FF).
-    const VPN_ENTRY_MASK: u64 = 0x1FF;
-
-    /// Size of a Page Table Entry in bytes (8 bytes for 64-bit PTE).
-    const PTE_SIZE: u64 = 8;
-
-    /// Cycles required to update a PTE's accessed/dirty bits in memory.
-    const PTE_UPDATE_CYCLES: u64 = 10;
-
-    let WalkRequest { access, privilege, mode } = request;
-    let levels = mode.levels();
+) -> WalkStep {
     let satp = csrs.satp;
-    let mut ppn_raw = satp & SATP_PPN_MASK;
+    let ppn_raw = satp & SATP_PPN_MASK;
     let asid = Asid::new(((satp >> SATP_ASID_SHIFT) & SATP_ASID_MASK) as u16);
-    let mut cycles = 0;
 
-    for level in (0..levels).rev() {
-        let vpn_shift = PAGE_SHIFT + level as u64 * VPN_BITS_PER_LEVEL;
-        let vpn_i = (vaddr.val() >> vpn_shift) & VPN_ENTRY_MASK;
-        let pte_addr = (ppn_raw << PAGE_SHIFT) + (vpn_i * PTE_SIZE);
+    let state = WalkState {
+        vaddr,
+        access: request.access,
+        privilege: request.privilege,
+        mode: request.mode,
+        level: request.mode.levels() - 1,
+        ppn_raw,
+        asid,
+        cycles: 0,
+    };
+    request_pte(state, pmp)
+}
 
-        if let Some(pmp_unit) = pmp {
-            let pmp_result = pmp_unit.check(pte_addr, 8, true, false, false, false);
-            if pmp_result != PmpResult::Allow {
-                return TranslationResult::fault(
-                    match access {
-                        AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
-                        AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
-                        AccessType::Write => Trap::StoreAccessFault(vaddr.val()),
-                    },
-                    cycles,
-                );
-            }
-        }
+/// Continues an in-flight walk after the caller has read the requested PTE
+/// from memory.
+pub fn continue_walk(
+    mut state: WalkState,
+    raw_pte: u64,
+    mmu: &mut Mmu,
+    csrs: &Csrs,
+    pmp: Option<&Pmp>,
+    bus_transit_cycles: u64,
+) -> WalkStep {
+    state.cycles += bus_transit_cycles;
+    let pte = PageTableEntry::new(raw_pte);
 
-        cycles += bus.calculate_transit_time(8);
-        let raw_pte = bus.read_u64(crate::common::PhysAddr::new(pte_addr));
-        let pte = PageTableEntry::new(raw_pte);
-
-        if !pte.is_valid() {
-            return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-        }
-
-        if pte.is_pointer() {
-            if level == 0 {
-                return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-            }
-            ppn_raw = pte.ppn_raw();
-            continue;
-        }
-
-        // W=1, R=0 is a reserved PTE encoding (spec 4.3.1) — must fault.
-        if pte.can_write() && !pte.can_read() {
-            return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-        }
-
-        if level > 0 {
-            let ppn_mask = (1 << (level as u64 * VPN_BITS_PER_LEVEL)) - 1;
-            if (pte.ppn_raw() & ppn_mask) != 0 {
-                return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-            }
-        }
-
-        if check_permissions(pte, access, privilege, csrs).is_err() {
-            return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-        }
-
-        // Software-managed A/D bits: fault to let the OS trap handler set them (matches spike).
-        if mmu.software_ad_bits {
-            if !pte.is_accessed() {
-                return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-            }
-            if access == AccessType::Write && !pte.is_dirty() {
-                return TranslationResult::fault(page_fault(vaddr.val(), access), cycles);
-            }
-        }
-
-        let (new_pte, updated) = update_access_bits(pte, access);
-
-        // Defer A/D bit writes to commit: speculative writes here would
-        // irreversibly corrupt kernel page-table state if the inst is squashed.
-        let pte_update = if updated {
-            cycles += PTE_UPDATE_CYCLES;
-            Some(crate::common::error::PteUpdate {
-                pte_addr: crate::common::PhysAddr::new(pte_addr),
-                pte_value: new_pte.raw(),
-            })
-        } else {
-            None
-        };
-
-        let final_ppn = pte.ppn();
-
-        let offset_mask = (1u64 << vpn_shift) - 1;
-        let final_paddr = final_ppn.to_addr() | (vaddr.val() & offset_mask);
-
-        let specific_4kb_ppn = Ppn::new(final_paddr >> PAGE_SHIFT);
-        let vpn = Vpn::new((vaddr.val() >> PAGE_SHIFT) & VPN_MASK);
-
-        // Cache the *original* PTE bits (no speculative A/D); a re-walk
-        // after commit picks up the updated state from RAM.
-        let pte_raw = pte.raw();
-        if access == AccessType::Fetch {
-            mmu.itlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
-        } else {
-            mmu.dtlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
-        }
-        mmu.l2_tlb.insert(vpn, specific_4kb_ppn, pte_raw, asid);
-
-        return pte_update.map_or_else(
-            || TranslationResult::success(PhysAddr::new(final_paddr), cycles),
-            |update| {
-                TranslationResult::success_with_pte_update(
-                    PhysAddr::new(final_paddr),
-                    cycles,
-                    update,
-                )
-            },
-        );
+    if !pte.is_valid() {
+        return WalkStep::Done(TranslationResult::fault(
+            page_fault(state.vaddr.val(), state.access),
+            state.cycles,
+        ));
     }
 
-    TranslationResult::fault(page_fault(vaddr.val(), access), cycles)
+    if pte.is_pointer() {
+        if state.level == 0 {
+            return WalkStep::Done(TranslationResult::fault(
+                page_fault(state.vaddr.val(), state.access),
+                state.cycles,
+            ));
+        }
+        state.level -= 1;
+        state.ppn_raw = pte.ppn_raw();
+        return request_pte(state, pmp);
+    }
+
+    // Leaf PTE: validate, set A/D, install in TLB, return success.
+    if pte.can_write() && !pte.can_read() {
+        return WalkStep::Done(TranslationResult::fault(
+            page_fault(state.vaddr.val(), state.access),
+            state.cycles,
+        ));
+    }
+
+    if state.level > 0 {
+        let ppn_mask = (1u64 << (u64::from(state.level) * VPN_BITS_PER_LEVEL)) - 1;
+        if (pte.ppn_raw() & ppn_mask) != 0 {
+            return WalkStep::Done(TranslationResult::fault(
+                page_fault(state.vaddr.val(), state.access),
+                state.cycles,
+            ));
+        }
+    }
+
+    if check_permissions(pte, state.access, state.privilege, csrs).is_err() {
+        return WalkStep::Done(TranslationResult::fault(
+            page_fault(state.vaddr.val(), state.access),
+            state.cycles,
+        ));
+    }
+
+    if mmu.software_ad_bits {
+        if !pte.is_accessed() {
+            return WalkStep::Done(TranslationResult::fault(
+                page_fault(state.vaddr.val(), state.access),
+                state.cycles,
+            ));
+        }
+        if state.access == AccessType::Write && !pte.is_dirty() {
+            return WalkStep::Done(TranslationResult::fault(
+                page_fault(state.vaddr.val(), state.access),
+                state.cycles,
+            ));
+        }
+    }
+
+    let (new_pte, updated) = update_access_bits(pte, state.access);
+
+    let pte_update = if updated {
+        state.cycles += PTE_UPDATE_CYCLES;
+        let vpn_shift = PAGE_SHIFT + u64::from(state.level) * VPN_BITS_PER_LEVEL;
+        let vpn_i = (state.vaddr.val() >> vpn_shift) & VPN_ENTRY_MASK;
+        let pte_addr = (state.ppn_raw << PAGE_SHIFT) + (vpn_i * PTE_SIZE);
+        Some(crate::common::error::PteUpdate {
+            pte_addr: PhysAddr::new(pte_addr),
+            pte_value: new_pte.raw(),
+        })
+    } else {
+        None
+    };
+
+    let final_ppn = pte.ppn();
+    let vpn_shift = PAGE_SHIFT + u64::from(state.level) * VPN_BITS_PER_LEVEL;
+    let offset_mask = (1u64 << vpn_shift) - 1;
+    let final_paddr = final_ppn.to_addr() | (state.vaddr.val() & offset_mask);
+
+    let specific_4kb_ppn = Ppn::new(final_paddr >> PAGE_SHIFT);
+    let vpn = Vpn::new((state.vaddr.val() >> PAGE_SHIFT) & VPN_MASK);
+
+    let pte_raw = pte.raw();
+    if state.access == AccessType::Fetch {
+        mmu.itlb.insert(vpn, specific_4kb_ppn, pte_raw, state.asid);
+    } else {
+        mmu.dtlb.insert(vpn, specific_4kb_ppn, pte_raw, state.asid);
+    }
+    mmu.l2_tlb.insert(vpn, specific_4kb_ppn, pte_raw, state.asid);
+
+    let result = pte_update.map_or_else(
+        || TranslationResult::success(PhysAddr::new(final_paddr), state.cycles),
+        |update| {
+            TranslationResult::success_with_pte_update(
+                PhysAddr::new(final_paddr),
+                state.cycles,
+                update,
+            )
+        },
+    );
+    WalkStep::Done(result)
+}
+
+/// Computes the PTE address for the current walk step, checks PMP, and
+/// returns the next [`WalkStep`]. Used by both `start_walk` and
+/// `continue_walk` when advancing.
+fn request_pte(state: WalkState, pmp: Option<&Pmp>) -> WalkStep {
+    let vpn_shift = PAGE_SHIFT + u64::from(state.level) * VPN_BITS_PER_LEVEL;
+    let vpn_i = (state.vaddr.val() >> vpn_shift) & VPN_ENTRY_MASK;
+    let pte_addr = (state.ppn_raw << PAGE_SHIFT) + (vpn_i * PTE_SIZE);
+
+    if let Some(pmp_unit) = pmp {
+        let pmp_result = pmp_unit.check(pte_addr, 8, true, false, false, false);
+        if pmp_result != PmpResult::Allow {
+            let trap = match state.access {
+                AccessType::Fetch => Trap::InstructionAccessFault(state.vaddr.val()),
+                AccessType::Read => Trap::LoadAccessFault(state.vaddr.val()),
+                AccessType::Write => Trap::StoreAccessFault(state.vaddr.val()),
+            };
+            return WalkStep::Done(TranslationResult::fault(trap, state.cycles));
+        }
+    }
+
+    WalkStep::NeedPte { pte_addr: PhysAddr::new(pte_addr), state }
 }
 
 /// Validates access permissions for a leaf PTE.

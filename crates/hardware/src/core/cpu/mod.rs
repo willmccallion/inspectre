@@ -24,7 +24,9 @@ use crate::core::hart::HartInit;
 use crate::core::units::mmu::Mmu;
 use crate::core::units::mmu::pmp::Pmp;
 use crate::core::{Core, Hart};
+use crate::sim::events::EventQueue;
 use crate::sim::per_hart_debug::HartDebug;
+use crate::sim::stats::Stats;
 use crate::soc::Soc;
 use crate::stats::SimStats;
 use std::sync::Arc;
@@ -71,6 +73,14 @@ pub struct Cpu {
     /// `config.general.direct_mode` and runtime-mutable (the ELF loader
     /// writes it after init).
     pub direct_mode: bool,
+
+    /// Global event queue: every inter-component message lands here.
+    pub event_queue: EventQueue,
+    /// Hierarchical statistics tree. Will absorb [`SimStats`] in a later phase.
+    pub stats_hier: Stats,
+    /// Monotonic counter for assigning fresh [`crate::sim::components::ReqId`]
+    /// values to outgoing memory requests.
+    pub next_req_id: u64,
 }
 
 unsafe impl Send for Cpu {}
@@ -211,6 +221,9 @@ impl Cpu {
             exit_signal,
             exit_code: None,
             direct_mode,
+            event_queue: EventQueue::new(),
+            stats_hier: Stats::new(),
+            next_req_id: 0,
         }
     }
 

@@ -6,10 +6,16 @@
 //! 3. **`ExecutionEngine`** — high-level trait covering the entire backend.
 //! 4. **`PipelineDispatch`** — enum dispatch for type-erased pipeline storage.
 
+use std::collections::HashMap;
+
+use crate::config::Config;
 use crate::core::pipeline::checkpoint::CheckpointTable;
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::latches::RenameIssueEntry;
 use crate::core::pipeline::load_queue::LoadQueue;
+use crate::core::pipeline::outstanding::{
+    OutstandingFetch, OutstandingLoad, OutstandingStore, OutstandingWalk,
+};
 use crate::core::pipeline::prf::PhysReg;
 use crate::core::pipeline::prf::PhysRegFile;
 use crate::core::pipeline::rename_map::RenameMap;
@@ -19,6 +25,10 @@ use crate::core::pipeline::snapshot::PipelineSnapshot;
 use crate::core::pipeline::store_buffer::StoreBuffer;
 use crate::core::pipeline::vec_prf::VecPhysRegFile;
 use crate::core::units::vpu::types::VecPhysReg;
+use crate::sim::components::{CacheId, ComponentId, PipelineId, ReqId};
+use crate::sim::events::EventQueue;
+use crate::sim::packet::Packet;
+use crate::sim::stats::Stats;
 use serde::Deserialize;
 
 /// Backend type selection.
@@ -137,10 +147,33 @@ pub trait ExecutionEngine {
     }
 }
 
-/// The full pipeline combines a frontend and an engine.
+/// Borrow bundle handed to each pipeline stage so it can schedule outgoing
+/// packets, mutate hierarchical stats, and consult routing IDs without
+/// reaching into [`Cpu`](crate::core::Cpu) for everything.
 ///
-/// The frontend is generic over the engine type, so the full pipeline
-/// maintains both together.
+/// Constructed once per cycle by the [`Pipeline::tick`] wrapper.  Stages
+/// receive `&mut PipelineCtx` and use it to emit [`MemReq`](crate::sim::packet::Packet::MemReq)
+/// packets and route them to the right L1 cache.
+#[derive(Debug)]
+pub struct PipelineCtx<'a> {
+    /// Global event scheduler.
+    pub scheduler: &'a mut EventQueue,
+    /// Hierarchical statistics tree.
+    pub stats: &'a mut Stats,
+    /// Read-only configuration.
+    pub config: &'a Config,
+    /// Current simulation cycle.
+    pub cycle: u64,
+    /// `ComponentId` of this pipeline; stamped on outgoing packets as `source`.
+    pub self_id: ComponentId,
+    /// L1 instruction cache target for fetch requests.
+    pub l1_i_id: ComponentId,
+    /// L1 data cache target for load / store requests.
+    pub l1_d_id: ComponentId,
+}
+
+/// The full pipeline combines a frontend, an engine, and the bookkeeping
+/// for in-flight memory operations routed through the event queue.
 #[derive(Debug)]
 pub struct Pipeline<E: ExecutionEngine> {
     /// Frontend stages: fetch, decode, rename.
@@ -153,6 +186,38 @@ pub struct Pipeline<E: ExecutionEngine> {
     /// (branch misprediction, trap, FENCE.I, MRET/SRET). Read at the top
     /// of `tick` to decide whether to flush the frontend, then cleared.
     pub redirect_pending: bool,
+    /// Identifier the dispatch loop uses to route `MemResp` packets here.
+    pub pipeline_id: PipelineId,
+    /// Inbound packets the dispatch loop placed here this cycle.
+    pub mailbox: Vec<(ComponentId, Packet)>,
+    /// Inflight instruction fetches keyed by request id.
+    pub outstanding_fetches: HashMap<ReqId, OutstandingFetch>,
+    /// Inflight demand loads keyed by request id.
+    pub outstanding_loads: HashMap<ReqId, OutstandingLoad>,
+    /// Inflight stores keyed by request id.
+    pub outstanding_stores: HashMap<ReqId, OutstandingStore>,
+    /// Inflight page-table walks keyed by the current PTE-read request id.
+    pub outstanding_walks: HashMap<ReqId, OutstandingWalk>,
+    /// Monotonic request-id counter.
+    pub next_req_id: u64,
+    /// Cached L1 instruction cache id.
+    pub l1_i_id: CacheId,
+    /// Cached L1 data cache id.
+    pub l1_d_id: CacheId,
+}
+
+impl<E: ExecutionEngine> Pipeline<E> {
+    /// Allocates a fresh [`ReqId`] for an outgoing packet.
+    pub fn alloc_req_id(&mut self) -> ReqId {
+        let id = self.next_req_id;
+        self.next_req_id = id.wrapping_add(1);
+        ReqId::new(id)
+    }
+
+    /// Places an inbound packet into the pipeline's mailbox.
+    pub fn deliver(&mut self, source: ComponentId, packet: Packet) {
+        self.mailbox.push((source, packet));
+    }
 }
 
 impl<E: ExecutionEngine> Pipeline<E> {
@@ -198,6 +263,14 @@ impl PipelineDispatch {
         match self {
             Self::InOrder(p) => p.tick(cpu),
             Self::OutOfOrder(p) => p.tick(cpu),
+        }
+    }
+
+    /// Places an inbound packet into the pipeline's mailbox.
+    pub fn deliver(&mut self, source: ComponentId, packet: Packet) {
+        match self {
+            Self::InOrder(p) => p.deliver(source, packet),
+            Self::OutOfOrder(p) => p.deliver(source, packet),
         }
     }
 

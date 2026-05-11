@@ -64,3 +64,9 @@ pub mod backend;
 
 /// Point-in-time pipeline state snapshot.
 pub mod snapshot;
+
+/// In-flight memory requests (fetches, loads, stores, page-table walks) the
+/// pipeline is waiting on.  Entries are keyed by `ReqId`; the mailbox-drain
+/// stage uses these maps to wake up parked operations when their `MemResp`
+/// arrives.
+pub mod outstanding;

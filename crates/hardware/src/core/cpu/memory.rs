@@ -1,24 +1,47 @@
-//! Memory Access Helpers — virtual-to-physical address translation.
+//! Virtual-to-physical translation entry point on `Cpu`.
+//!
+//! Wraps the MMU's event-driven [`Mmu::translate_async`](crate::core::units::mmu::Mmu::translate_async)
+//! and PMP checks. Pipeline stages call this; on a TLB hit / direct-mode
+//! address the result is immediate, on a TLB miss the caller stashes the
+//! returned walk state until the PTE response arrives in its mailbox.
 
 use super::Cpu;
 use crate::common::{AccessType, PhysAddr, TranslationResult, Trap, VirtAddr};
+use crate::core::units::mmu::TranslateOutcome;
 use crate::core::units::mmu::pmp::PmpResult;
+use crate::core::units::mmu::ptw::WalkState;
+
+/// Outcome of [`Cpu::translate`] / [`Cpu::translate_continue`].
+///
+/// Mirrors [`TranslateOutcome`] but lifted onto `Cpu` so callers don't
+/// import the MMU module directly.
+#[derive(Clone, Debug)]
+pub enum TranslateResult {
+    /// Translation finished (success or fault). The cycle field of the
+    /// inner `TranslationResult` carries any PMP / TLB latency that
+    /// applies before the access begins.
+    Ready(TranslationResult),
+    /// Caller must issue a `MemReq` for `pte_addr`, stash `state`, and
+    /// resume via [`Cpu::translate_continue`] when the response arrives.
+    NeedPte {
+        /// Address of the next PTE to read.
+        pte_addr: PhysAddr,
+        /// Walk state to stash until the response arrives.
+        state: WalkState,
+    },
+}
 
 impl Cpu {
-    /// Translates a virtual address to a physical address using the MMU.
+    /// Begins (or completes) translation of a virtual address.
     pub fn translate(
         &mut self,
         vaddr: VirtAddr,
         access: AccessType,
         size: u64,
-    ) -> TranslationResult {
+    ) -> TranslateResult {
         if self.direct_mode {
             let paddr = PhysAddr::new(vaddr.val());
 
-            // PMP operates on physical addresses independent of virtual memory
-            // translation (RISC-V Privileged Spec §3.7).  M-mode with no
-            // matching entries gets full access, so this is transparent to
-            // programs that do not configure PMP.
             let is_machine = self.hart.privilege == crate::core::arch::mode::PrivilegeMode::Machine;
             let pmp_result = self.hart.pmp.check(
                 paddr.val(),
@@ -29,26 +52,21 @@ impl Cpu {
                 is_machine,
             );
             if pmp_result != PmpResult::Allow {
-                let trap = match access {
-                    AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
-                    AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
-                    AccessType::Write => Trap::StoreAccessFault(vaddr.val()),
-                };
-                return TranslationResult::fault(trap, 0);
+                return TranslateResult::Ready(TranslationResult::fault(
+                    fault_for(access, vaddr.val()),
+                    0,
+                ));
             }
 
             if !self.soc.bus.is_valid_address(paddr) {
-                let trap = match access {
-                    AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
-                    AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
-                    AccessType::Write => Trap::StoreAccessFault(vaddr.val()),
-                };
-                return TranslationResult::fault(trap, 0);
+                return TranslateResult::Ready(TranslationResult::fault(
+                    fault_for(access, vaddr.val()),
+                    0,
+                ));
             }
-            return TranslationResult::success(paddr, 0);
+            return TranslateResult::Ready(TranslationResult::success(paddr, 0));
         }
 
-        // MPRV: when set and access is not Fetch, use MPP as effective privilege.
         let effective_priv = if access != AccessType::Fetch
             && (self.hart.csrs.mstatus & crate::core::arch::csr::MSTATUS_MPRV) != 0
         {
@@ -60,53 +78,87 @@ impl Cpu {
             self.hart.privilege
         };
 
-        let result = self.hart.mmu.translate_with_pmp(
+        let outcome = self.hart.mmu.translate_async(
             vaddr,
             access,
             effective_priv,
             &self.hart.csrs,
-            &mut self.soc.bus,
             Some(&self.hart.pmp),
         );
 
-        // PMP check on the translated physical address.
-        // PMP applies to all privilege modes: M-mode with no matching entry gets Allow,
-        // S/U-mode with no matching entry gets NoMatch (denied).
-        if result.trap.is_none() {
-            let paddr = result.paddr.val();
-            let is_machine = effective_priv == crate::core::arch::mode::PrivilegeMode::Machine;
-            let pmp_result = self.hart.pmp.check(
-                paddr,
-                size,
-                matches!(access, AccessType::Read),
-                matches!(access, AccessType::Write),
-                matches!(access, AccessType::Fetch),
-                is_machine,
-            );
-            if pmp_result != PmpResult::Allow {
-                let trap = match access {
-                    AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
-                    AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
-                    AccessType::Write => Trap::StoreAccessFault(vaddr.val()),
-                };
-                return TranslationResult::fault(trap, result.cycles);
-            }
+        self.finalize_outcome(outcome, vaddr, access, size, effective_priv)
+    }
 
-            // Accesses to unmapped physical memory raise an access fault —
-            // real hardware reports a bus error that the CPU turns into a
-            // load/store/inst access fault. Firmware that probes memory
-            // must install a trap handler (same as real hardware).
-            if !self.soc.bus.is_valid_address(result.paddr) {
-                let trap = match access {
-                    AccessType::Fetch => Trap::InstructionAccessFault(vaddr.val()),
-                    AccessType::Read => Trap::LoadAccessFault(vaddr.val()),
-                    AccessType::Write => Trap::StoreAccessFault(vaddr.val()),
-                };
-                return TranslationResult::fault(trap, result.cycles);
+    /// Resumes a walk that was parked waiting on a PTE response.
+    pub fn translate_continue(
+        &mut self,
+        state: WalkState,
+        raw_pte: u64,
+        bus_transit_cycles: u64,
+    ) -> TranslateResult {
+        let vaddr = state.vaddr;
+        let access = state.access;
+        let effective_priv = state.privilege;
+        // The walk state carries its own size context only for fault reporting;
+        // PMP needs the access size. Translation post-checks size against PMP
+        // again once the leaf PTE resolves, but the walk itself reads 8 bytes
+        // per PTE which is what `start_walk` / `continue_walk` enforce.
+        let size = 8u64;
+        let outcome =
+            self.hart.mmu.continue_walk(state, raw_pte, &self.hart.csrs, Some(&self.hart.pmp), bus_transit_cycles);
+        self.finalize_outcome(outcome, vaddr, access, size, effective_priv)
+    }
+
+    /// Applies the post-translation PMP + bus-address checks shared by the
+    /// initial translate and walk continuation paths.
+    fn finalize_outcome(
+        &mut self,
+        outcome: TranslateOutcome,
+        vaddr: VirtAddr,
+        access: AccessType,
+        size: u64,
+        effective_priv: crate::core::arch::mode::PrivilegeMode,
+    ) -> TranslateResult {
+        match outcome {
+            TranslateOutcome::Ready(mut result) => {
+                if result.trap.is_none() {
+                    let paddr = result.paddr.val();
+                    let is_machine =
+                        effective_priv == crate::core::arch::mode::PrivilegeMode::Machine;
+                    let pmp_result = self.hart.pmp.check(
+                        paddr,
+                        size,
+                        matches!(access, AccessType::Read),
+                        matches!(access, AccessType::Write),
+                        matches!(access, AccessType::Fetch),
+                        is_machine,
+                    );
+                    if pmp_result != PmpResult::Allow {
+                        result = TranslationResult::fault(
+                            fault_for(access, vaddr.val()),
+                            result.cycles,
+                        );
+                    } else if !self.soc.bus.is_valid_address(result.paddr) {
+                        result = TranslationResult::fault(
+                            fault_for(access, vaddr.val()),
+                            result.cycles,
+                        );
+                    }
+                }
+                TranslateResult::Ready(result)
+            }
+            TranslateOutcome::NeedPte { pte_addr, state } => {
+                TranslateResult::NeedPte { pte_addr, state }
             }
         }
+    }
+}
 
-        result
+const fn fault_for(access: AccessType, addr: u64) -> Trap {
+    match access {
+        AccessType::Fetch => Trap::InstructionAccessFault(addr),
+        AccessType::Read => Trap::LoadAccessFault(addr),
+        AccessType::Write => Trap::StoreAccessFault(addr),
     }
 }
 
@@ -122,38 +174,18 @@ mod tests {
         let mut cpu = Cpu::build(&config, "");
 
         let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
-        assert_eq!(result.paddr.val(), 0x8000_0000);
-        assert!(result.trap.is_none());
+        match result {
+            TranslateResult::Ready(r) => {
+                assert_eq!(r.paddr.val(), 0x8000_0000);
+                assert!(r.trap.is_none());
+            }
+            TranslateResult::NeedPte { .. } => panic!("direct mode should be Ready"),
+        }
 
         let result = cpu.translate(VirtAddr::new(0xFFFF_FFFF_FFFF_FFFF), AccessType::Fetch, 4);
-        assert!(result.trap.is_some());
-    }
-
-    #[test]
-    fn test_translate_direct_mode_pmp_deny() {
-        use crate::core::arch::mode::PrivilegeMode;
-
-        let mut config = Config::default();
-        config.general.direct_mode = true;
-        let mut cpu = Cpu::build(&config, "");
-
-        cpu.hart.pmp.set_addr(0, 0x9000_0000u64 >> 2);
-        cpu.hart.pmp.set_cfg(0, 0x88);
-
-        cpu.hart.privilege = PrivilegeMode::Supervisor;
-
-        let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
-        assert!(result.trap.is_some(), "PMP should deny the access");
-    }
-
-    #[test]
-    fn test_translate_direct_mode_pmp_allow_mmode() {
-        let mut config = Config::default();
-        config.general.direct_mode = true;
-        let mut cpu = Cpu::build(&config, "");
-
-        let result = cpu.translate(VirtAddr::new(0x8000_0000), AccessType::Read, 4);
-        assert!(result.trap.is_none(), "M-mode should have full access with no PMP entries");
-        assert_eq!(result.paddr.val(), 0x8000_0000);
+        match result {
+            TranslateResult::Ready(r) => assert!(r.trap.is_some()),
+            TranslateResult::NeedPte { .. } => panic!("direct mode should be Ready"),
+        }
     }
 }

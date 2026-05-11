@@ -1,9 +1,10 @@
 //! Memory Management Unit (MMU).
 //!
-//! This module implements the Memory Management Unit, responsible for
-//! virtual-to-physical address translation. It supports the RISC-V SV39
-//! paging scheme and includes Translation Lookaside Buffers (TLBs) for
-//! caching translations.
+//! Handles RISC-V virtual-to-physical translation for the Sv39 / Sv48 / Sv57
+//! paging modes. The MMU owns the TLB hierarchy (per-access L1 TLB, shared
+//! L2 TLB) and exposes [`Mmu::translate_async`] — an event-driven API that
+//! either resolves the translation immediately or returns the first PTE
+//! address the caller must read via a `MemReq` packet.
 
 pub mod pmp;
 
@@ -15,14 +16,34 @@ use crate::common::{AccessType, Asid, PhysAddr, TranslationResult, Trap, VirtAdd
 use crate::core::arch::csr::{Csrs, PagingMode};
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::units::mmu::pmp::Pmp;
-use crate::soc::interconnect::Bus;
 
+use self::ptw::{WalkRequest, WalkState, WalkStep};
 use self::tlb::{L2Tlb, Tlb};
+
+/// Outcome of [`Mmu::translate_async`].
+///
+/// `Ready` means translation completed without needing memory; `NeedPte`
+/// means the caller must issue a `MemReq` for `pte_addr`, stash `state`
+/// in its outstanding-walks table, and call [`Mmu::continue_walk`] with the
+/// 64-bit PTE value when the response arrives.
+#[derive(Clone, Debug)]
+pub enum TranslateOutcome {
+    /// Translation completed (success, fault, direct mode, TLB hit).
+    Ready(TranslationResult),
+    /// Walk needs to read a PTE from memory.
+    NeedPte {
+        /// Physical address of the PTE to fetch.
+        pte_addr: PhysAddr,
+        /// Walk state to stash until the response arrives.
+        state: WalkState,
+    },
+}
 
 /// Memory Management Unit (MMU) for virtual-to-physical address translation.
 ///
-/// Implements RISC-V SV39 page-based virtual memory with separate instruction
-/// and data L1 TLBs, a shared L2 TLB, and a page table walker.
+/// Implements RISC-V SV39 / Sv48 / Sv57 page-based virtual memory with
+/// separate instruction and data L1 TLBs, a shared L2 TLB, and a stateful
+/// page-table walker that emits `MemReq` packets through the event queue.
 #[derive(Debug)]
 pub struct Mmu {
     /// Data TLB for load/store address translation.
@@ -49,10 +70,9 @@ impl Mmu {
     /// * `l2_size` - Total number of entries in the shared L2 TLB
     /// * `l2_ways` - L2 TLB associativity (ways per set)
     /// * `l2_latency` - L2 TLB hit latency in cycles
-    ///
-    /// # Returns
-    ///
-    /// A new `Mmu` instance with initialized TLBs.
+    /// * `software_ad_bits` - If true, A/D bits are software-managed (faults
+    ///   on missing A/D instead of auto-setting them)
+    /// * `paging_mode_max` - Highest paging mode the SATP writer will accept
     pub fn new(
         tlb_size: usize,
         l2_size: usize,
@@ -70,100 +90,55 @@ impl Mmu {
         }
     }
 
-    /// Translates a virtual address to a physical address.
+    /// Attempts to translate `vaddr`.
     ///
-    /// Performs address translation using the page table walker and TLBs,
-    /// checking permissions and handling page faults. Supports SV39 paging
-    /// and bare mode (no translation).
-    ///
-    /// # Arguments
-    ///
-    /// * `vaddr` - Virtual address to translate
-    /// * `access` - Type of access (Fetch, Read, Write)
-    /// * `privilege` - Current privilege mode
-    /// * `csrs` - Control and status registers (for SATP, SSTATUS)
-    /// * `bus` - System bus for page table walks
-    ///
-    /// # Returns
-    ///
-    /// A `TranslationResult` containing the physical address, cycle count,
-    /// and any trap that occurred during translation.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use hardware::core::units::mmu::Mmu;
-    /// use hardware::common::{VirtAddr, AccessType};
-    /// use hardware::core::arch::mode::PrivilegeMode;
-    ///
-    /// let mut mmu = Mmu::new(32);
-    ///
-    /// // In machine mode, addresses pass through without translation
-    /// let result = mmu.translate(
-    ///     VirtAddr::new(0x80000000),
-    ///     AccessType::Fetch,
-    ///     PrivilegeMode::Machine,
-    ///     &csrs,
-    ///     &mut bus,
-    /// );
-    /// assert_eq!(result.paddr.val(), 0x80000000);
-    /// assert!(result.trap.is_none());
-    ///
-    /// // In supervisor mode with paging enabled, TLB is consulted
-    /// // and page table walk is performed on TLB miss
-    /// ```
-    pub fn translate(
+    /// Resolves direct-mode, M-mode, Bare, canonical-VA, TLB-hit, and
+    /// L2-TLB-hit cases immediately and returns
+    /// [`TranslateOutcome::Ready`]. On a TLB miss the walker is started
+    /// and [`TranslateOutcome::NeedPte`] is returned: the caller issues a
+    /// `MemReq` for `pte_addr`, stashes `state`, and resumes the walk via
+    /// [`Mmu::continue_walk`] when the PTE response arrives.
+    pub fn translate_async(
         &mut self,
         vaddr: VirtAddr,
         access: AccessType,
         privilege: PrivilegeMode,
         csrs: &Csrs,
-        bus: &mut Bus,
-    ) -> TranslationResult {
-        self.translate_with_pmp(vaddr, access, privilege, csrs, bus, None)
-    }
-
-    /// Translates a virtual address with optional PMP enforcement.
-    ///
-    /// Same as [`translate`](Self::translate) but also checks PMP permissions when `pmp` is `Some`.
-    pub fn translate_with_pmp(
-        &mut self,
-        vaddr: VirtAddr,
-        access: AccessType,
-        privilege: PrivilegeMode,
-        csrs: &Csrs,
-        bus: &mut Bus,
         pmp: Option<&Pmp>,
-    ) -> TranslationResult {
+    ) -> TranslateOutcome {
         use crate::common::constants::{PAGE_SHIFT, VPN_MASK};
         use crate::core::arch::csr::{
             PagingMode, SATP_ASID_MASK, SATP_ASID_SHIFT, SATP_MODE_MASK, SATP_MODE_SHIFT,
         };
-        /// Bit position of MXR (Make eXecutable Readable) bit in sstatus register.
         const SSTATUS_MXR_SHIFT: u64 = 19;
-        /// Bit position of SUM (Supervisor User Memory access) bit in sstatus register.
         const SSTATUS_SUM_SHIFT: u64 = 18;
 
         let satp = csrs.satp;
         let mode_raw = (satp >> SATP_MODE_SHIFT) & SATP_MODE_MASK;
         let Some(paging) = PagingMode::from_satp_mode(mode_raw) else {
-            return TranslationResult::fault(Trap::InstructionAccessFault(vaddr.val()), 0);
+            return TranslateOutcome::Ready(TranslationResult::fault(
+                Trap::InstructionAccessFault(vaddr.val()),
+                0,
+            ));
         };
 
         if privilege == PrivilegeMode::Machine || paging == PagingMode::Bare {
-            return TranslationResult::success(PhysAddr::new(vaddr.val()), 0);
+            return TranslateOutcome::Ready(TranslationResult::success(
+                PhysAddr::new(vaddr.val()),
+                0,
+            ));
         }
 
         let va = vaddr.val();
         if !is_canonical_va(va, paging) {
-            return TranslationResult::fault(
+            return TranslateOutcome::Ready(TranslationResult::fault(
                 match access {
                     AccessType::Fetch => Trap::InstructionPageFault(va),
                     AccessType::Read => Trap::LoadPageFault(va),
                     AccessType::Write => Trap::StorePageFault(va),
                 },
                 0,
-            );
+            ));
         }
         let vpn = Vpn::new((vaddr.val() >> PAGE_SHIFT) & VPN_MASK);
         let asid = Asid::new(((satp >> SATP_ASID_SHIFT) & SATP_ASID_MASK) as u16);
@@ -175,42 +150,59 @@ impl Mmu {
         };
 
         if let Some(hit) = tlb_entry {
-            // Invalidate so the PTW sets the dirty bit in the PTE and re-caches with D=1.
             if access == AccessType::Write && !hit.d {
                 self.dtlb.invalidate(vpn);
             } else {
                 if access == AccessType::Write && !hit.w {
-                    return TranslationResult::fault(Trap::StorePageFault(vaddr.val()), 0);
+                    return TranslateOutcome::Ready(TranslationResult::fault(
+                        Trap::StorePageFault(vaddr.val()),
+                        0,
+                    ));
                 }
                 if access == AccessType::Fetch && !hit.x {
-                    return TranslationResult::fault(Trap::InstructionPageFault(vaddr.val()), 0);
+                    return TranslateOutcome::Ready(TranslationResult::fault(
+                        Trap::InstructionPageFault(vaddr.val()),
+                        0,
+                    ));
                 }
                 if access == AccessType::Read {
                     let mxr = (csrs.sstatus >> SSTATUS_MXR_SHIFT) & 1 != 0;
                     let readable = hit.r || (hit.x && mxr);
                     if !readable {
-                        return TranslationResult::fault(Trap::LoadPageFault(vaddr.val()), 0);
+                        return TranslateOutcome::Ready(TranslationResult::fault(
+                            Trap::LoadPageFault(vaddr.val()),
+                            0,
+                        ));
                     }
                 }
 
                 if privilege == PrivilegeMode::User && !hit.u {
-                    return TranslationResult::fault(page_fault(vaddr.val(), access), 0);
+                    return TranslateOutcome::Ready(TranslationResult::fault(
+                        page_fault(vaddr.val(), access),
+                        0,
+                    ));
                 }
                 if privilege == PrivilegeMode::Supervisor && hit.u {
                     let sum = (csrs.sstatus >> SSTATUS_SUM_SHIFT) & 1 != 0;
                     if !sum {
-                        return TranslationResult::fault(page_fault(vaddr.val(), access), 0);
+                        return TranslateOutcome::Ready(TranslationResult::fault(
+                            page_fault(vaddr.val(), access),
+                            0,
+                        ));
                     }
                     if access == AccessType::Fetch {
-                        return TranslationResult::fault(
+                        return TranslateOutcome::Ready(TranslationResult::fault(
                             Trap::InstructionPageFault(vaddr.val()),
                             0,
-                        );
+                        ));
                     }
                 }
 
                 let paddr = hit.ppn.to_addr() | vaddr.page_offset();
-                return TranslationResult::success(PhysAddr::new(paddr), 0);
+                return TranslateOutcome::Ready(TranslationResult::success(
+                    PhysAddr::new(paddr),
+                    0,
+                ));
             }
         }
 
@@ -223,45 +215,49 @@ impl Mmu {
             let d = (pte_bits >> 7) & 1 != 0;
 
             if access == AccessType::Write && !d {
-                // Fall through to PTW so it sets the dirty bit.
-                // Do NOT promote to L1: a D=0 entry would re-fall on next hit.
+                // fall through to PTW so it sets the dirty bit
             } else {
-                // Run BEFORE promoting to L1 so faulting entries don't pollute L1.
                 if access == AccessType::Write && !w {
-                    return TranslationResult::fault(Trap::StorePageFault(vaddr.val()), l2_latency);
+                    return TranslateOutcome::Ready(TranslationResult::fault(
+                        Trap::StorePageFault(vaddr.val()),
+                        l2_latency,
+                    ));
                 }
                 if access == AccessType::Fetch && !x {
-                    return TranslationResult::fault(
+                    return TranslateOutcome::Ready(TranslationResult::fault(
                         Trap::InstructionPageFault(vaddr.val()),
                         l2_latency,
-                    );
+                    ));
                 }
                 if access == AccessType::Read {
                     let mxr = (csrs.sstatus >> SSTATUS_MXR_SHIFT) & 1 != 0;
                     if !(r || (x && mxr)) {
-                        return TranslationResult::fault(
+                        return TranslateOutcome::Ready(TranslationResult::fault(
                             Trap::LoadPageFault(vaddr.val()),
                             l2_latency,
-                        );
+                        ));
                     }
                 }
 
                 if privilege == PrivilegeMode::User && !u {
-                    return TranslationResult::fault(page_fault(vaddr.val(), access), l2_latency);
+                    return TranslateOutcome::Ready(TranslationResult::fault(
+                        page_fault(vaddr.val(), access),
+                        l2_latency,
+                    ));
                 }
                 if privilege == PrivilegeMode::Supervisor && u {
                     let sum = (csrs.sstatus >> SSTATUS_SUM_SHIFT) & 1 != 0;
                     if !sum {
-                        return TranslationResult::fault(
+                        return TranslateOutcome::Ready(TranslationResult::fault(
                             page_fault(vaddr.val(), access),
                             l2_latency,
-                        );
+                        ));
                     }
                     if access == AccessType::Fetch {
-                        return TranslationResult::fault(
+                        return TranslateOutcome::Ready(TranslationResult::fault(
                             Trap::InstructionPageFault(vaddr.val()),
                             l2_latency,
-                        );
+                        ));
                     }
                 }
 
@@ -272,23 +268,38 @@ impl Mmu {
                 }
 
                 let paddr = ppn.to_addr() | vaddr.page_offset();
-                return TranslationResult::success(PhysAddr::new(paddr), l2_latency);
+                return TranslateOutcome::Ready(TranslationResult::success(
+                    PhysAddr::new(paddr),
+                    l2_latency,
+                ));
             }
         }
 
-        let request = ptw::WalkRequest { access, privilege, mode: paging };
-        if let Some(pmp_unit) = pmp {
-            ptw::page_table_walk_with_pmp(self, vaddr, request, csrs, bus, pmp_unit)
-        } else {
-            ptw::page_table_walk(self, vaddr, request, csrs, bus)
+        let request = WalkRequest { access, privilege, mode: paging };
+        match ptw::start_walk(request, vaddr, csrs, pmp) {
+            WalkStep::Done(result) => TranslateOutcome::Ready(result),
+            WalkStep::NeedPte { pte_addr, state } => TranslateOutcome::NeedPte { pte_addr, state },
+        }
+    }
+
+    /// Continues an in-flight walk after the caller has loaded the PTE
+    /// at `state.pte_addr` from memory.
+    pub fn continue_walk(
+        &mut self,
+        state: WalkState,
+        raw_pte: u64,
+        csrs: &Csrs,
+        pmp: Option<&Pmp>,
+        bus_transit_cycles: u64,
+    ) -> TranslateOutcome {
+        match ptw::continue_walk(state, raw_pte, self, csrs, pmp, bus_transit_cycles) {
+            WalkStep::Done(result) => TranslateOutcome::Ready(result),
+            WalkStep::NeedPte { pte_addr, state } => TranslateOutcome::NeedPte { pte_addr, state },
         }
     }
 }
 
-/// Returns true if `va` is a canonical virtual address for `mode`. Canonical
-/// addresses have the bits strictly above `mode.va_top_bit()` equal to bit
-/// `va_top_bit` itself (sign extension). For `Bare` every address is
-/// canonical because `va_top_bit = 63` makes the upper-bits range empty.
+/// Returns true if `va` is a canonical virtual address for `mode`.
 const fn is_canonical_va(va: u64, mode: crate::core::arch::csr::PagingMode) -> bool {
     let top = mode.va_top_bit();
     if top >= 63 {
@@ -301,15 +312,6 @@ const fn is_canonical_va(va: u64, mode: crate::core::arch::csr::PagingMode) -> b
 }
 
 /// Creates an appropriate page fault trap for the access type.
-///
-/// # Arguments
-///
-/// * `addr` - The faulting virtual address
-/// * `access` - The type of access that caused the fault
-///
-/// # Returns
-///
-/// The appropriate `Trap` variant for the page fault.
 const fn page_fault(addr: u64, access: AccessType) -> Trap {
     match access {
         AccessType::Fetch => Trap::InstructionPageFault(addr),
