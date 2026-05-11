@@ -100,6 +100,7 @@ impl ExecutionEngine for InOrderEngine {
 
         let trap_event = commit::commit_stage(
             cpu,
+            &mut self.common,
             &mut self.rob,
             &mut self.store_buffer,
             &mut self.scoreboard,

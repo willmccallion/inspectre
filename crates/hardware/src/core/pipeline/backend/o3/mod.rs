@@ -320,6 +320,7 @@ impl ExecutionEngine for O3Engine {
 
         let trap_event = commit::commit_stage(
             cpu,
+            &mut self.common,
             &mut self.rob,
             &mut self.store_buffer,
             &mut self.scoreboard,

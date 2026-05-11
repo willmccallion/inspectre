@@ -11,15 +11,17 @@ use crate::common::constants::{
     DELEG_MEIP_BIT, DELEG_MSIP_BIT, DELEG_MTIP_BIT, DELEG_SEIP_BIT, DELEG_SSIP_BIT, DELEG_STIP_BIT,
 };
 use crate::common::constants::{PAGE_SHIFT, VPN_MASK};
-use crate::common::{Asid, LrScRecord, RegIdx, SfenceVmaInfo, Trap, Vpn};
+use crate::common::{Asid, LrScRecord, PhysAddr, RegIdx, SfenceVmaInfo, Trap, Vpn};
 use crate::core::Cpu;
 use crate::core::arch::csr;
 use crate::core::arch::mode::PrivilegeMode;
 use crate::core::arch::trap::TrapHandler;
 use crate::sim::per_hart_debug::PC_TRACE_MAX;
 use crate::core::pipeline::checkpoint::CheckpointTable;
+use crate::core::pipeline::engine::BackendCommon;
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::load_queue::LoadQueue;
+use crate::core::pipeline::outstanding::OutstandingStore;
 use crate::core::pipeline::prf::{PhysReg, PhysRegFile};
 use crate::core::pipeline::rename_map::RenameMap;
 use crate::core::pipeline::rob::{Rob, RobState};
@@ -29,6 +31,8 @@ use crate::core::pipeline::store_buffer::{StoreBuffer, StoreResolution, width_to
 use crate::core::pipeline::vec_prf::VecPhysRegFile;
 use crate::core::units::bru::BranchPredictor;
 use crate::core::units::vpu::types::{VRegIdx, VecPhysReg};
+use crate::sim::components::ComponentId;
+use crate::sim::packet::{AccessSize, MemOp, Packet, WriteData};
 use crate::trace_branch;
 use crate::trace_commit;
 use crate::trace_csr;
@@ -38,10 +42,12 @@ use crate::trace_trap;
 ///
 /// Retires up to `width` instructions from the ROB head per cycle.
 /// Handles register writes, CSR application, trap dispatch, and
-/// store buffer drain.
+/// store buffer drain. Store drains emit `MemReq` packets through the
+/// engine's `BackendCommon`.
 #[allow(clippy::too_many_arguments)]
 pub fn commit_stage(
     cpu: &mut Cpu,
+    common: &mut BackendCommon,
     rob: &mut Rob,
     store_buffer: &mut StoreBuffer,
     scoreboard: &mut Scoreboard,
@@ -336,7 +342,7 @@ pub fn commit_stage(
         }
 
         if let Some(pte_upd) = entry.pte_update {
-            write_store_to_memory(cpu, pte_upd.pte_addr, pte_upd.pte_value, MemWidth::Double);
+            write_store_to_memory(cpu, common, pte_upd.pte_addr, pte_upd.pte_value, MemWidth::Double);
         }
 
         // Apply fp_flags before CSR writes to keep execute-time CSR reads of fflags consistent.
@@ -353,7 +359,7 @@ pub fn commit_stage(
         if let Some(csr_update) = entry.csr_update {
             // SATP write: drain SB so PTW reads up-to-date PTEs after translation mode change.
             if csr_update.addr == csr::SATP {
-                drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
+                drain_all_committed(cpu, common, store_buffer, vec_store_buffer.as_deref_mut());
             }
             // O3 applies fflags/fcsr eagerly at complete time; don't re-apply.
             if !csr_update.applied {
@@ -483,7 +489,7 @@ pub fn commit_stage(
         }
 
         if entry.ctrl.system_op == SystemOp::FenceI {
-            drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
+            drain_all_committed(cpu, common, store_buffer, vec_store_buffer.as_deref_mut());
             // I-cache flush after drain so refills see new data; force a fresh redirect.
             let _ = cpu.core.l1_i_cache.invalidate_all();
             cpu.hart.pc = entry.pc.wrapping_add(entry.inst_size.as_u64());
@@ -496,7 +502,7 @@ pub fn commit_stage(
             let pred_r = pred_bits & 0b0010 != 0;
             // pred.w drains the SB; pred.r is satisfied by commit order.
             if pred_w || pred_r {
-                drain_all_committed(cpu, store_buffer, vec_store_buffer.as_deref_mut());
+                drain_all_committed(cpu, common, store_buffer, vec_store_buffer.as_deref_mut());
             }
         }
 
@@ -518,7 +524,7 @@ pub fn commit_stage(
             SystemOp::CboZero | SystemOp::CboInval | SystemOp::CboClean | SystemOp::CboFlush
         ) {
             let rs1 = entry.result.unwrap_or(0);
-            if let Some(trap) = commit_cbo(cpu, entry.ctrl.system_op, rs1, entry.inst) {
+            if let Some(trap) = commit_cbo(cpu, common, entry.ctrl.system_op, rs1, entry.inst) {
                 cpu.trap(&trap, entry.pc);
                 break;
             }
@@ -533,18 +539,22 @@ pub fn commit_stage(
     cpu.stats.retire_histogram[retired_count.min(3)] += 1;
 
     // One drain per cycle: fall through to VSB if scalar SB has nothing committed.
-    if !try_drain_one_store(cpu, store_buffer)
+    if !try_drain_one_store(cpu, common, store_buffer)
         && let Some(vsb) = vec_store_buffer
     {
-        let _ = vsb.drain_one_committed(cpu);
+        let _ = vsb.drain_one_committed(cpu, common);
     }
     trap_event
 }
 
-/// Drains one committed scalar SB entry. Returns true if a write occurred
-/// (so the caller can decide whether to issue the vec-store-side-buffer
-/// drain in the same cycle).
-fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
+/// Drains one committed scalar SB entry to memory by emitting a `MemReq`
+/// (op = Write). Returns true if a write was emitted (so the caller can
+/// decide whether to also drain the vec-store buffer in the same cycle).
+fn try_drain_one_store(
+    cpu: &mut Cpu,
+    common: &mut BackendCommon,
+    store_buffer: &mut StoreBuffer,
+) -> bool {
     let Some(store) = store_buffer.drain_one() else { return false };
     let StoreResolution::Committed { paddr, data } = store.resolution else {
         // Cancelled (failed SC) — slot was drained without a write.
@@ -560,58 +570,79 @@ fn try_drain_one_store(cpu: &mut Cpu, store_buffer: &mut StoreBuffer) -> bool {
             cpu.stats.wcb_coalesces += 1;
         }
         if let Some(drain) = evicted {
-            let addr = crate::common::PhysAddr::new(drain.line_addr);
-            let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
+            // Cache-line drain from WCB: emit a write-back MemReq.
+            emit_line_writeback(cpu, common, PhysAddr::new(drain.line_addr));
             cpu.stats.wcb_drains += 1;
         }
-    } else if is_ram {
-        let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
+    } else {
+        write_store_to_memory(cpu, common, paddr, data, store.width);
     }
-    write_store_to_memory(cpu, paddr, data, store.width);
     trace_commit!(cpu.config.general.trace_instructions;
         paddr      = %crate::trace::Hex(paddr.val()),
         data       = %crate::trace::Hex(data),
         width      = ?store.width,
-        via_wcb    = !cpu.core.wcb.is_disabled(),
+        via_wcb    = !cpu.core.wcb.is_disabled() && is_ram,
         "CM: committed store drained to memory"
     );
     true
 }
 
-/// Drains **all** committed stores from the store buffer to memory, and
-/// flushes any committed vec-store writes from the VSB too. Also flushes
-/// the WCB.
+/// Drains **all** committed stores from the store buffer through the packet
+/// pipeline, and flushes any committed vec-store writes from the VSB too.
+/// Also flushes the WCB.
 ///
 /// Called before SATP writes (so the PTW sees up-to-date PTEs) and on FENCE
 /// commit (so younger memory ops see older committed writes).
 fn drain_all_committed(
     cpu: &mut Cpu,
+    common: &mut BackendCommon,
     store_buffer: &mut StoreBuffer,
     vec_store_buffer: Option<&mut crate::core::pipeline::vec_store_buffer::VecStoreBuffer>,
 ) {
     while let Some(store) = store_buffer.drain_one() {
         if let StoreResolution::Committed { paddr, data } = store.resolution {
-            let is_ram = cpu.soc.bus.ram_region().is_some_and(|r| r.contains(paddr.val(), 1));
-            if is_ram {
-                let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
-            }
-            write_store_to_memory(cpu, paddr, data, store.width);
+            write_store_to_memory(cpu, common, paddr, data, store.width);
         }
     }
     if let Some(vsb) = vec_store_buffer {
-        vsb.drain_all_committed(cpu);
+        vsb.drain_all_committed(cpu, common);
     }
-    flush_wcb(cpu);
+    flush_wcb(cpu, common);
 }
 
-/// Flushes all WCB entries through the cache hierarchy.
-fn flush_wcb(cpu: &mut Cpu) {
+/// Flushes all WCB entries by emitting write-back `MemReq` packets.
+fn flush_wcb(cpu: &mut Cpu, common: &mut BackendCommon) {
     let drains = cpu.core.wcb.flush_all();
     for drain in drains {
-        let addr = crate::common::PhysAddr::new(drain.line_addr);
-        let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
+        emit_line_writeback(cpu, common, PhysAddr::new(drain.line_addr));
         cpu.stats.wcb_drains += 1;
     }
+}
+
+/// Emits a cache-line write-back `MemReq` to the L1D for an evicted WCB
+/// line. The cache routes it through the hierarchy; memctrl applies the
+/// actual DRAM write.
+fn emit_line_writeback(cpu: &mut Cpu, common: &mut BackendCommon, paddr: PhysAddr) {
+    let req_id = common.alloc_req_id();
+    let l1_d_id = common.l1_d_id;
+    let pipeline_id = common.pipeline_id;
+    common.outstanding_stores.insert(
+        req_id,
+        OutstandingStore { rob_tag: crate::core::pipeline::rob::RobTag::default(), paddr },
+    );
+    let cycle = cpu.soc.cycle;
+    cpu.event_queue.schedule(
+        cycle,
+        ComponentId::Cache(l1_d_id),
+        ComponentId::Pipeline(pipeline_id),
+        Packet::MemReq {
+            req_id,
+            paddr,
+            vaddr: None,
+            size: AccessSize::Line,
+            op: MemOp::Write { data: WriteData::Small(0) },
+        },
+    );
 }
 
 /// Writes a store's data to the correct memory target (RAM fast-path or bus).
@@ -620,7 +651,13 @@ fn flush_wcb(cpu: &mut Cpu) {
 /// must have drained the store buffer first so prior committed stores are
 /// visible to the page-table walk and observable by other agents before
 /// this op's side effect.
-fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> {
+fn commit_cbo(
+    cpu: &mut Cpu,
+    common: &mut BackendCommon,
+    op: SystemOp,
+    rs1: u64,
+    inst: u32,
+) -> Option<Trap> {
     use crate::common::{AccessType, VirtAddr};
     use crate::core::arch::csr::{
         CboInvalAction, cbo_inval_action, cbocf_allowed, cboz_allowed,
@@ -653,14 +690,27 @@ fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> 
     };
 
     let aligned_va = rs1 & !(CBOZ_BLOCK_SIZE - 1);
-    let result = cpu.translate(VirtAddr::new(aligned_va), access, CBOZ_BLOCK_SIZE);
+    let translate_result = cpu.translate(VirtAddr::new(aligned_va), access, CBOZ_BLOCK_SIZE);
+    let result = match translate_result {
+        crate::core::cpu::memory::TranslateResult::Ready(r) => r,
+        crate::core::cpu::memory::TranslateResult::NeedPte { .. } => {
+            // Commit-time walks are not yet pipelined for CBO; surface as
+            // a page fault so the trap commits and the next attempt warms
+            // the TLB via a regular load.
+            return Some(match access {
+                AccessType::Read => Trap::LoadPageFault(aligned_va),
+                AccessType::Write => Trap::StorePageFault(aligned_va),
+                AccessType::Fetch => Trap::InstructionPageFault(aligned_va),
+            });
+        }
+    };
     if let Some(trap) = result.trap {
         return Some(trap);
     }
     let paddr = result.paddr.val();
 
     match effective_op {
-        SystemOp::CboZero => cboz_write(cpu, paddr),
+        SystemOp::CboZero => cboz_write(cpu, common, paddr),
         // cbo.flush is "writeback then invalidate"; in this simulator stores
         // are already at RAM by commit, so the writeback is a no-op and we
         // share cbo.inval's drop-the-line implementation.
@@ -677,14 +727,14 @@ fn commit_cbo(cpu: &mut Cpu, op: SystemOp, rs1: u64, inst: u32) -> Option<Trap> 
 
 /// Writes `CBOZ_BLOCK_SIZE` bytes of zeros at `block_paddr` as a sequence of
 /// 8-byte stores. Caller must drain the store buffer first.
-fn cboz_write(cpu: &mut Cpu, block_paddr: u64) {
-    use crate::common::PhysAddr;
+fn cboz_write(cpu: &mut Cpu, common: &mut BackendCommon, block_paddr: u64) {
     use crate::isa::zicboz::CBOZ_BLOCK_SIZE;
     const CHUNK: u64 = 8;
     let mut offset = 0u64;
     while offset < CBOZ_BLOCK_SIZE {
         write_store_to_memory(
             cpu,
+            common,
             PhysAddr::new(block_paddr + offset),
             0,
             MemWidth::Double,
@@ -693,39 +743,48 @@ fn cboz_write(cpu: &mut Cpu, block_paddr: u64) {
     }
 }
 
+/// Writes a store's data to memory by emitting a `MemReq` (op = Write).
+///
+/// The cache + bus + memctrl chain handles the write: RAM addresses
+/// propagate to the memory controller, which writes the bytes to DRAM
+/// when it processes the `MemReq`. MMIO addresses route through the bus
+/// to the target device's `Handle::handle`, which performs the side
+/// effect. The pipeline registers the request in `outstanding_stores`
+/// so the mailbox drain clears it once the device acks.
 fn write_store_to_memory(
     cpu: &mut Cpu,
-    paddr: crate::common::PhysAddr,
+    common: &mut BackendCommon,
+    paddr: PhysAddr,
     data: u64,
     width: MemWidth,
 ) {
-    let raw = paddr.val();
-    let in_htif = cpu.soc.bus.htif_range().is_some_and(|(lo, hi)| raw >= lo && raw < hi);
-    let ram_target =
-        if in_htif { None } else { cpu.soc.bus.ram_region().filter(|r| r.contains(raw, 1)) };
-    if let Some(r) = ram_target {
-        // SAFETY: `ram_target` is `Some` only after `RamRegion::contains` confirms
-        // the address is inside the DRAM region; widths up to 8 bytes fit because
-        // DRAM is contiguous.
-        unsafe {
-            let ptr = r.ptr(raw);
-            match width {
-                MemWidth::Byte => *ptr = data as u8,
-                MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
-                MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
-                MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
-                MemWidth::Nop => {}
-            }
-        }
-    } else {
-        match width {
-            MemWidth::Byte => cpu.soc.bus.write_u8(paddr, data as u8),
-            MemWidth::Half => cpu.soc.bus.write_u16(paddr, data as u16),
-            MemWidth::Word => cpu.soc.bus.write_u32(paddr, data as u32),
-            MemWidth::Double => cpu.soc.bus.write_u64(paddr, data),
-            MemWidth::Nop => {}
-        }
-    }
+    let access_size = match width {
+        MemWidth::Byte => AccessSize::B1,
+        MemWidth::Half => AccessSize::B2,
+        MemWidth::Word => AccessSize::B4,
+        MemWidth::Double => AccessSize::B8,
+        MemWidth::Nop => return,
+    };
+    let req_id = common.alloc_req_id();
+    let l1_d_id = common.l1_d_id;
+    let pipeline_id = common.pipeline_id;
+    common.outstanding_stores.insert(
+        req_id,
+        OutstandingStore { rob_tag: crate::core::pipeline::rob::RobTag::default(), paddr },
+    );
+    let cycle = cpu.soc.cycle;
+    cpu.event_queue.schedule(
+        cycle,
+        ComponentId::Cache(l1_d_id),
+        ComponentId::Pipeline(pipeline_id),
+        Packet::MemReq {
+            req_id,
+            paddr,
+            vaddr: None,
+            size: access_size,
+            op: MemOp::Write { data: WriteData::Small(data) },
+        },
+    );
 }
 
 /// Checks for pending interrupts. Returns the trap if one should be taken.
