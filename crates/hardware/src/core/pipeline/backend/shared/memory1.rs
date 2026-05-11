@@ -421,15 +421,15 @@ fn emit_load_req<E: ExecutionEngine>(
         MemOp::Read
     };
 
+    let target = mmio_or_l1d(cpu, engine, paddr, access_size);
     let common = engine.common_mut();
     let req_id = common.alloc_req_id();
-    let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
 
     let cycle = cpu.soc.cycle;
     cpu.event_queue.schedule(
         cycle,
-        ComponentId::Cache(l1_d_id),
+        target,
         ComponentId::Pipeline(pipeline_id),
         Packet::MemReq { req_id, paddr, vaddr: Some(vaddr), size: access_size, op },
     );
@@ -474,4 +474,29 @@ fn park_walk<E: ExecutionEngine>(
             op: MemOp::Read,
         },
     );
+}
+
+/// Returns `ComponentId::Bus` when `paddr` is MMIO and `ComponentId::Cache(L1D)`
+/// when it's pure RAM. MMIO loads/stores must bypass the L1D — caching MMIO
+/// makes subsequent accesses hit the cache and silently miss the device's
+/// side effect (e.g. an HTIF tohost write that L1D hit would never reach the
+/// device).
+fn mmio_or_l1d<E: ExecutionEngine>(
+    cpu: &Cpu,
+    engine: &E,
+    paddr: PhysAddr,
+    size: AccessSize,
+) -> ComponentId {
+    let size_bytes = match size {
+        AccessSize::B1 => 1u64,
+        AccessSize::B2 => 2,
+        AccessSize::B4 => 4,
+        AccessSize::B8 => 8,
+        AccessSize::Line => 64,
+    };
+    if cpu.soc.bus.ram_region_for(paddr.val(), size_bytes).is_some() {
+        ComponentId::Cache(engine.common().l1_d_id)
+    } else {
+        ComponentId::Bus
+    }
 }

@@ -185,9 +185,18 @@ fn dispatch_walk_continuation<E: ExecutionEngine>(
                 emit_fetch_req(pipeline, cpu, req_id, paddr, VirtAddr::new(pc));
             }
         }
-        WalkContinuation::LoadStore(entry) => {
+        WalkContinuation::LoadStore(mut entry) => {
+            if let Some(trap) = result.trap {
+                // Walker returned a page fault (e.g. software A/D unset).
+                // Stamp the trap on the entry so memory1 propagates it to
+                // memory2 / writeback rather than re-translating and
+                // re-walking forever.
+                entry.trap = Some(trap);
+                entry.exception_stage = Some(ExceptionStage::Memory);
+            }
             // Re-inject into Execute→Memory1 so the next memory1 tick runs
-            // with the TLB now warm.
+            // with the TLB now warm (success path) or surfaces the trap
+            // through the normal stage transitions (fault path).
             pipeline.engine.execute_mem1_mut().push(entry);
         }
     }

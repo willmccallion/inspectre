@@ -791,9 +791,14 @@ fn write_store_to_memory(
         }
     }
 
+    let is_ram = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes).is_some();
     let req_id = common.alloc_req_id();
-    let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
+    let target = if is_ram {
+        ComponentId::Cache(common.l1_d_id)
+    } else {
+        ComponentId::Bus
+    };
     let _ = common.outstanding_stores.insert(
         req_id,
         OutstandingStore { rob_tag: crate::core::pipeline::rob::RobTag::default(), paddr },
@@ -801,7 +806,7 @@ fn write_store_to_memory(
     let cycle = cpu.soc.cycle;
     cpu.event_queue.schedule(
         cycle,
-        ComponentId::Cache(l1_d_id),
+        target,
         ComponentId::Pipeline(pipeline_id),
         Packet::MemReq {
             req_id,
