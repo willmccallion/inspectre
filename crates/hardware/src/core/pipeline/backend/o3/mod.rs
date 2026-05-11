@@ -110,6 +110,8 @@ pub struct O3Engine {
     /// Dedicated store buffer for in-flight vector stores. See
     /// `core::pipeline::vec_store_buffer` for forwarding/drain semantics.
     pub vec_store_buffer: VecStoreBuffer,
+    /// In-flight memory bookkeeping: mailbox + outstanding tables + routing IDs.
+    pub common: crate::core::pipeline::engine::BackendCommon,
 }
 
 /// A single vector memory micro-op representing one element (or cache-line chunk)
@@ -147,8 +149,13 @@ pub struct VecMemInflight {
 }
 
 impl O3Engine {
-    /// Creates a new O3 engine from config.
-    pub fn new(config: &Config) -> Self {
+    /// Creates a new O3 engine from config and routing IDs.
+    pub fn new(
+        config: &Config,
+        pipeline_id: crate::sim::components::PipelineId,
+        l1_i_id: crate::sim::components::CacheId,
+        l1_d_id: crate::sim::components::CacheId,
+    ) -> Self {
         let rob_size = config.pipeline.rob_size;
         let prf_gpr_size = config.pipeline.prf_gpr_size;
         let prf_fpr_size = config.pipeline.prf_fpr_size;
@@ -201,6 +208,13 @@ impl O3Engine {
                 config.pipeline.vec_store_buffer_size,
                 config.pipeline.vec_store_forwarding,
             ),
+            common: {
+                let mut c = crate::core::pipeline::engine::BackendCommon::default();
+                c.pipeline_id = pipeline_id;
+                c.l1_i_id = l1_i_id;
+                c.l1_d_id = l1_d_id;
+                c
+            },
         }
     }
 
@@ -1359,6 +1373,14 @@ impl ExecutionEngine for O3Engine {
         &mut self,
     ) -> &mut Vec<crate::core::pipeline::latches::Mem1Mem2Entry> {
         &mut self.mem1_mem2
+    }
+
+    fn common(&self) -> &crate::core::pipeline::engine::BackendCommon {
+        &self.common
+    }
+
+    fn common_mut(&mut self) -> &mut crate::core::pipeline::engine::BackendCommon {
+        &mut self.common
     }
 
     fn rename_map(&self) -> &RenameMap {

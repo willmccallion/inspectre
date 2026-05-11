@@ -1,7 +1,17 @@
 //! Simulator: owns the CPU, the pipeline, and the global event queue.
 //!
-//! Each `tick()` drains the event queue first — delivering every packet whose
-//! `fire_at <= cycle` to its target component — and then runs the pipeline.
+//! Each `tick()`:
+//! 1. Increments the cycle in `pre_tick`.
+//! 2. Drains events scheduled for the new cycle, delivering packets to
+//!    pipelines / caches / bus / memory controllers.
+//! 3. Runs one cycle of the pipeline (mailbox-drain at the top, then
+//!    engine.tick, then frontend.tick).
+//! 4. Drains again so packets the pipeline just emitted reach their
+//!    targets this cycle. The cache / bus / mem-controller handlers
+//!    schedule their responses for future cycles; those land in the
+//!    pipeline's mailbox via the next cycle's start-of-tick drain.
+//! 5. Runs `post_tick` for mode tracing.
+//!
 //! Memory traffic (instruction fetch, load, store, page-table walk) flows
 //! exclusively through scheduled `MemReq` / `MemResp` packets.
 
@@ -17,14 +27,15 @@ use crate::sim::events::Event;
 use crate::sim::handle::{Handle, HandleCtx};
 use crate::sim::packet::Packet;
 use crate::soc::Soc;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-/// Default `CacheId` assigned to the L1 instruction cache for a single core.
+/// Default `CacheId` for the L1 instruction cache in a single-core config.
 const L1I_CACHE_ID: CacheId = CacheId::new(0);
-/// Default `CacheId` assigned to the L1 data cache for a single core.
+/// Default `CacheId` for the L1 data cache in a single-core config.
 const L1D_CACHE_ID: CacheId = CacheId::new(1);
+/// Default `PipelineId` for the single-core pipeline.
+const PIPELINE_ID: PipelineId = PipelineId::new(0);
 
 /// Top-level simulator: CPU architectural state + pipeline + scheduler.
 #[derive(Debug)]
@@ -45,37 +56,18 @@ impl Simulator {
     /// via this slot.
     pub fn new(soc: Soc, config: &Config, exit_signal: Arc<AtomicU64>) -> Self {
         let cpu = Cpu::new(soc, config, exit_signal);
-        let pipeline_id = PipelineId::new(0);
         let pipeline = match config.pipeline.backend {
             BackendType::InOrder => PipelineDispatch::InOrder(Box::new(Pipeline {
                 frontend: Frontend::new(config.pipeline.width),
-                engine: InOrderEngine::new(config),
+                engine: InOrderEngine::new(config, PIPELINE_ID, L1I_CACHE_ID, L1D_CACHE_ID),
                 rename_output: Vec::with_capacity(config.pipeline.width),
                 redirect_pending: false,
-                pipeline_id,
-                mailbox: Vec::new(),
-                outstanding_fetches: HashMap::new(),
-                outstanding_loads: HashMap::new(),
-                outstanding_stores: HashMap::new(),
-                outstanding_walks: HashMap::new(),
-                next_req_id: 0,
-                l1_i_id: L1I_CACHE_ID,
-                l1_d_id: L1D_CACHE_ID,
             })),
             BackendType::OutOfOrder => PipelineDispatch::OutOfOrder(Box::new(Pipeline {
                 frontend: Frontend::new(config.pipeline.width),
-                engine: O3Engine::new(config),
+                engine: O3Engine::new(config, PIPELINE_ID, L1I_CACHE_ID, L1D_CACHE_ID),
                 rename_output: Vec::with_capacity(config.pipeline.width),
                 redirect_pending: false,
-                pipeline_id,
-                mailbox: Vec::new(),
-                outstanding_fetches: HashMap::new(),
-                outstanding_loads: HashMap::new(),
-                outstanding_stores: HashMap::new(),
-                outstanding_walks: HashMap::new(),
-                next_req_id: 0,
-                l1_i_id: L1I_CACHE_ID,
-                l1_d_id: L1D_CACHE_ID,
             })),
         };
         Self { cpu, pipeline }
@@ -93,14 +85,6 @@ impl Simulator {
 
     /// Advances the simulator by one clock cycle.
     ///
-    /// 1. Drains the event queue: every event with `fire_at <= cycle` is
-    ///    dispatched to its target component. Packets aimed at the pipeline
-    ///    land in its mailbox; packets aimed at caches, memory controllers,
-    ///    devices, or the bus invoke their `Handle::handle` impl.
-    /// 2. Runs the CPU pre-tick (interrupt updates, hang detection).
-    /// 3. Runs one cycle of the pipeline.
-    /// 4. Runs the CPU post-tick (privilege tracing, status).
-    ///
     /// # Errors
     ///
     /// Returns [`SimError::HangDetected`] if the PC has not advanced for too many
@@ -110,10 +94,17 @@ impl Simulator {
     pub fn tick(&mut self) -> Result<(), SimError> {
         let prev_priv = self.cpu.hart.privilege;
         let skip = self.cpu.pre_tick()?;
+        // First drain: deliver events scheduled for cycles <= now into
+        // their targets (filling pipeline.mailbox with responses from
+        // previous cycles' emissions).
         self.drain_events();
         if !skip {
             self.pipeline.tick(&mut self.cpu);
         }
+        // Second drain: events the pipeline just scheduled (MemReqs to L1)
+        // reach their target component handlers this cycle so the next
+        // cycle's start-of-tick drain delivers their responses.
+        self.drain_events();
         self.cpu.post_tick(prev_priv);
         Ok(())
     }
@@ -145,8 +136,8 @@ impl Simulator {
                 self.cpu.soc.mem_controller.handle(packet, source, &mut ctx);
             }
             ComponentId::Device(_) | ComponentId::Hart(_) | ComponentId::Core(_) => {
-                // Hart / Core targeting is unused in Phase 2; device targeting
-                // is always routed via Bus rather than direct.
+                // Devices are routed via Bus; Hart / Core targeting is
+                // reserved for future multi-core / coherence packets.
             }
         }
     }
@@ -157,26 +148,22 @@ impl Simulator {
     }
 }
 
-/// Dispatches a packet to one of the caches lookup by `CacheId`.
+/// Dispatches a packet to the cache identified by `id`.
 fn dispatch_to_cache(cpu: &mut Cpu, id: CacheId, packet: Packet, source: ComponentId) {
     let self_id = ComponentId::Cache(id);
+    let cycle = cpu.soc.cycle;
+    let mut ctx = HandleCtx {
+        scheduler: &mut cpu.event_queue,
+        stats: &mut cpu.stats_hier,
+        config: &cpu.config,
+        cycle,
+        self_id,
+    };
     match id {
-        id if id == CacheId::new(0) => {
-            let mut ctx = build_ctx_with_self(&mut cpu.event_queue, &mut cpu.stats_hier, &cpu.config, cpu.soc.cycle, self_id);
-            cpu.core.l1_i_cache.handle(packet, source, &mut ctx);
-        }
-        id if id == CacheId::new(1) => {
-            let mut ctx = build_ctx_with_self(&mut cpu.event_queue, &mut cpu.stats_hier, &cpu.config, cpu.soc.cycle, self_id);
-            cpu.core.l1_d_cache.handle(packet, source, &mut ctx);
-        }
-        id if id == CacheId::new(2) => {
-            let mut ctx = build_ctx_with_self(&mut cpu.event_queue, &mut cpu.stats_hier, &cpu.config, cpu.soc.cycle, self_id);
-            cpu.core.l2_cache.handle(packet, source, &mut ctx);
-        }
-        id if id == CacheId::new(3) => {
-            let mut ctx = build_ctx_with_self(&mut cpu.event_queue, &mut cpu.stats_hier, &cpu.config, cpu.soc.cycle, self_id);
-            cpu.soc.l3_cache.handle(packet, source, &mut ctx);
-        }
+        id if id == CacheId::new(0) => cpu.core.l1_i_cache.handle(packet, source, &mut ctx),
+        id if id == CacheId::new(1) => cpu.core.l1_d_cache.handle(packet, source, &mut ctx),
+        id if id == CacheId::new(2) => cpu.core.l2_cache.handle(packet, source, &mut ctx),
+        id if id == CacheId::new(3) => cpu.soc.l3_cache.handle(packet, source, &mut ctx),
         _ => {}
     }
 }
@@ -191,17 +178,7 @@ fn build_ctx(cpu: &mut Cpu, self_id: ComponentId) -> HandleCtx<'_> {
     }
 }
 
-fn build_ctx_with_self<'a>(
-    queue: &'a mut crate::sim::events::EventQueue,
-    stats: &'a mut crate::sim::stats::Stats,
-    config: &'a Config,
-    cycle: u64,
-    self_id: ComponentId,
-) -> HandleCtx<'a> {
-    HandleCtx { scheduler: queue, stats, config, cycle, self_id }
-}
-
-/// Suppress an unused-import lint until the `MemCtrlId` constant is used
+/// Suppress unused-import warnings until the `MemCtrlId` constant is used
 /// for routing in a follow-up.
 const _: fn() = || {
     let _ = MemCtrlId::new(0);

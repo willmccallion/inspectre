@@ -8,14 +8,10 @@
 
 use std::collections::HashMap;
 
-use crate::config::Config;
 use crate::core::pipeline::checkpoint::CheckpointTable;
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::latches::RenameIssueEntry;
 use crate::core::pipeline::load_queue::LoadQueue;
-use crate::core::pipeline::outstanding::{
-    OutstandingFetch, OutstandingLoad, OutstandingStore, OutstandingWalk,
-};
 use crate::core::pipeline::prf::PhysReg;
 use crate::core::pipeline::prf::PhysRegFile;
 use crate::core::pipeline::rename_map::RenameMap;
@@ -26,7 +22,6 @@ use crate::core::pipeline::store_buffer::StoreBuffer;
 use crate::core::pipeline::vec_prf::VecPhysRegFile;
 use crate::core::units::vpu::types::VecPhysReg;
 use crate::sim::components::{CacheId, ComponentId, PipelineId, ReqId};
-use crate::sim::events::EventQueue;
 use crate::sim::packet::Packet;
 use crate::sim::stats::Stats;
 use serde::Deserialize;
@@ -332,7 +327,7 @@ impl PipelineDispatch {
                 mem2_wb: p.engine.mem2_wb.clone(),
                 fetch1_stall: p.frontend.fetch1_stall,
                 fetch2_stall: p.frontend.fetch2_stall,
-                mem1_stall: p.engine.mem1_stall,
+                mem1_stall: 0,
                 width,
             },
             Self::OutOfOrder(p) => PipelineSnapshot {
@@ -370,7 +365,12 @@ mod tests {
         let mut cpu = crate::core::Cpu::build(&config, "");
 
         let frontend = Frontend::new(config.pipeline.width);
-        let engine = InOrderEngine::new(&config);
+        let engine = InOrderEngine::new(
+            &config,
+            PipelineId::new(0),
+            CacheId::new(0),
+            CacheId::new(1),
+        );
         let pipeline = Pipeline {
             frontend,
             engine,
