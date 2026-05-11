@@ -128,11 +128,25 @@ impl Simulator {
                 dispatch_to_cache(&mut self.cpu, id, packet, source);
             }
             ComponentId::Bus => {
-                let mut ctx = build_ctx(&mut self.cpu, ComponentId::Bus);
+                let cycle = self.cpu.soc.cycle;
+                let mut ctx = HandleCtx {
+                    scheduler: &mut self.cpu.event_queue,
+                    stats: &mut self.cpu.stats_hier,
+                    config: &self.cpu.config,
+                    cycle,
+                    self_id: ComponentId::Bus,
+                };
                 self.cpu.soc.bus.handle(packet, source, &mut ctx);
             }
             ComponentId::MemCtrl(id) => {
-                let mut ctx = build_ctx(&mut self.cpu, ComponentId::MemCtrl(id));
+                let cycle = self.cpu.soc.cycle;
+                let mut ctx = HandleCtx {
+                    scheduler: &mut self.cpu.event_queue,
+                    stats: &mut self.cpu.stats_hier,
+                    config: &self.cpu.config,
+                    cycle,
+                    self_id: ComponentId::MemCtrl(id),
+                };
                 self.cpu.soc.mem_controller.handle(packet, source, &mut ctx);
             }
             ComponentId::Device(_) | ComponentId::Hart(_) | ComponentId::Core(_) => {
@@ -152,29 +166,19 @@ impl Simulator {
 fn dispatch_to_cache(cpu: &mut Cpu, id: CacheId, packet: Packet, source: ComponentId) {
     let self_id = ComponentId::Cache(id);
     let cycle = cpu.soc.cycle;
-    let mut ctx = HandleCtx {
-        scheduler: &mut cpu.event_queue,
-        stats: &mut cpu.stats_hier,
-        config: &cpu.config,
-        cycle,
-        self_id,
-    };
+    // Split-borrow Cpu fields explicitly so the HandleCtx (borrowing
+    // event_queue / stats_hier / config) coexists with the cache field
+    // borrow.
+    let scheduler = &mut cpu.event_queue;
+    let stats = &mut cpu.stats_hier;
+    let config = &cpu.config;
+    let mut ctx = HandleCtx { scheduler, stats, config, cycle, self_id };
     match id {
         id if id == CacheId::new(0) => cpu.core.l1_i_cache.handle(packet, source, &mut ctx),
         id if id == CacheId::new(1) => cpu.core.l1_d_cache.handle(packet, source, &mut ctx),
         id if id == CacheId::new(2) => cpu.core.l2_cache.handle(packet, source, &mut ctx),
         id if id == CacheId::new(3) => cpu.soc.l3_cache.handle(packet, source, &mut ctx),
         _ => {}
-    }
-}
-
-fn build_ctx(cpu: &mut Cpu, self_id: ComponentId) -> HandleCtx<'_> {
-    HandleCtx {
-        scheduler: &mut cpu.event_queue,
-        stats: &mut cpu.stats_hier,
-        config: &cpu.config,
-        cycle: cpu.soc.cycle,
-        self_id,
     }
 }
 

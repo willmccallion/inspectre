@@ -63,7 +63,7 @@ fn park_fetch_walk<E: ExecutionEngine>(
     let req_id = common.alloc_req_id();
     let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
-    common.outstanding_walks.insert(
+    let _ = common.outstanding_walks.insert(
         req_id,
         OutstandingWalk {
             state,
@@ -99,7 +99,7 @@ fn issue_fetch<E: ExecutionEngine>(
     let pipeline_id = common.pipeline_id;
     let paddr = fetch.paddr;
     let pc = fetch.pc;
-    common.outstanding_fetches.insert(req_id, fetch);
+    let _ = common.outstanding_fetches.insert(req_id, fetch);
 
     let cycle = cpu.soc.cycle;
     cpu.event_queue.schedule(

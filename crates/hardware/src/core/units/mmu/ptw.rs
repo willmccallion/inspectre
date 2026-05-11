@@ -190,7 +190,7 @@ pub fn start_walk(
         access: request.access,
         privilege: request.privilege,
         mode: request.mode,
-        level: request.mode.levels() - 1,
+        level: (request.mode.levels() as u32) - 1,
         ppn_raw,
         asid,
         cycles: 0,

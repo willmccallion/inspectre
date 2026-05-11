@@ -626,7 +626,7 @@ fn emit_line_writeback(cpu: &mut Cpu, common: &mut BackendCommon, paddr: PhysAdd
     let req_id = common.alloc_req_id();
     let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
-    common.outstanding_stores.insert(
+    let _ = common.outstanding_stores.insert(
         req_id,
         OutstandingStore { rob_tag: crate::core::pipeline::rob::RobTag::default(), paddr },
     );
@@ -768,7 +768,7 @@ fn write_store_to_memory(
     let req_id = common.alloc_req_id();
     let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
-    common.outstanding_stores.insert(
+    let _ = common.outstanding_stores.insert(
         req_id,
         OutstandingStore { rob_tag: crate::core::pipeline::rob::RobTag::default(), paddr },
     );

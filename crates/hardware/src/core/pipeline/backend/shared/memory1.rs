@@ -108,11 +108,13 @@ fn process_entry<E: ExecutionEngine>(
 
     // 3. Sdtrig load/store triggers.
     if ex.ctrl.mem_read && !is_atomic && cpu.check_load_trigger(ex.alu) {
-        push_trap(engine, ex, Trap::Breakpoint(ex.pc), ExceptionStage::Memory);
+        let trap = Trap::Breakpoint(ex.pc);
+        push_trap(engine, ex, trap, ExceptionStage::Memory);
         return EntryOutcome::Done;
     }
     if ex.ctrl.mem_write && !is_atomic && cpu.check_store_trigger(ex.alu) {
-        push_trap(engine, ex, Trap::Breakpoint(ex.pc), ExceptionStage::Memory);
+        let trap = Trap::Breakpoint(ex.pc);
+        push_trap(engine, ex, trap, ExceptionStage::Memory);
         return EntryOutcome::Done;
     }
 
@@ -424,7 +426,7 @@ fn emit_load_req<E: ExecutionEngine>(
         Packet::MemReq { req_id, paddr, vaddr: Some(vaddr), size: access_size, op },
     );
 
-    engine.common_mut().outstanding_loads.insert(
+    let _ = engine.common_mut().outstanding_loads.insert(
         req_id,
         OutstandingLoad { entry: ex, paddr, vaddr, pte_update },
     );
@@ -442,7 +444,7 @@ fn park_walk<E: ExecutionEngine>(
     let req_id = common.alloc_req_id();
     let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;
-    common.outstanding_walks.insert(
+    let _ = common.outstanding_walks.insert(
         req_id,
         OutstandingWalk {
             state,

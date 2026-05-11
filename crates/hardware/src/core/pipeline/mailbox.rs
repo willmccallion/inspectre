@@ -121,7 +121,7 @@ fn complete_walk<E: ExecutionEngine>(
         TranslateResult::NeedPte { pte_addr, state } => {
             let common = pipeline.engine.common_mut();
             let req_id = common.alloc_req_id();
-            common.outstanding_walks.insert(
+            let _ = common.outstanding_walks.insert(
                 req_id,
                 OutstandingWalk { state, pte_addr, continuation: walk.continuation },
             );
@@ -150,7 +150,7 @@ fn dispatch_walk_continuation<E: ExecutionEngine>(
                 let req_id = common.alloc_req_id();
                 let paddr = fetch.paddr;
                 let pc = fetch.pc;
-                common.outstanding_fetches.insert(req_id, fetch);
+                let _ = common.outstanding_fetches.insert(req_id, fetch);
                 emit_fetch_req(pipeline, cpu, req_id, paddr, VirtAddr::new(pc));
             }
         }

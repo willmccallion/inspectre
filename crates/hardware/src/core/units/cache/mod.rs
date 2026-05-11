@@ -578,7 +578,7 @@ impl Handle for Cache {
                         },
                     );
                 } else if let Some(ds) = self.downstream {
-                    self.pending.insert(
+                    let _ = self.pending.insert(
                         req_id,
                         PendingRequest {
                             source: source_for_response,

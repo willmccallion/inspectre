@@ -207,7 +207,7 @@ pub enum LrScRecord {
 ///
 /// This structure encapsulates the outcome of an MMU walk, including performance
 /// metrics and any faults that may have occurred.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TranslationResult {
     /// The translated physical address, or zero if translation failed.
     pub paddr: PhysAddr,

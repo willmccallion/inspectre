@@ -554,28 +554,14 @@ impl ExecutionEngine for O3Engine {
             return;
         }
 
-        // With MSHRs: misses park there, so memory1 always accepts. Without: gate on oldest incomplete.
-        let has_mshrs = cpu.core.l1d_mshrs.capacity() > 0;
-        let mem1_busy = !has_mshrs
-            && self.mem1_mem2.iter().any(|e| {
-                let is_mem = e.ctrl.mem_read || e.ctrl.mem_write;
-                is_mem && e.complete_cycle > now
-            });
-
-        if mem1_busy {
-            cpu.stats.stalls_mem += 1;
-        } else {
-            let cancelled = memory1::memory1_stage(
-                cpu,
-                &mut self.execute_mem1,
-                &mut self.mem1_mem2,
-                now,
-                Some(&mut self.load_queue),
-            );
-            for phys in cancelled {
-                self.issue_queue.cancel_wakeup_phys(phys, &self.prf);
-            }
-        }
+        // Packet-based memory1 always accepts work and parks loads in
+        // `common.outstanding_loads`. Backpressure comes from the L1D's
+        // pending table when the cache is saturated, which surfaces as
+        // mailbox-drain backlogs rather than a per-engine `mem1_busy` gate.
+        let mut input = std::mem::take(&mut self.execute_mem1);
+        memory1::memory1_stage(cpu, self, &mut input);
+        self.execute_mem1.extend(input);
+        let _ = now;
 
         // Backpressure only on undrained execute_mem1; pending_results drains after issue.
         let mem_backpressured = !self.execute_mem1.is_empty();
@@ -1292,7 +1278,7 @@ impl ExecutionEngine for O3Engine {
 
     fn flush(&mut self, cpu: &mut Cpu) {
         // Drain committed VSB writes; trap-driven flushes still owe pre-trap retired stores.
-        self.vec_store_buffer.drain_all_committed(cpu);
+        self.vec_store_buffer.drain_all_committed(cpu, &mut self.common);
 
         for entry in self.rob.iter_all() {
             self.free_list.reclaim(entry.phys_dst);
