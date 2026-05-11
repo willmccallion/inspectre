@@ -63,7 +63,15 @@ pub fn memory1_stage<E: ExecutionEngine>(
     engine: &mut E,
     input: &mut Vec<ExMem1Entry>,
 ) {
-    let entries = std::mem::take(input);
+    let mut entries = std::mem::take(input);
+    // Out-of-order execute can drop entries into execute_mem1 in completion
+    // order rather than program order. memory1's SB-forward / atomic-vs-SB
+    // checks only inspect *older* store entries, so a younger load that
+    // ends up at the front of `entries` can permanently stall on a store
+    // that hasn't committed yet, even though the older load it sits behind
+    // would have drained its blocking store first. Sort by rob_tag so the
+    // oldest in-flight memory op gets first crack at the SB each cycle.
+    entries.sort_by_key(|e| e.rob_tag.0);
     let mut iter = entries.into_iter();
 
     while let Some(ex) = iter.next() {
