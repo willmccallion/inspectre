@@ -402,17 +402,22 @@ impl VecStoreBuffer {
         ForwardResult::Miss
     }
 
-    /// Drains one cache-line buffer from the oldest drainable entry to
-    /// memory. Returns `true` if a write occurred. One call per pipeline
-    /// cycle to share commit-time bandwidth with the scalar SB.
-    pub fn drain_one_committed(&mut self, cpu: &mut Cpu) -> bool {
+    /// Drains one cache-line buffer from the oldest drainable entry by
+    /// emitting `MemReq` packets through the engine's `BackendCommon`.
+    /// Returns `true` if a write was issued. One call per pipeline cycle
+    /// to share commit-time bandwidth with the scalar SB.
+    pub fn drain_one_committed(
+        &mut self,
+        cpu: &mut Cpu,
+        common: &mut crate::core::pipeline::engine::BackendCommon,
+    ) -> bool {
         let Some(idx) = self.oldest_drainable_entry_index() else { return false };
 
         let line = {
             let entry = &mut self.entries[idx];
             entry.lines.remove(0)
         };
-        write_line_to_memory(cpu, &line);
+        write_line_to_memory(cpu, common, &line);
 
         if self.entries[idx].lines.is_empty() {
             self.entries[idx].valid = false;
@@ -422,8 +427,12 @@ impl VecStoreBuffer {
 
     /// Drains all currently-drainable entries. Used by FENCE / SATP / FENCE.I
     /// (commit-time barriers) and by the trap-driven full flush.
-    pub fn drain_all_committed(&mut self, cpu: &mut Cpu) {
-        while self.drain_one_committed(cpu) {}
+    pub fn drain_all_committed(
+        &mut self,
+        cpu: &mut Cpu,
+        common: &mut crate::core::pipeline::engine::BackendCommon,
+    ) {
+        while self.drain_one_committed(cpu, common) {}
     }
 
     /// Drops entries strictly newer than `keep_tag`. Older entries (whether
@@ -479,10 +488,13 @@ impl VecStoreBuffer {
 
 /// Issues memory writes for every contiguous valid-byte run in a VSB line.
 ///
-/// Each run is rounded to a single 1/2/4/8-byte aligned write that covers it,
-/// matching the WCB / `write_store_to_memory` interface used by the scalar SB
-/// drain path.
-fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
+/// Each run is rounded to a single 1/2/4/8-byte aligned `MemReq` that
+/// covers it, matching the scalar SB drain path.
+fn write_line_to_memory(
+    cpu: &mut Cpu,
+    common: &mut crate::core::pipeline::engine::BackendCommon,
+    line: &VsbLine,
+) {
     let mut i = 0usize;
     while i < VSB_LINE_BYTES {
         if (line.valid_mask >> i) & 1 == 0 {
@@ -520,7 +532,7 @@ fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
                 data |= (line.data[abs_offset + b] as u64) << (b * 8);
             }
             let paddr = PhysAddr::new(abs_addr);
-            issue_drained_write(cpu, paddr, data, width);
+            issue_drained_write(cpu, common, paddr, data, width);
 
             pos += max_natural;
         }
@@ -528,50 +540,48 @@ fn write_line_to_memory(cpu: &mut Cpu, line: &VsbLine) {
     }
 }
 
-/// Wraps scalar-SB drain semantics (WCB merge + memory write) for a single VSB write.
-fn issue_drained_write(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidth) {
-    let raw = paddr.val();
-    let in_htif = cpu.soc.bus.htif_range().is_some_and(|(lo, hi)| raw >= lo && raw < hi);
-    let ram_target =
-        if in_htif { None } else { cpu.soc.bus.ram_region().filter(|r| r.contains(raw, 1)) };
-    let width_bytes = width_to_bytes(width);
+/// Emits a `MemReq` (op = Write) for a single VSB-drained write. The cache
+/// hierarchy + memory controller + device handle the actual data delivery
+/// (no direct RamRegion writes — bit-exact writes propagate via the
+/// memory controller's `service_request`).
+fn issue_drained_write(
+    cpu: &mut Cpu,
+    common: &mut crate::core::pipeline::engine::BackendCommon,
+    paddr: PhysAddr,
+    data: u64,
+    width: MemWidth,
+) {
+    use crate::core::pipeline::outstanding::OutstandingStore;
+    use crate::sim::components::ComponentId;
+    use crate::sim::packet::{AccessSize, MemOp, Packet, WriteData};
 
-    if !cpu.core.wcb.is_disabled() && ram_target.is_some() {
-        let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
-        if evicted.is_none() {
-            cpu.stats.wcb_coalesces += 1;
-        }
-        if let Some(drain) = evicted {
-            let addr = PhysAddr::new(drain.line_addr);
-            let _latency = cpu.simulate_memory_access(addr, crate::common::AccessType::Write);
-            cpu.stats.wcb_drains += 1;
-        }
-    } else if ram_target.is_some() {
-        let _latency = cpu.simulate_memory_access(paddr, crate::common::AccessType::Write);
-    }
-
-    if let Some(r) = ram_target {
-        // SAFETY: `ram_target` is `Some` only after `RamRegion::contains` confirms
-        // the address is inside DRAM; widths up to 8 bytes fit because DRAM is contiguous.
-        unsafe {
-            let ptr = r.ptr(raw);
-            match width {
-                MemWidth::Byte => *ptr = data as u8,
-                MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
-                MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
-                MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
-                MemWidth::Nop => {}
-            }
-        }
-    } else {
-        match width {
-            MemWidth::Byte => cpu.soc.bus.write_u8(paddr, data as u8),
-            MemWidth::Half => cpu.soc.bus.write_u16(paddr, data as u16),
-            MemWidth::Word => cpu.soc.bus.write_u32(paddr, data as u32),
-            MemWidth::Double => cpu.soc.bus.write_u64(paddr, data),
-            MemWidth::Nop => {}
-        }
-    }
+    let access_size = match width {
+        MemWidth::Byte => AccessSize::B1,
+        MemWidth::Half => AccessSize::B2,
+        MemWidth::Word => AccessSize::B4,
+        MemWidth::Double => AccessSize::B8,
+        MemWidth::Nop => return,
+    };
+    let req_id = common.alloc_req_id();
+    let l1_d_id = common.l1_d_id;
+    let pipeline_id = common.pipeline_id;
+    common.outstanding_stores.insert(
+        req_id,
+        OutstandingStore { rob_tag: RobTag::default(), paddr },
+    );
+    let cycle = cpu.soc.cycle;
+    cpu.event_queue.schedule(
+        cycle,
+        ComponentId::Cache(l1_d_id),
+        ComponentId::Pipeline(pipeline_id),
+        Packet::MemReq {
+            req_id,
+            paddr,
+            vaddr: None,
+            size: access_size,
+            op: MemOp::Write { data: WriteData::Small(data) },
+        },
+    );
 }
 
 #[cfg(test)]

@@ -41,21 +41,25 @@ impl Cpu {
                 let asid = Asid::new(
                     ((self.hart.csrs.satp >> csr::SATP_ASID_SHIFT) & csr::SATP_ASID_MASK) as u16,
                 );
-                let inst = if let Some(hit) =
+                // Hang detection reads the instruction at the stuck PC for
+                // tracing; uses the RAM fast-path pointer (bench-side
+                // observability — no cache modelling needed).
+                let paddr_raw = if let Some(hit) =
                     self.hart.mmu.dtlb.lookup(Vpn::new((self.hart.pc >> PAGE_SHIFT) & VPN_MASK), asid)
                 {
-                    let paddr = crate::common::PhysAddr::new(
-                        hit.ppn.to_addr() | (self.hart.pc & PAGE_OFFSET_MASK),
-                    );
-                    self.soc.bus.read_u32(paddr)
+                    hit.ppn.to_addr() | (self.hart.pc & PAGE_OFFSET_MASK)
                 } else {
-                    let paddr = crate::common::PhysAddr::new(self.hart.pc);
-                    if self.soc.bus.is_valid_address(paddr) {
-                        self.soc.bus.read_u32(paddr)
-                    } else {
-                        0
-                    }
+                    self.hart.pc
                 };
+                let inst = self
+                    .soc
+                    .bus
+                    .ram_region()
+                    .filter(|r| r.contains(paddr_raw, 4))
+                    .map_or(0u32, |r| {
+                        // SAFETY: `RamRegion::contains` bounds-checks the access.
+                        unsafe { r.ptr(paddr_raw).cast::<u32>().read_unaligned() }
+                    });
 
                 if inst == WFI_INSTRUCTION {
                     trace_trap!(self.config.general.trace_instructions;

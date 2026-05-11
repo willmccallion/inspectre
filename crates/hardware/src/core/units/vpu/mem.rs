@@ -731,36 +731,82 @@ fn is_element_active(cpu: &Cpu, i: usize, vm: bool) -> bool {
     cpu.hart.regs.vpr().read_mask_bit(VRegIdx::new(0), ElemIdx::new(i))
 }
 
+/// Translates a vector-element address synchronously.
+///
+/// The in-order vector unit executes element-by-element atomically during
+/// the execute stage, so it cannot park on a TLB miss the way the pipelined
+/// LSU does. If translation needs a page-table walk this function surfaces
+/// it as the appropriate page fault — the trap commits, the OS handler
+/// installs the PTE, and the re-issue path warms the TLB before retrying.
+fn translate_vector_element(
+    cpu: &mut Cpu,
+    vaddr: u64,
+    access: AccessType,
+    size: u64,
+) -> Result<crate::common::PhysAddr, Trap> {
+    use crate::core::cpu::memory::TranslateResult;
+    match cpu.translate(VirtAddr::new(vaddr), access, size) {
+        TranslateResult::Ready(r) => {
+            if let Some(trap) = r.trap {
+                Err(trap)
+            } else {
+                Ok(r.paddr)
+            }
+        }
+        TranslateResult::NeedPte { .. } => Err(match access {
+            AccessType::Read => Trap::LoadPageFault(vaddr),
+            AccessType::Write => Trap::StorePageFault(vaddr),
+            AccessType::Fetch => Trap::InstructionPageFault(vaddr),
+        }),
+    }
+}
+
 /// Read a single element from memory at `vaddr` with the given EEW.
+///
+/// Reads bytes via the RAM fast-path pointer (vector memory ops are
+/// architecturally not defined for MMIO regions; a non-RAM address
+/// surfaces zero, which the encoded operation either consumes or
+/// faults on at the protection check above).
 fn mem_read_element(cpu: &mut Cpu, vaddr: u64, eew: Sew) -> Result<u64, Trap> {
     let size = eew.bytes() as u64;
-    let tr = cpu.translate(VirtAddr::new(vaddr), AccessType::Read, size);
-    if let Some(trap) = tr.trap {
-        return Err(trap);
-    }
-    let paddr = tr.paddr;
-    let val = match eew {
-        Sew::E8 => u64::from(cpu.soc.bus.read_u8(paddr)),
-        Sew::E16 => u64::from(cpu.soc.bus.read_u16(paddr)),
-        Sew::E32 => u64::from(cpu.soc.bus.read_u32(paddr)),
-        Sew::E64 => cpu.soc.bus.read_u64(paddr),
+    let paddr = translate_vector_element(cpu, vaddr, AccessType::Read, size)?;
+    let raw = paddr.val();
+    let region = cpu.soc.bus.ram_region().filter(|r| r.contains(raw, size));
+    let val = if let Some(r) = region {
+        // SAFETY: `RamRegion::contains(raw, size)` bounds-checks the access.
+        unsafe {
+            match eew {
+                Sew::E8 => u64::from(*r.ptr(raw)),
+                Sew::E16 => u64::from(r.ptr(raw).cast::<u16>().read_unaligned()),
+                Sew::E32 => u64::from(r.ptr(raw).cast::<u32>().read_unaligned()),
+                Sew::E64 => r.ptr(raw).cast::<u64>().read_unaligned(),
+            }
+        }
+    } else {
+        // Architecturally invalid: vector ops against MMIO return zero.
+        0
     };
     Ok(val)
 }
 
 /// Write a single element to memory at `vaddr` with the given EEW.
+///
+/// Writes via the RAM fast-path pointer. Non-RAM addresses are silently
+/// dropped — vector stores to MMIO are not architecturally defined.
 fn mem_write_element(cpu: &mut Cpu, vaddr: u64, eew: Sew, val: u64) -> Result<(), Trap> {
     let size = eew.bytes() as u64;
-    let tr = cpu.translate(VirtAddr::new(vaddr), AccessType::Write, size);
-    if let Some(trap) = tr.trap {
-        return Err(trap);
-    }
-    let paddr = tr.paddr;
-    match eew {
-        Sew::E8 => cpu.soc.bus.write_u8(paddr, val as u8),
-        Sew::E16 => cpu.soc.bus.write_u16(paddr, val as u16),
-        Sew::E32 => cpu.soc.bus.write_u32(paddr, val as u32),
-        Sew::E64 => cpu.soc.bus.write_u64(paddr, val),
+    let paddr = translate_vector_element(cpu, vaddr, AccessType::Write, size)?;
+    let raw = paddr.val();
+    if let Some(r) = cpu.soc.bus.ram_region().filter(|r| r.contains(raw, size)) {
+        // SAFETY: `RamRegion::contains(raw, size)` bounds-checks the access.
+        unsafe {
+            match eew {
+                Sew::E8 => *r.ptr(raw) = val as u8,
+                Sew::E16 => r.ptr(raw).cast::<u16>().write_unaligned(val as u16),
+                Sew::E32 => r.ptr(raw).cast::<u32>().write_unaligned(val as u32),
+                Sew::E64 => r.ptr(raw).cast::<u64>().write_unaligned(val),
+            }
+        }
     }
     Ok(())
 }
