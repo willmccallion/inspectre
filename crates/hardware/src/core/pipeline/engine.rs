@@ -258,6 +258,14 @@ impl<E: ExecutionEngine> Pipeline<E> {
         if needs_frontend_flush {
             self.frontend.flush();
             self.rename_output.clear();
+            // Drop wrong-path in-flight fetches and walks; their MemResps will
+            // arrive over the next several cycles and would otherwise re-enter
+            // the just-cleared latches as stale instructions. Committed stores
+            // (outstanding_stores) and pre-redirect loads still in the kept
+            // ROB range remain so they can complete.
+            let common = self.engine.common_mut();
+            common.outstanding_fetches.clear();
+            common.outstanding_walks.clear();
         }
 
         if cpu.check_exit().is_none() && !cpu.hart.wfi_waiting {
