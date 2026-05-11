@@ -71,6 +71,7 @@ fn park_fetch_walk<E: ExecutionEngine>(
             continuation: WalkContinuation::Fetch(pending),
         },
     );
+    common.fetch_walk_pending = true;
 
     let cycle = cpu.soc.cycle;
     cpu.event_queue.schedule(
@@ -120,6 +121,13 @@ fn issue_fetch<E: ExecutionEngine>(
 /// Executes the Fetch1 stage: emits up to `pipeline.width` fetch `MemReq`
 /// packets, advancing the architectural PC by the predicted next-PC.
 pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
+    // Stall fetch while a translation walk is outstanding for an earlier
+    // fetch: emitting more MemReqs for the same PC every cycle just piles
+    // up duplicate walks (gem5 MinorCPU's IFU stays in the ItlbWait state
+    // until the walk completes).
+    if engine.common().fetch_walk_pending {
+        return;
+    }
     let mut current_pc = cpu.hart.pc;
     let c_enabled = (cpu.hart.csrs.misa & csr::MISA_EXT_C) != 0;
     let align_mask: u64 = if c_enabled { 1 } else { 3 };

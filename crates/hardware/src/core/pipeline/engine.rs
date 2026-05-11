@@ -204,6 +204,10 @@ pub struct BackendCommon {
     /// Advanced when a contiguous run drains from `fetch_reorder`; bumped to
     /// `next_fetch_seq` on flush so post-flush fetches stay in order.
     pub next_emit_fetch_seq: u64,
+    /// True while a fetch is parked on a page-table walk. fetch1 stalls
+    /// instead of re-emitting the same PC every cycle (gem5 MinorCPU's
+    /// IFU `ItlbWait` state). Cleared when the matching walk completes.
+    pub fetch_walk_pending: bool,
     /// Monotonic request-id counter; allocate via [`BackendCommon::alloc_req_id`].
     pub next_req_id: u64,
     /// `PipelineId` of this engine; stamped on every outgoing packet as the
@@ -288,6 +292,7 @@ impl<E: ExecutionEngine> Pipeline<E> {
             common.outstanding_fetches.clear();
             common.outstanding_walks.clear();
             common.fetch_reorder.clear();
+            common.fetch_walk_pending = false;
             // Bump the emit cursor past every fetch_seq allocated so far so
             // any straggler responses for pre-flush fetches are dropped
             // rather than entering the post-flush fetch stream.
