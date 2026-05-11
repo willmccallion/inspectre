@@ -44,11 +44,15 @@ use crate::sim::packet::{self, AccessSize, MemOp, Packet};
 
 /// Outcome of processing a single `ExMem1Entry`.
 enum EntryOutcome {
-    /// Entry was passed downstream (Mem1Mem2 push) or parked in the
-    /// engine's outstanding tables.
+    /// Entry was passed downstream (Mem1Mem2 push); continue iterating.
     Done,
     /// SB partial overlap or atomic-vs-SB stall — push back to input.
     Stall(ExMem1Entry),
+    /// Entry was parked on a page-table walk in the engine's outstanding
+    /// tables. Younger memory ops cannot pass an unresolved older
+    /// translation in an in-order pipeline, so halt iteration and push any
+    /// remaining entries back to the input latch.
+    ParkedWalk,
 }
 
 /// Executes the Memory1 stage. Returns immediately; ordering-violation
@@ -67,6 +71,10 @@ pub fn memory1_stage<E: ExecutionEngine>(
             EntryOutcome::Done => continue,
             EntryOutcome::Stall(ex) => {
                 input.push(ex);
+                input.extend(iter);
+                return;
+            }
+            EntryOutcome::ParkedWalk => {
                 input.extend(iter);
                 return;
             }
@@ -131,7 +139,7 @@ fn process_entry<E: ExecutionEngine>(
         }
         TranslateResult::NeedPte { pte_addr, state } => {
             park_walk(cpu, engine, state, pte_addr, ex);
-            return EntryOutcome::Done;
+            return EntryOutcome::ParkedWalk;
         }
     };
 
