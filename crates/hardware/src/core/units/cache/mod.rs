@@ -544,31 +544,23 @@ const fn hit_level_for(level: CacheLevel) -> HitLevel {
 }
 
 impl Handle for Cache {
-    fn handle(&mut self, packet: Packet, _source: ComponentId, ctx: &mut HandleCtx<'_>) {
+    fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
         match packet {
             Packet::MemReq { req_id, paddr, vaddr, size, op } => {
                 let line_addr = LineAddr::from_phys(paddr, self.line_bytes as u64);
 
                 if !self.enabled {
-                    if let Some(ds) = self.downstream {
-                        ctx.scheduler.schedule(
-                            ctx.cycle,
-                            ds,
-                            ctx.self_id,
-                            Packet::MemReq { req_id, paddr, vaddr, size, op },
-                        );
-                    }
+                    self.forward_pass_through(req_id, paddr, vaddr, size, op, source, ctx);
                     return;
                 }
 
                 let is_write = matches!(op, MemOp::Write { .. });
                 let hit = self.access_check(paddr.val(), is_write);
-                let source_for_response = _source;
 
                 if hit {
                     ctx.scheduler.schedule(
                         ctx.cycle + self.latency,
-                        source_for_response,
+                        source,
                         ctx.self_id,
                         Packet::MemResp {
                             req_id,
@@ -580,13 +572,7 @@ impl Handle for Cache {
                 } else if let Some(ds) = self.downstream {
                     let _ = self.pending.insert(
                         req_id,
-                        PendingRequest {
-                            source: source_for_response,
-                            paddr,
-                            vaddr,
-                            size,
-                            op: op.clone(),
-                        },
+                        PendingRequest { source, paddr, vaddr, size, op: op.clone() },
                     );
                     ctx.scheduler.schedule(
                         ctx.cycle + self.latency,
@@ -597,7 +583,9 @@ impl Handle for Cache {
                 }
             }
             Packet::MemResp { req_id, line_addr, data, hit_level } => {
-                if let Some(pending) = self.pending.remove(&req_id) {
+                let Some(pending) = self.pending.remove(&req_id) else { return };
+
+                if self.enabled {
                     let is_write = matches!(pending.op, MemOp::Write { .. });
                     let (_pen, evicted) =
                         self.install_line_tracked(pending.paddr.val(), is_write, 0);
@@ -614,14 +602,14 @@ impl Handle for Cache {
                             );
                         }
                     }
-
-                    ctx.scheduler.schedule(
-                        ctx.cycle,
-                        pending.source,
-                        ctx.self_id,
-                        Packet::MemResp { req_id, line_addr, data, hit_level },
-                    );
                 }
+
+                ctx.scheduler.schedule(
+                    ctx.cycle,
+                    pending.source,
+                    ctx.self_id,
+                    Packet::MemResp { req_id, line_addr, data, hit_level },
+                );
             }
             Packet::CacheInval { line_addr } => {
                 let _ = self.invalidate_line(line_addr.val());
@@ -631,5 +619,33 @@ impl Handle for Cache {
             }
             _ => {}
         }
+    }
+}
+
+impl Cache {
+    /// Pass-through routing used when this cache level is disabled: forwards
+    /// the request to `downstream` with zero added latency while recording the
+    /// original requester so the eventual response routes back through here.
+    fn forward_pass_through(
+        &mut self,
+        req_id: ReqId,
+        paddr: PhysAddr,
+        vaddr: Option<VirtAddr>,
+        size: AccessSize,
+        op: MemOp,
+        source: ComponentId,
+        ctx: &mut HandleCtx<'_>,
+    ) {
+        let Some(ds) = self.downstream else { return };
+        let _ = self.pending.insert(
+            req_id,
+            PendingRequest { source, paddr, vaddr, size, op: op.clone() },
+        );
+        ctx.scheduler.schedule(
+            ctx.cycle,
+            ds,
+            ctx.self_id,
+            Packet::MemReq { req_id, paddr, vaddr, size, op },
+        );
     }
 }

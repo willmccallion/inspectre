@@ -5,9 +5,10 @@
 use super::devices::Device;
 use super::memory::RamRegion;
 use crate::common::{LineAddr, PhysAddr};
-use crate::sim::components::{ComponentId, MemCtrlId};
+use crate::sim::components::{ComponentId, MemCtrlId, ReqId};
 use crate::sim::handle::{Handle, HandleCtx};
 use crate::sim::packet::{HitLevel, MemRespData, Packet};
+use std::collections::HashMap;
 
 /// Aggregated interrupt signals returned by [`Bus::tick`] each cycle.
 #[derive(Clone, Copy, Debug, Default)]
@@ -41,6 +42,10 @@ pub struct Bus {
     /// HTIF address range, checked before the RAM fast path so HTIF tohost
     /// stores route through the device.
     htif_range: Option<(u64, u64)>,
+    /// In-flight RAM `MemReq`s forwarded to the memory controller, keyed by
+    /// `ReqId` so the matching `MemResp` from the controller can be routed back
+    /// to the originating upstream component (typically the LLC).
+    pending: HashMap<ReqId, ComponentId>,
 }
 
 impl std::fmt::Debug for Bus {
@@ -58,7 +63,7 @@ impl std::fmt::Debug for Bus {
 
 impl Bus {
     /// Creates a new bus with the given width and latency.
-    pub const fn new(width_bytes: u64, latency_cycles: u64) -> Self {
+    pub fn new(width_bytes: u64, latency_cycles: u64) -> Self {
         Self {
             devices: Vec::new(),
             width_bytes,
@@ -68,6 +73,7 @@ impl Bus {
             ram_ctrl: None,
             ram_region: None,
             htif_range: None,
+            pending: HashMap::new(),
         }
     }
 
@@ -206,42 +212,53 @@ impl Bus {
 
 impl Handle for Bus {
     fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
-        if let Packet::MemReq { req_id, paddr, .. } = &packet {
-            let raw = paddr.val();
-            // RAM range routes to the memory controller.
-            if let Some((ctrl_id, start, end)) = self.ram_ctrl
-                && raw >= start
-                && raw < end
-                && self
+        match packet {
+            Packet::MemReq { req_id, paddr, .. } => {
+                let raw = paddr.val();
+                let is_ram = self.ram_ctrl.is_some_and(|(_, start, end)| raw >= start && raw < end);
+                let is_htif = self
                     .htif_range
-                    .is_none_or(|(hstart, hend)| !(raw >= hstart && raw < hend))
-            {
+                    .is_some_and(|(hstart, hend)| raw >= hstart && raw < hend);
+
+                if is_ram && !is_htif {
+                    let (ctrl_id, _, _) = self.ram_ctrl.expect("ram_ctrl checked above");
+                    let _ = self.pending.insert(req_id, source);
+                    ctx.scheduler.schedule(
+                        ctx.cycle + self.latency_cycles,
+                        ComponentId::MemCtrl(ctrl_id),
+                        ctx.self_id,
+                        packet,
+                    );
+                    return;
+                }
+                if let Some(idx) = self.find_device_idx(paddr) {
+                    self.devices[idx].handle(packet, source, ctx);
+                    return;
+                }
+                // Unmapped address: reply with zeros so the originator unblocks.
+                let line_addr = LineAddr::from_phys(paddr, 64);
                 ctx.scheduler.schedule(
                     ctx.cycle + self.latency_cycles,
-                    ComponentId::MemCtrl(ctrl_id),
+                    source,
                     ctx.self_id,
-                    packet,
+                    Packet::MemResp {
+                        req_id,
+                        line_addr,
+                        data: MemRespData::Small(0),
+                        hit_level: HitLevel::Mmio,
+                    },
                 );
-                return;
             }
-            // MMIO range: dispatch in-place to the device's Handle.
-            if let Some(idx) = self.find_device_idx(*paddr) {
-                self.devices[idx].handle(packet, source, ctx);
-                return;
+            Packet::MemResp { req_id, line_addr, data, hit_level } => {
+                let Some(upstream) = self.pending.remove(&req_id) else { return };
+                ctx.scheduler.schedule(
+                    ctx.cycle + self.latency_cycles,
+                    upstream,
+                    ctx.self_id,
+                    Packet::MemResp { req_id, line_addr, data, hit_level },
+                );
             }
-            // Unmapped address: reply with zeros so the originator unblocks.
-            let line_addr = LineAddr::from_phys(*paddr, 64);
-            ctx.scheduler.schedule(
-                ctx.cycle + self.latency_cycles,
-                source,
-                ctx.self_id,
-                Packet::MemResp {
-                    req_id: *req_id,
-                    line_addr,
-                    data: MemRespData::Small(0),
-                    hit_level: HitLevel::Mmio,
-                },
-            );
+            _ => {}
         }
     }
 }
