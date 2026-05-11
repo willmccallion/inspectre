@@ -745,12 +745,15 @@ fn cboz_write(cpu: &mut Cpu, common: &mut BackendCommon, block_paddr: u64) {
 
 /// Writes a store's data to memory by emitting a `MemReq` (op = Write).
 ///
-/// The cache + bus + memctrl chain handles the write: RAM addresses
-/// propagate to the memory controller, which writes the bytes to DRAM
-/// when it processes the `MemReq`. MMIO addresses route through the bus
-/// to the target device's `Handle::handle`, which performs the side
-/// effect. The pipeline registers the request in `outstanding_stores`
-/// so the mailbox drain clears it once the device acks.
+/// Data dimension: for RAM-backed addresses the bytes are written directly
+/// into the `RamRegion` here so subsequent loads via the RAM fast path see
+/// the new value. MMIO addresses are not backed by RAM, so the device's
+/// `Handle::handle` runs the side effect when the packet reaches it.
+///
+/// Latency / state dimension: a `Packet::MemReq` flows through the cache
+/// hierarchy regardless so the L1D dirty bit, MSHR, write-combining buffer,
+/// memory-controller accounting, and outstanding-store ack all see the
+/// store at the right time.
 fn write_store_to_memory(
     cpu: &mut Cpu,
     common: &mut BackendCommon,
@@ -765,6 +768,33 @@ fn write_store_to_memory(
         MemWidth::Double => AccessSize::B8,
         MemWidth::Nop => return,
     };
+    let width_bytes = match width {
+        MemWidth::Byte => 1u64,
+        MemWidth::Half => 2,
+        MemWidth::Word => 4,
+        MemWidth::Double => 8,
+        MemWidth::Nop => return,
+    };
+
+    if let Some(r) = cpu
+        .soc
+        .bus
+        .ram_region()
+        .filter(|r| r.contains(paddr.val(), width_bytes))
+    {
+        // SAFETY: `RamRegion::contains` above bounds-checks the write.
+        unsafe {
+            let ptr = r.ptr(paddr.val());
+            match width {
+                MemWidth::Byte => *ptr = data as u8,
+                MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
+                MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
+                MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
+                MemWidth::Nop => {}
+            }
+        }
+    }
+
     let req_id = common.alloc_req_id();
     let l1_d_id = common.l1_d_id;
     let pipeline_id = common.pipeline_id;

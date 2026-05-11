@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::common::{LineAddr, PhysAddr};
 use crate::sim::components::ComponentId;
 use crate::sim::handle::{Handle, HandleCtx};
-use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet, WriteData};
+use crate::sim::packet::{AccessSize, HitLevel, MemOp, MemRespData, Packet};
 use crate::soc::memory::buffer::DramBuffer;
 
 /// Cache-line size used when building `LineAddr` from a `PhysAddr`.
@@ -280,7 +280,14 @@ impl Handle for MemoryController {
 }
 
 /// Reads or writes the underlying buffer for a memory request and returns the
-/// response payload. Writes return a zero `Small` payload.
+/// response payload.
+///
+/// Writes do not touch the backing buffer here: scalar/vector store drains
+/// at commit and CBO routines write the bytes into `RamRegion` directly so
+/// subsequent loads via the RAM fast path see the new value immediately. The
+/// `MemReq` packet still flows through the cache + bus + controller chain
+/// for cache-state and latency accounting; this function returns a zero ack
+/// payload for the response.
 fn service_request(
     buffer: &Arc<DramBuffer>,
     base: PhysAddr,
@@ -291,10 +298,7 @@ fn service_request(
     let offset = (paddr.val().saturating_sub(base.val())) as usize;
     match op {
         MemOp::Read | MemOp::Fetch => read_response(buffer, offset, size),
-        MemOp::Write { data } => {
-            write_payload(buffer, offset, size, &data);
-            MemRespData::Small(0)
-        }
+        MemOp::Write { .. } => MemRespData::Small(0),
         MemOp::Atomic { .. } => {
             // Atomic semantics are resolved upstream (LR/SC reservation, AMO
             // round-trip in the LSU). The controller serves the load value.
@@ -325,24 +329,3 @@ fn read_response(buffer: &Arc<DramBuffer>, offset: usize, size: AccessSize) -> M
     }
 }
 
-fn write_payload(buffer: &Arc<DramBuffer>, offset: usize, size: AccessSize, data: &WriteData) {
-    match (size, data) {
-        (AccessSize::B1, WriteData::Small(v)) => buffer.write_u8(offset, *v as u8),
-        (AccessSize::B2, WriteData::Small(v)) => {
-            buffer.write_slice(offset, &(*v as u16).to_le_bytes());
-        }
-        (AccessSize::B4, WriteData::Small(v)) => {
-            buffer.write_slice(offset, &(*v as u32).to_le_bytes());
-        }
-        (AccessSize::B8, WriteData::Small(v)) => {
-            buffer.write_slice(offset, &v.to_le_bytes());
-        }
-        (AccessSize::Line, WriteData::Line(bytes)) => {
-            buffer.write_slice(offset, bytes);
-        }
-        // Mismatched size/payload pairs are ignored — the upstream LSU should
-        // never construct them. A future tightening could express this in the
-        // packet enum's type by parameterizing `WriteData` on `AccessSize`.
-        _ => {}
-    }
-}
