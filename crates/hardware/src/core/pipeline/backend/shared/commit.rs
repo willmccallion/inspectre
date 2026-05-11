@@ -1236,8 +1236,10 @@ mod tests {
         rob.complete(tag, 42);
 
         let mut redirect = false;
+        let mut common = BackendCommon::default();
         let trap = commit_stage(
             &mut cpu,
+            &mut common,
             &mut rob,
             &mut store_buffer,
             &mut scoreboard,

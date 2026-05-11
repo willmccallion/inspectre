@@ -1439,7 +1439,7 @@ mod tests {
         let config = Config::default();
         let mut cpu = Cpu::build(&config, "");
 
-        let mut engine = O3Engine::new(&config);
+        let mut engine = O3Engine::new(&config, crate::sim::components::PipelineId::new(0), crate::sim::components::CacheId::new(0), crate::sim::components::CacheId::new(1));
         assert_eq!(engine.width, config.pipeline.width);
 
         engine.flush(&mut cpu);
@@ -1450,7 +1450,7 @@ mod tests {
     fn test_o3_engine_sync_arch_regs() {
         let config = Config::default();
         let mut cpu = Cpu::build(&config, "");
-        let mut engine = O3Engine::new(&config);
+        let mut engine = O3Engine::new(&config, crate::sim::components::PipelineId::new(0), crate::sim::components::CacheId::new(0), crate::sim::components::CacheId::new(1));
 
         cpu.hart.regs.write(RegIdx::new(1), 42);
         engine.sync_arch_regs(&cpu);
