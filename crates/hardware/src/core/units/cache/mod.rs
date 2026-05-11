@@ -1,21 +1,29 @@
-//! Set-Associative Cache Simulator.
+//! Set-associative cache.
 //!
-//! This module implements a configurable set-associative cache simulator.
-//! It supports various replacement policies (LRU, FIFO, Random, etc.) and
-//! hardware prefetchers. It models cache hits, misses, and write-back
-//! penalties to simulate memory hierarchy latency.
+//! Each cache level is its own [`Handle`] component. Requests arrive as
+//! [`Packet::MemReq`]; on a hit the cache schedules a [`Packet::MemResp`] back
+//! to the requester, on a miss it forwards a `MemReq` downstream and records
+//! the original requester in [`Cache::pending`] so the eventual response can
+//! be routed back. Evictions emit [`Packet::CacheInval`] to upstream caches
+//! to maintain inclusion.
 
 pub mod policies;
 
 pub mod mshr;
 
+use std::collections::HashMap;
+
 use self::policies::{
     FifoPolicy, LruPolicy, MruPolicy, PlruPolicy, RandomPolicy, ReplacementPolicy,
 };
+use crate::common::{LineAddr, PhysAddr, VirtAddr};
 use crate::config::{CacheConfig, Prefetcher as PrefetcherType, ReplacementPolicy as PolicyType};
 use crate::core::units::prefetch::{
     NextLinePrefetcher, Prefetcher, StreamPrefetcher, StridePrefetcher, TaggedPrefetcher,
 };
+use crate::sim::components::{CacheId, ComponentId, ReqId};
+use crate::sim::handle::{Handle, HandleCtx};
+use crate::sim::packet::{AccessSize, CacheLevel, HitLevel, MemOp, MemRespData, Packet};
 
 /// Information about an evicted cache line.
 #[derive(Clone, Copy, Debug)]
@@ -26,6 +34,24 @@ pub struct EvictedLine {
     pub dirty: bool,
 }
 
+/// In-flight memory request the cache is waiting to satisfy.
+///
+/// One entry per [`ReqId`] forwarded downstream; the eventual `MemResp` is
+/// routed back to `source`.
+#[derive(Clone, Debug)]
+pub struct PendingRequest {
+    /// Component that issued the original [`Packet::MemReq`].
+    pub source: ComponentId,
+    /// Post-translation address.
+    pub paddr: PhysAddr,
+    /// Pre-translation address for fault reporting.
+    pub vaddr: Option<VirtAddr>,
+    /// Access width.
+    pub size: AccessSize,
+    /// Read / write / atomic / fetch.
+    pub op: MemOp,
+}
+
 /// Cache line entry containing tag, validity, and dirty bits.
 #[derive(Clone, Debug, Default)]
 struct CacheLine {
@@ -34,16 +60,25 @@ struct CacheLine {
     dirty: bool,
 }
 
-/// Cache simulator implementing a set-associative cache with configurable policies.
-///
-/// Supports various replacement policies (FIFO, LRU, PLRU, Random, MRU) and prefetchers
-/// (Next-Line, Stride, Stream, Tagged). Models cache hits, misses, and write-back penalties.
-pub struct CacheSim {
-    /// Access latency in cycles (added on hit; miss adds next-level latency).
+/// A set-associative cache at one level of the memory hierarchy.
+pub struct Cache {
+    /// Arena-relative identifier; the `ComponentId` form is `ComponentId::Cache(id)`.
+    pub id: CacheId,
+    /// Position in the hierarchy.
+    pub level: CacheLevel,
+    /// Caches that may hold a copy of any line installed here; receive
+    /// `CacheInval` on eviction to maintain inclusion.
+    pub upstream: Vec<ComponentId>,
+    /// Where to forward a `MemReq` on a miss. `None` for the last cache
+    /// when no downstream has been wired yet.
+    pub downstream: Option<ComponentId>,
+    /// Outstanding misses waiting on a downstream response.
+    pub pending: HashMap<ReqId, PendingRequest>,
+    /// Access latency in cycles.
     pub latency: u64,
-    /// When false, accesses bypass this cache and use next-level latency only.
+    /// When false, accesses bypass this cache and forward straight downstream.
     pub enabled: bool,
-    /// Optional hardware prefetcher (boxed for dynamic dispatch; `Send + Sync` for thread safety).
+    /// Optional hardware prefetcher.
     pub prefetcher: Option<Box<dyn Prefetcher + Send + Sync>>,
     lines: Vec<CacheLine>,
     num_sets: usize,
@@ -52,9 +87,11 @@ pub struct CacheSim {
     policy: Box<dyn ReplacementPolicy + Send + Sync>,
 }
 
-impl std::fmt::Debug for CacheSim {
+impl std::fmt::Debug for Cache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CacheSim")
+        f.debug_struct("Cache")
+            .field("id", &self.id)
+            .field("level", &self.level)
             .field("latency", &self.latency)
             .field("enabled", &self.enabled)
             .field("num_sets", &self.num_sets)
@@ -64,18 +101,12 @@ impl std::fmt::Debug for CacheSim {
     }
 }
 
-impl CacheSim {
-    /// Creates a new cache simulator with the specified configuration.
+impl Cache {
+    /// Creates a new cache.
     ///
-    /// # Arguments
-    ///
-    /// * `config` - Cache configuration specifying size, associativity,
-    ///   line size, replacement policy, and prefetcher
-    ///
-    /// # Returns
-    ///
-    /// A new `CacheSim` instance initialized according to the configuration.
-    pub fn new(config: &CacheConfig) -> Self {
+    /// `id` and `level` identify the cache for routing; `upstream` and
+    /// `downstream` are empty by default and configured by the system builder.
+    pub fn new(id: CacheId, level: CacheLevel, config: &CacheConfig) -> Self {
         let safe_ways = if config.ways == 0 { 1 } else { config.ways };
         let safe_line = if config.line_bytes == 0 { 64 } else { config.line_bytes };
         let safe_size = if config.size_bytes == 0 { 4096 } else { config.size_bytes };
@@ -110,6 +141,11 @@ impl CacheSim {
         };
 
         Self {
+            id,
+            level,
+            upstream: Vec::new(),
+            downstream: None,
+            pending: HashMap::new(),
             lines: vec![CacheLine::default(); num_sets * safe_ways],
             num_sets,
             ways: safe_ways,
@@ -121,28 +157,24 @@ impl CacheSim {
         }
     }
 
+    /// Sets the downstream target for forwarded misses.
+    pub fn set_downstream(&mut self, downstream: ComponentId) {
+        self.downstream = Some(downstream);
+    }
+
+    /// Adds an upstream consumer that should receive `CacheInval` on
+    /// eviction to keep inclusion invariants.
+    pub fn add_upstream(&mut self, upstream: ComponentId) {
+        self.upstream.push(upstream);
+    }
+
     /// Reconstructs the physical address from a set index and tag.
     #[inline]
     const fn reconstruct_addr(&self, set_index: usize, tag: u64) -> u64 {
         tag * (self.line_bytes * self.num_sets) as u64 + (set_index * self.line_bytes) as u64
     }
 
-    /// Checks if the cache contains the specified address.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The address to check
-    ///
-    /// # Returns
-    ///
-    /// `true` if the address is present in the cache, `false` otherwise.
-    ///
-    /// # Panics
-    ///
-    /// This function will not panic. Array indexing is guaranteed safe because:
-    /// - `set_index` is always `< num_sets` (modulo operation)
-    /// - `base_idx = set_index * ways` is always `< lines.len()`
-    /// - `idx = base_idx + i` where `i < ways` ensures `idx < lines.len()`
+    /// Returns true if the cache holds the line containing `addr`.
     pub fn contains(&self, addr: u64) -> bool {
         if !self.enabled {
             return false;
@@ -161,30 +193,13 @@ impl CacheSim {
         false
     }
 
-    /// Installs a cache line for the specified address.
-    ///
-    /// Selects a victim line using the replacement policy and installs
-    /// the new line. Returns the penalty for write-back if the victim
-    /// line was dirty.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The address to install
-    /// * `is_write` - Whether this is a write operation
-    /// * `next_level_latency` - Latency of the next cache level (for write-back penalty)
-    ///
-    /// # Returns
-    ///
-    /// The penalty in cycles for writing back a dirty victim line.
+    /// Installs a cache line. Returns the write-back penalty when the victim
+    /// was dirty.
     fn install_line(&mut self, addr: u64, is_write: bool, next_level_latency: u64) -> u64 {
         self.install_line_tracked(addr, is_write, next_level_latency).0
     }
 
     /// Installs a cache line and returns both the penalty and eviction info.
-    ///
-    /// Returns `(penalty, Option<EvictedLine>)`. The evicted line info is
-    /// `Some` when a valid line was replaced, enabling the caller to implement
-    /// inclusion/exclusion policies.
     fn install_line_tracked(
         &mut self,
         addr: u64,
@@ -215,23 +230,7 @@ impl CacheSim {
         (penalty, evicted)
     }
 
-    /// Accesses the cache for the specified address.
-    ///
-    /// Performs a cache lookup, updates replacement policy on hit,
-    /// installs the line on miss, and triggers prefetcher. Returns
-    /// hit status and penalty cycles.
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - The address to access
-    /// * `is_write` - Whether this is a write operation
-    /// * `next_level_latency` - Latency of the next cache level
-    ///
-    /// # Returns
-    ///
-    /// A tuple `(hit, penalty)` where `hit` indicates a cache hit
-    /// and `penalty` is the number of penalty cycles (0 on hit,
-    /// miss penalty + write-back penalty on miss).
+    /// Probe the cache, install on miss, run the prefetcher. Returns `(hit, penalty)`.
     pub fn access(&mut self, addr: u64, is_write: bool, next_level_latency: u64) -> (bool, u64) {
         if !self.enabled {
             return (false, 0);
@@ -272,13 +271,8 @@ impl CacheSim {
         (hit, penalty)
     }
 
-    /// Accesses the cache with eviction tracking for inclusion/exclusion policies.
-    ///
-    /// Returns `(hit, penalty, Vec<EvictedLine>)` where the evicted lines
-    /// include both the demand miss eviction and any prefetch-triggered evictions.
-    ///
-    /// Prefetch candidates are installed directly. Use `access_tracked_split` if
-    /// you need to filter prefetch candidates before installation.
+    /// Probe the cache with eviction tracking. Prefetch candidates are
+    /// installed directly. Use `access_tracked_split` to filter them first.
     pub fn access_tracked(
         &mut self,
         addr: u64,
@@ -301,11 +295,8 @@ impl CacheSim {
         (hit, penalty, all_evictions)
     }
 
-    /// Accesses the cache with eviction tracking, returning prefetch candidates
-    /// separately instead of installing them.
-    ///
-    /// Returns `(hit, penalty, demand_evictions, prefetch_candidates)`.
-    /// The caller is responsible for filtering and installing the prefetch candidates.
+    /// Probe with eviction tracking, returning prefetch candidates separately
+    /// instead of installing them.
     pub fn access_tracked_split(
         &mut self,
         addr: u64,
@@ -350,9 +341,7 @@ impl CacheSim {
         (hit, penalty, evictions, prefetches)
     }
 
-    /// Installs prefetch targets into this cache, returning any evictions.
-    ///
-    /// Used after filtering prefetch candidates through a shared prefetch filter.
+    /// Installs prefetch targets, returning any evictions.
     pub fn install_prefetches(
         &mut self,
         targets: &[u64],
@@ -370,11 +359,10 @@ impl CacheSim {
         evictions
     }
 
-    /// Non-blocking cache access: checks for hit/miss without installing the line on miss.
+    /// Non-blocking probe: checks for hit/miss without installing on miss.
     ///
-    /// On hit: updates replacement policy and dirty bit, triggers prefetcher. Returns true.
-    /// On miss: triggers prefetcher but does NOT install the line. Returns false.
-    /// The caller (MSHR) is responsible for installing the line later.
+    /// On hit, updates replacement policy and dirty bit, triggers prefetcher.
+    /// On miss, triggers prefetcher but does NOT install the line.
     pub fn access_check(&mut self, addr: u64, is_write: bool) -> bool {
         if !self.enabled {
             return false;
@@ -409,8 +397,6 @@ impl CacheSim {
     }
 
     /// Install a cache line from outside (e.g. when an MSHR completes).
-    ///
-    /// Returns the write-back penalty if the evicted victim was dirty.
     pub fn install_line_public(
         &mut self,
         addr: u64,
@@ -421,8 +407,6 @@ impl CacheSim {
     }
 
     /// Install a cache line from outside with eviction tracking.
-    ///
-    /// Returns `(penalty, Option<EvictedLine>)`.
     pub fn install_line_public_tracked(
         &mut self,
         addr: u64,
@@ -432,9 +416,8 @@ impl CacheSim {
         self.install_line_tracked(addr, is_write, next_level_latency)
     }
 
-    /// Writes back the cache line at `addr` if dirty and clears the dirty
-    /// bit, keeping the line valid. Used by Zicbom `cbo.clean`. Returns true
-    /// if the line was present.
+    /// Writes back the line at `addr` if dirty and clears the dirty bit.
+    /// Used by Zicbom `cbo.clean`. Returns true if the line was present.
     pub fn clean_line(&mut self, addr: u64) -> bool {
         if !self.enabled {
             return false;
@@ -452,10 +435,7 @@ impl CacheSim {
         false
     }
 
-    /// Invalidates the cache line containing the specified address.
-    ///
-    /// Used by the inclusive cache policy to back-invalidate L1 when L2 evicts a line.
-    /// Returns true if the line was found and invalidated, false if not present.
+    /// Invalidates the line containing `addr`. Returns true if the line was present.
     pub fn invalidate_line(&mut self, addr: u64) -> bool {
         if !self.enabled {
             return false;
@@ -476,11 +456,8 @@ impl CacheSim {
         false
     }
 
-    /// Installs a line without evicting the previous one (used for exclusive policy
-    /// when swapping an L1 evictee into L2, if there is an invalid way available).
-    /// Falls back to normal `install_line` if no free way exists.
-    ///
-    /// Returns `(penalty, Option<EvictedLine>)`.
+    /// Installs a line into an invalid way without eviction if possible.
+    /// Falls back to `install_line_tracked` if no free way exists.
     pub fn install_or_replace(
         &mut self,
         addr: u64,
@@ -513,11 +490,8 @@ impl CacheSim {
         self.line_bytes
     }
 
-    /// Flushes the cache: writes back all dirty lines and invalidates all entries.
-    ///
-    /// Returns information about evicted dirty lines so callers can account
-    /// for writeback latency. Only dirty lines are invalidated; clean lines
-    /// remain valid.
+    /// Writes back all dirty lines and invalidates them. Returns the evicted
+    /// dirty lines for writeback accounting; clean lines remain valid.
     pub fn flush(&mut self) -> Vec<EvictedLine> {
         let mut evicted = Vec::new();
         if !self.enabled {
@@ -537,9 +511,8 @@ impl CacheSim {
         evicted
     }
 
-    /// Invalidates all cache lines (dirty and clean), returning evicted dirty
-    /// lines for writeback accounting. Used for I-cache invalidation on FENCE.I
-    /// where stale clean lines must also be discarded.
+    /// Invalidates every line, returning evicted dirty lines. Used for I-cache
+    /// invalidation on FENCE.I where stale clean lines must also be discarded.
     pub fn invalidate_all(&mut self) -> Vec<EvictedLine> {
         let mut evicted = Vec::new();
         if !self.enabled {
@@ -559,5 +532,104 @@ impl CacheSim {
             }
         }
         evicted
+    }
+}
+
+const fn hit_level_for(level: CacheLevel) -> HitLevel {
+    match level {
+        CacheLevel::L1I | CacheLevel::L1D => HitLevel::L1,
+        CacheLevel::L2 => HitLevel::L2,
+        CacheLevel::L3 => HitLevel::L3,
+    }
+}
+
+impl Handle for Cache {
+    fn handle(&mut self, packet: Packet, _source: ComponentId, ctx: &mut HandleCtx<'_>) {
+        match packet {
+            Packet::MemReq { req_id, paddr, vaddr, size, op } => {
+                let line_addr = LineAddr::from_phys(paddr, self.line_bytes as u64);
+
+                if !self.enabled {
+                    if let Some(ds) = self.downstream {
+                        ctx.scheduler.schedule(
+                            ctx.cycle,
+                            ds,
+                            ctx.self_id,
+                            Packet::MemReq { req_id, paddr, vaddr, size, op },
+                        );
+                    }
+                    return;
+                }
+
+                let is_write = matches!(op, MemOp::Write { .. });
+                let hit = self.access_check(paddr.val(), is_write);
+                let source_for_response = _source;
+
+                if hit {
+                    ctx.scheduler.schedule(
+                        ctx.cycle + self.latency,
+                        source_for_response,
+                        ctx.self_id,
+                        Packet::MemResp {
+                            req_id,
+                            line_addr,
+                            data: MemRespData::Small(0),
+                            hit_level: hit_level_for(self.level),
+                        },
+                    );
+                } else if let Some(ds) = self.downstream {
+                    self.pending.insert(
+                        req_id,
+                        PendingRequest {
+                            source: source_for_response,
+                            paddr,
+                            vaddr,
+                            size,
+                            op: op.clone(),
+                        },
+                    );
+                    ctx.scheduler.schedule(
+                        ctx.cycle + self.latency,
+                        ds,
+                        ctx.self_id,
+                        Packet::MemReq { req_id, paddr, vaddr, size, op },
+                    );
+                }
+            }
+            Packet::MemResp { req_id, line_addr, data, hit_level } => {
+                if let Some(pending) = self.pending.remove(&req_id) {
+                    let is_write = matches!(pending.op, MemOp::Write { .. });
+                    let (_pen, evicted) =
+                        self.install_line_tracked(pending.paddr.val(), is_write, 0);
+
+                    if let Some(ev) = evicted {
+                        let ev_line =
+                            LineAddr::from_phys(PhysAddr::new(ev.addr), self.line_bytes as u64);
+                        for &u in &self.upstream {
+                            ctx.scheduler.schedule(
+                                ctx.cycle,
+                                u,
+                                ctx.self_id,
+                                Packet::CacheInval { line_addr: ev_line },
+                            );
+                        }
+                    }
+
+                    ctx.scheduler.schedule(
+                        ctx.cycle,
+                        pending.source,
+                        ctx.self_id,
+                        Packet::MemResp { req_id, line_addr, data, hit_level },
+                    );
+                }
+            }
+            Packet::CacheInval { line_addr } => {
+                let _ = self.invalidate_line(line_addr.val());
+            }
+            Packet::CacheClean { line_addr } => {
+                let _ = self.clean_line(line_addr.val());
+            }
+            _ => {}
+        }
     }
 }

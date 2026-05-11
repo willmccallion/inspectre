@@ -195,9 +195,13 @@ impl Cpu {
         });
         hart.committed_next_pc = config.general.start_pc;
 
+        let l3_id = soc.l3_cache_id();
+        let core = Core::new(CoreId::new(0), config, 0, l3_id);
+        let mut soc = soc;
+        soc.attach_l2_upstream(core.l2_cache.id);
         Self {
             hart,
-            core: Core::new(CoreId::new(0), config),
+            core,
             soc,
             config: config.clone(),
             per_hart_debug: vec![HartDebug::default()],

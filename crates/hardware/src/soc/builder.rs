@@ -6,7 +6,9 @@
 //! coherence) is added in later phases.
 
 use crate::config::{Config, MemoryController as MemControllerType};
-use crate::core::units::cache::CacheSim;
+use crate::core::units::cache::Cache;
+use crate::sim::components::{CacheId, ComponentId, MemCtrlId};
+use crate::sim::packet::CacheLevel;
 use crate::soc::devices::{Clint, GoldfishRtc, Htif, Plic, SysCon, Uart, VirtioBlock};
 use crate::soc::interconnect::Bus;
 use crate::soc::memory::buffer::DramBuffer;
@@ -16,6 +18,13 @@ use crate::soc::memory::controller::{
 use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+
+/// `CacheId` of the shared LLC in single-core configurations.
+///
+/// Convention: a core occupies `CacheId`s `[core_base, core_base+3)`
+/// (L1I, L1D, L2). The shared LLC sits immediately after the last core's
+/// caches. For a single core that places it at `CacheId(3)`.
+pub const L3_CACHE_ID: CacheId = CacheId::new(3);
 
 /// The simulated System-on-Chip.
 ///
@@ -36,7 +45,7 @@ pub struct Soc {
     /// Main memory controller.
     pub mem_controller: MemoryController,
     /// Shared L3 cache (last-level cache; future shared LLC for multi-core).
-    pub l3_cache: CacheSim,
+    pub l3_cache: Cache,
 }
 
 impl std::fmt::Debug for Soc {
@@ -117,16 +126,27 @@ impl Soc {
             )),
         };
 
-        let l3_cache = CacheSim::new(&config.cache.l3);
+        let mut l3_cache = Cache::new(L3_CACHE_ID, CacheLevel::L3, &config.cache.l3);
+        l3_cache.set_downstream(ComponentId::Bus);
 
         let ram_region = crate::soc::memory::RamRegion::new(
             ram_buffer.as_mut_ptr(),
             ram_base,
             ram_size as u64,
         );
-        bus.attach_ram(crate::sim::components::MemCtrlId::new(0), ram_region);
+        bus.attach_ram(MemCtrlId::new(0), ram_region);
 
         Self { cycle: 0, bus, mem_controller, l3_cache }
+    }
+
+    /// Returns the `CacheId` of the shared LLC.
+    pub const fn l3_cache_id(&self) -> CacheId {
+        self.l3_cache.id
+    }
+
+    /// Wires up the L2 cache of a core as an upstream consumer of the L3.
+    pub fn attach_l2_upstream(&mut self, l2_id: CacheId) {
+        self.l3_cache.add_upstream(ComponentId::Cache(l2_id));
     }
 
     /// Loads a binary into memory at the given physical address.
