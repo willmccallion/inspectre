@@ -1,0 +1,103 @@
+//! Synchronous packet probes for device-level unit tests.
+//!
+//! Devices in the packet-based design react to `MemReq` packets through
+//! their [`Handle`] impl rather than exposing direct `read_u8`/`write_u8`
+//! methods. These helpers construct a local event queue + `HandleCtx`,
+//! dispatch a `MemReq`, drain the resulting `MemResp`, and return the
+//! response data. Used by unit tests that exercise CLINT / PLIC / UART /
+//! HTIF / SysCon / Goldfish RTC / VirtIO state directly without a full
+//! `Simulator`.
+//!
+//! For tests that need a `Simulator`, prefer `sim.probe_mem_load` /
+//! `sim.probe_mem_store` instead — those go through the `Bus` routing
+//! layer.
+
+use rvsim_core::common::{LineAddr, PhysAddr};
+use rvsim_core::config::Config;
+use rvsim_core::sim::components::{ComponentId, DeviceId, PipelineId, ReqId};
+use rvsim_core::sim::events::EventQueue;
+use rvsim_core::sim::handle::{Handle, HandleCtx};
+use rvsim_core::sim::packet::{AccessSize, MemOp, MemRespData, Packet, WriteData};
+use rvsim_core::sim::stats::Stats;
+
+/// Maps a `width_bytes` value (1/2/4/8) to the matching [`AccessSize`].
+fn access_size_for(width: u8) -> AccessSize {
+    match width {
+        1 => AccessSize::B1,
+        2 => AccessSize::B2,
+        4 => AccessSize::B4,
+        _ => AccessSize::B8,
+    }
+}
+
+/// Dispatches a `MemReq::Read` to `device` and returns the response payload.
+pub fn read<H: Handle>(device: &mut H, paddr: PhysAddr, width: u8) -> u64 {
+    let req_id = ReqId::new(u64::MAX);
+    let mut queue = EventQueue::new();
+    let mut stats = Stats::new();
+    let config = Config::default();
+    let mut ctx = HandleCtx {
+        scheduler: &mut queue,
+        stats: &mut stats,
+        config: &config,
+        cycle: 0,
+        self_id: ComponentId::Device(DeviceId::new(0)),
+    };
+    device.handle(
+        Packet::MemReq {
+            req_id,
+            paddr,
+            vaddr: None,
+            size: access_size_for(width),
+            op: MemOp::Read,
+        },
+        ComponentId::Pipeline(PipelineId::new(0)),
+        &mut ctx,
+    );
+    while let Some(event) = queue.pop_ready(u64::MAX) {
+        if let Packet::MemResp { req_id: rid, data, .. } = event.packet
+            && rid == req_id
+        {
+            return match data {
+                MemRespData::Small(v) => v,
+                MemRespData::Line(_) => 0,
+            };
+        }
+    }
+    0
+}
+
+/// Dispatches a `MemReq::Write` to `device` for its side effect.
+pub fn write<H: Handle>(device: &mut H, paddr: PhysAddr, value: u64, width: u8) {
+    let req_id = ReqId::new(u64::MAX);
+    let mut queue = EventQueue::new();
+    let mut stats = Stats::new();
+    let config = Config::default();
+    let mut ctx = HandleCtx {
+        scheduler: &mut queue,
+        stats: &mut stats,
+        config: &config,
+        cycle: 0,
+        self_id: ComponentId::Device(DeviceId::new(0)),
+    };
+    device.handle(
+        Packet::MemReq {
+            req_id,
+            paddr,
+            vaddr: None,
+            size: access_size_for(width),
+            op: MemOp::Write { data: WriteData::Small(value) },
+        },
+        ComponentId::Pipeline(PipelineId::new(0)),
+        &mut ctx,
+    );
+    // Drain the ack so the local queue doesn't leak it (the side effect
+    // already fired inside `device.handle`).
+    let _ = queue.pop_ready(u64::MAX);
+}
+
+// Silence the unused-import warning for `LineAddr` — packets reference it
+// internally via `LineAddr::from_phys` but tests don't import it directly.
+const _: fn() = || {
+    let _ = LineAddr::from_phys(PhysAddr::new(0), 64);
+};

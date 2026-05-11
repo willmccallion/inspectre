@@ -37,36 +37,36 @@ fn test_syscon_address_range() {
 #[test]
 fn test_syscon_read_u8_returns_zero() {
     let (mut syscon, _) = create_test_syscon();
-    assert_eq!(syscon.read_u8(0), 0);
-    assert_eq!(syscon.read_u8(0x100), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), 1) as u8), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0x100), 1) as u8), 0);
 }
 
 #[test]
 fn test_syscon_read_u16_returns_zero() {
     let (mut syscon, _) = create_test_syscon();
-    assert_eq!(syscon.read_u16(0), 0);
-    assert_eq!(syscon.read_u16(0x100), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), 2) as u16), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0x100), 2) as u16), 0);
 }
 
 #[test]
 fn test_syscon_read_u32_returns_zero() {
     let (mut syscon, _) = create_test_syscon();
-    assert_eq!(syscon.read_u32(0), 0);
-    assert_eq!(syscon.read_u32(0x100), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), 4) as u32), 0);
+    assert_eq!((crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0x100), 4) as u32), 0);
 }
 
 #[test]
 fn test_syscon_read_u64_returns_zero() {
     let (mut syscon, _) = create_test_syscon();
-    assert_eq!(syscon.read_u64(0), 0);
-    assert_eq!(syscon.read_u64(0x100), 0);
+    assert_eq!(crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), 8), 0);
+    assert_eq!(crate::common::probe::read(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0x100), 8), 0);
 }
 
 #[test]
 fn test_syscon_write_u8_ignored() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
-    syscon.write_u8(0, 0x55);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x55) as u64, 1);
     // Exit signal should remain unchanged
     assert_eq!(exit_signal.load(Ordering::Relaxed), u64::MAX);
 }
@@ -75,7 +75,7 @@ fn test_syscon_write_u8_ignored() {
 fn test_syscon_write_u16_ignored() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
-    syscon.write_u16(0, 0x5555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x5555) as u64, 2);
     // Exit signal should remain unchanged
     assert_eq!(exit_signal.load(Ordering::Relaxed), u64::MAX);
 }
@@ -85,7 +85,7 @@ fn test_syscon_poweroff_signal() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write poweroff magic value (0x5555) to offset 0
-    syscon.write_u32(0, 0x5555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x5555) as u64, 4);
 
     // Exit signal should be set to 0
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
@@ -96,7 +96,7 @@ fn test_syscon_reset_signal() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write reset magic value (0x7777) to offset 0
-    syscon.write_u32(0, 0x7777);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x7777) as u64, 4);
 
     // Exit signal should be set to 0 (simulated as exit)
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
@@ -107,7 +107,7 @@ fn test_syscon_failure_signal() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write failure magic value (0x3333) to offset 0
-    syscon.write_u32(0, 0x3333);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x3333) as u64, 4);
 
     // Exit signal should be set to 1 (failure)
     assert_eq!(exit_signal.load(Ordering::Relaxed), 1);
@@ -118,7 +118,7 @@ fn test_syscon_write_non_magic_value_ignored() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write non-magic value
-    syscon.write_u32(0, 0x1234);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x1234) as u64, 4);
 
     // Exit signal should remain unchanged
     assert_eq!(exit_signal.load(Ordering::Relaxed), u64::MAX);
@@ -129,7 +129,7 @@ fn test_syscon_write_non_zero_offset_ignored() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write magic value to non-zero offset
-    syscon.write_u32(4, 0x5555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 4), (0x5555) as u64, 4);
 
     // Exit signal should remain unchanged
     assert_eq!(exit_signal.load(Ordering::Relaxed), u64::MAX);
@@ -140,7 +140,7 @@ fn test_syscon_write_u64_delegates_to_u32() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // Write poweroff signal as u64 (should delegate to u32)
-    syscon.write_u64(0, 0xDEADBEEF_00005555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), 0xDEADBEEF_00005555, 8);
 
     // Exit signal should be set to 0 (lower 32 bits = 0x5555)
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
@@ -151,14 +151,14 @@ fn test_syscon_multiple_commands() {
     let (mut syscon, exit_signal) = create_test_syscon();
 
     // First command: poweroff
-    syscon.write_u32(0, 0x5555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x5555) as u64, 4);
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
 
     // Reset exit signal
     exit_signal.store(u64::MAX, Ordering::Relaxed);
 
     // Second command: failure
-    syscon.write_u32(0, 0x3333);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x3333) as u64, 4);
     assert_eq!(exit_signal.load(Ordering::Relaxed), 1);
 }
 
@@ -169,18 +169,18 @@ fn test_syscon_all_magic_values() {
     // Test poweroff
     let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
     let mut syscon = SysCon::new(base_addr, exit_signal.clone());
-    syscon.write_u32(0, 0x5555);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x5555) as u64, 4);
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
 
     // Test reset
     let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
     let mut syscon = SysCon::new(base_addr, exit_signal.clone());
-    syscon.write_u32(0, 0x7777);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x7777) as u64, 4);
     assert_eq!(exit_signal.load(Ordering::Relaxed), 0);
 
     // Test failure
     let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
     let mut syscon = SysCon::new(base_addr, exit_signal.clone());
-    syscon.write_u32(0, 0x3333);
+    crate::common::probe::write(&mut syscon, rvsim_core::common::PhysAddr::new(0x100000 + 0), (0x3333) as u64, 4);
     assert_eq!(exit_signal.load(Ordering::Relaxed), 1);
 }
