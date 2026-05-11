@@ -384,6 +384,9 @@ fn decode_instruction(inst: u32, pc: u64, d: &Decoded) -> Result<ControlSignals,
             c.mem_read = true;
             c.mem_write = c.atomic_op != AtomicOp::Lr;
             c.reg_write = true;
+            // AMO and LR always sign-extend the loaded old value. SC writes
+            // a 0/1 success code and overrides load_data in memory2.
+            c.signed_load = true;
         }
         f_opcodes::OP_LOAD_FP => match d.funct3 {
             FP_WIDTH_HALF => {
