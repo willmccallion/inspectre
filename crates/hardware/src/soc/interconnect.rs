@@ -106,6 +106,20 @@ impl Bus {
         self.ram_region
     }
 
+    /// Returns the RAM fast-path view only when `[paddr, paddr+size)` is pure
+    /// RAM — i.e. does not overlap an MMIO overlay (HTIF lives inside the RAM
+    /// range, so its bytes belong to the device, not to `RamRegion`).
+    pub fn ram_region_for(&self, paddr: u64, size: u64) -> Option<RamRegion> {
+        self.ram_region.filter(|r| {
+            if !r.contains(paddr, size) {
+                return false;
+            }
+            !self
+                .htif_range
+                .is_some_and(|(start, end)| paddr < end && paddr + size > start)
+        })
+    }
+
     /// Returns the cached `(start, end_exclusive)` HTIF range.
     #[inline]
     pub const fn htif_range(&self) -> Option<(u64, u64)> {

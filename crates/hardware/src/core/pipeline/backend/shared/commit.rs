@@ -776,13 +776,9 @@ fn write_store_to_memory(
         MemWidth::Nop => return,
     };
 
-    if let Some(r) = cpu
-        .soc
-        .bus
-        .ram_region()
-        .filter(|r| r.contains(paddr.val(), width_bytes))
-    {
-        // SAFETY: `RamRegion::contains` above bounds-checks the write.
+    if let Some(r) = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes) {
+        // SAFETY: `ram_region_for` confirms the address is pure RAM and
+        // bounds-checks the write.
         unsafe {
             let ptr = r.ptr(paddr.val());
             match width {

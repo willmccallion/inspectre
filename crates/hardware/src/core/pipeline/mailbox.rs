@@ -169,11 +169,12 @@ fn dispatch_walk_continuation<E: ExecutionEngine>(
 ) {
     match continuation {
         WalkContinuation::Fetch(mut fetch) => {
+            pipeline.engine.common_mut().fetch_walk_pending = false;
             if let Some(trap) = result.trap {
                 fetch.trap = Some(trap);
                 fetch.exception_stage = Some(ExceptionStage::Fetch);
                 fetch.paddr = PhysAddr::new(0);
-                complete_fetch(pipeline, fetch);
+                buffer_fetch(pipeline, fetch);
             } else {
                 fetch.paddr = result.paddr;
                 let common = pipeline.engine.common_mut();
@@ -213,9 +214,9 @@ fn read_load_bytes(cpu: &Cpu, paddr: u64, width: MemWidth, resp_data: &MemRespDa
         MemWidth::Nop => 0,
     };
     if size > 0
-        && let Some(r) = cpu.soc.bus.ram_region().filter(|r| r.contains(paddr, size))
+        && let Some(r) = cpu.soc.bus.ram_region_for(paddr, size)
     {
-        // SAFETY: `RamRegion::contains(paddr, size)` bounds-checks the access.
+        // SAFETY: `ram_region_for` confirms pure-RAM coverage and bounds.
         return unsafe {
             let ptr = r.ptr(paddr);
             match width {
