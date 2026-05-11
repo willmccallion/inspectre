@@ -177,6 +177,14 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                     ras_snapshot: 0,
                 };
                 park_fetch_walk(cpu, engine, state, pte_addr, pending);
+                // Advance the architectural fetch PC past this instruction so
+                // when fetch_walk_pending clears, fetch1 doesn't reallocate a
+                // second fetch_seq for the same PC and double-fetch it. We
+                // can't read the encoding to know the precise size, so assume
+                // 4 bytes — a compressed instruction at the parked PC will
+                // mispredict via the normal pred_target compare in execute,
+                // exactly like a default not-taken prediction on a branch.
+                current_pc = current_pc.wrapping_add(4);
                 break;
             }
         };
@@ -285,6 +293,12 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                             ras_snapshot,
                         };
                         park_fetch_walk(cpu, engine, state, pte_addr, pending);
+                        // See the lower-half NeedPte arm above: advance past
+                        // this 4-byte instruction so the walk-completion path
+                        // and the next fetch1 don't both emit a fetch for the
+                        // same PC. The instruction is known to be 32-bit
+                        // here (compressed instructions never cross a page).
+                        cpu.hart.pc = current_pc.wrapping_add(4);
                         return;
                     }
                 }
