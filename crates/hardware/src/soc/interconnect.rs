@@ -224,6 +224,16 @@ impl Bus {
     }
 }
 
+/// Bytes-on-the-bus for the address phase of any MemReq (the bus carries an
+/// 8-byte address plus control). Pre-refactor `simulate_memory_access`
+/// charged `calculate_transit_time(8)` here too.
+const BUS_REQ_BYTES: usize = 8;
+
+/// Bytes-on-the-bus for a MemResp returning a cache line. Sub-line responses
+/// are still charged this size to match the pre-refactor cycle model, which
+/// always pulled a full line for the demand miss.
+const BUS_RESP_BYTES: usize = 64;
+
 impl Handle for Bus {
     fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
         match packet {
@@ -233,12 +243,14 @@ impl Handle for Bus {
                 let is_htif = self
                     .htif_range
                     .is_some_and(|(hstart, hend)| raw >= hstart && raw < hend);
+                let req_transit = self.calculate_transit_time(BUS_REQ_BYTES);
+                let resp_transit = self.calculate_transit_time(BUS_RESP_BYTES);
 
                 if is_ram && !is_htif {
                     let (ctrl_id, _, _) = self.ram_ctrl.expect("ram_ctrl checked above");
                     let _ = self.pending.insert(req_id, source);
                     ctx.scheduler.schedule(
-                        ctx.cycle + self.latency_cycles,
+                        ctx.cycle + req_transit,
                         ComponentId::MemCtrl(ctrl_id),
                         ctx.self_id,
                         packet,
@@ -252,7 +264,7 @@ impl Handle for Bus {
                 // Unmapped address: reply with zeros so the originator unblocks.
                 let line_addr = LineAddr::from_phys(paddr, 64);
                 ctx.scheduler.schedule(
-                    ctx.cycle + self.latency_cycles,
+                    ctx.cycle + resp_transit,
                     source,
                     ctx.self_id,
                     Packet::MemResp {
@@ -266,7 +278,7 @@ impl Handle for Bus {
             Packet::MemResp { req_id, line_addr, data, hit_level } => {
                 let Some(upstream) = self.pending.remove(&req_id) else { return };
                 ctx.scheduler.schedule(
-                    ctx.cycle + self.latency_cycles,
+                    ctx.cycle + self.calculate_transit_time(BUS_RESP_BYTES),
                     upstream,
                     ctx.self_id,
                     Packet::MemResp { req_id, line_addr, data, hit_level },
