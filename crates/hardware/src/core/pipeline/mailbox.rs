@@ -42,13 +42,43 @@ pub fn drain<E: ExecutionEngine>(pipeline: &mut Pipeline<E>, cpu: &mut Cpu) {
             complete_walk(pipeline, cpu, walk);
         } else if let Some(fetch) = pipeline.engine.common_mut().outstanding_fetches.remove(&req_id)
         {
-            complete_fetch(pipeline, fetch);
+            buffer_fetch(pipeline, fetch);
         } else if let Some(load) = pipeline.engine.common_mut().outstanding_loads.remove(&req_id) {
             complete_load(pipeline, cpu, load, &data);
         } else {
             // outstanding_stores ack or stale post-flush response — drop.
             let _ = pipeline.engine.common_mut().outstanding_stores.remove(&req_id);
         }
+    }
+
+    drain_fetch_reorder(pipeline);
+}
+
+/// Inserts a completed fetch into the reorder buffer at its `fetch_seq`.
+/// Out-of-order arrivals (e.g. an L1I-hit fetch returning before an older
+/// fetch that missed and went all the way to DRAM) sit here until every
+/// older fetch has completed.
+fn buffer_fetch<E: ExecutionEngine>(pipeline: &mut Pipeline<E>, fetch: OutstandingFetch) {
+    let common = pipeline.engine.common_mut();
+    // Stale-after-flush responses have fetch_seqs below the post-flush
+    // emit cursor; drop them rather than reintroducing wrong-path entries.
+    if fetch.fetch_seq < common.next_emit_fetch_seq {
+        return;
+    }
+    let _ = common.fetch_reorder.insert(fetch.fetch_seq, fetch);
+}
+
+/// Drains every contiguous run of completed fetches from the reorder buffer
+/// into the fetch1→fetch2 latch in program order. Stops on the first gap
+/// (a still-in-flight older fetch).
+fn drain_fetch_reorder<E: ExecutionEngine>(pipeline: &mut Pipeline<E>) {
+    loop {
+        let next_seq = pipeline.engine.common().next_emit_fetch_seq;
+        let Some(fetch) = pipeline.engine.common_mut().fetch_reorder.remove(&next_seq) else {
+            break;
+        };
+        pipeline.engine.common_mut().next_emit_fetch_seq = next_seq.wrapping_add(1);
+        complete_fetch(pipeline, fetch);
     }
 }
 

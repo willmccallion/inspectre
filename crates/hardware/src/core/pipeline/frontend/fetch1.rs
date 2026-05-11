@@ -132,6 +132,11 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
             break;
         }
 
+        // Allocate the program-order fetch sequence number once per PC
+        // before any walk/issue decision so the reorder buffer keys every
+        // path the same way.
+        let fetch_seq = engine.common_mut().alloc_fetch_seq();
+
         let mut fetch_trap = None;
         if (current_pc & align_mask) != 0 {
             fetch_trap = Some(Trap::InstructionAddressMisaligned(current_pc));
@@ -153,6 +158,7 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                 // Park a fetch with paddr unknown; walk completion will
                 // re-issue the actual fetch MemReq.
                 let pending = OutstandingFetch {
+                    fetch_seq,
                     pc: current_pc,
                     paddr: PhysAddr::new(0),
                     pred_taken: false,
@@ -175,6 +181,7 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                 "F1: fetch trap"
             );
             let fetch = OutstandingFetch {
+                fetch_seq,
                 pc: current_pc,
                 paddr: PhysAddr::new(0),
                 pred_taken: false,
@@ -241,6 +248,7 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                             // Issue the fetch normally — the upper-half
                             // fault is surfaced when fetch2 re-translates.
                             let fetch = OutstandingFetch {
+                                fetch_seq,
                                 pc: current_pc,
                                 paddr: PhysAddr::new(phys_addr),
                                 pred_taken: false,
@@ -258,6 +266,7 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
                     }
                     TranslateResult::NeedPte { pte_addr, state } => {
                         let pending = OutstandingFetch {
+                            fetch_seq,
                             pc: current_pc,
                             paddr: PhysAddr::new(phys_addr),
                             pred_taken: false,
@@ -359,6 +368,7 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
         );
 
         let fetch = OutstandingFetch {
+            fetch_seq,
             pc: current_pc,
             paddr: PhysAddr::new(phys_addr),
             pred_taken,

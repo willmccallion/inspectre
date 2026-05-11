@@ -25,6 +25,12 @@ use crate::core::units::mmu::ptw::WalkState;
 /// into the fetch1→fetch2 latch when the response arrives.
 #[derive(Clone, Debug)]
 pub struct OutstandingFetch {
+    /// Monotonically-increasing fetch sequence number assigned at issue
+    /// time. The mailbox-drain stage uses this to reorder responses back
+    /// into program order before pushing them into the fetch1→fetch2 latch:
+    /// a mixed cache-hit/cache-miss burst can return out of order because
+    /// the slower path arrives many cycles after the fast one.
+    pub fetch_seq: u64,
     /// Program counter being fetched.
     pub pc: u64,
     /// Post-translation address used to issue the `MemReq`.

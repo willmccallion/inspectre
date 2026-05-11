@@ -6,7 +6,7 @@
 //! 3. **`ExecutionEngine`** — high-level trait covering the entire backend.
 //! 4. **`PipelineDispatch`** — enum dispatch for type-erased pipeline storage.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::core::pipeline::checkpoint::CheckpointTable;
 use crate::core::pipeline::free_list::FreeList;
@@ -192,6 +192,18 @@ pub struct BackendCommon {
     pub outstanding_stores: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingStore>,
     /// Inflight page-table walks keyed by the current PTE-read request id.
     pub outstanding_walks: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingWalk>,
+    /// Completed but not-yet-emittable fetches, keyed by `fetch_seq`. A burst
+    /// of mixed L1-hit and lower-level-hit fetches returns out of program
+    /// order; this reorder buffer holds the early arrivals until every older
+    /// fetch has completed, then drains contiguously into the fetch1→fetch2
+    /// latch.
+    pub fetch_reorder: BTreeMap<u64, crate::core::pipeline::outstanding::OutstandingFetch>,
+    /// Next `fetch_seq` to assign at fetch issue time.
+    pub next_fetch_seq: u64,
+    /// Next `fetch_seq` we expect to emit to the fetch1→fetch2 latch.
+    /// Advanced when a contiguous run drains from `fetch_reorder`; bumped to
+    /// `next_fetch_seq` on flush so post-flush fetches stay in order.
+    pub next_emit_fetch_seq: u64,
     /// Monotonic request-id counter; allocate via [`BackendCommon::alloc_req_id`].
     pub next_req_id: u64,
     /// `PipelineId` of this engine; stamped on every outgoing packet as the
@@ -210,6 +222,15 @@ impl BackendCommon {
         let id = self.next_req_id;
         self.next_req_id = id.wrapping_add(1);
         ReqId::new(id)
+    }
+
+    /// Allocates a fresh fetch sequence number for the in-program-order
+    /// fetch reorder buffer.
+    #[inline]
+    pub fn alloc_fetch_seq(&mut self) -> u64 {
+        let seq = self.next_fetch_seq;
+        self.next_fetch_seq = seq.wrapping_add(1);
+        seq
     }
 }
 
@@ -266,6 +287,11 @@ impl<E: ExecutionEngine> Pipeline<E> {
             let common = self.engine.common_mut();
             common.outstanding_fetches.clear();
             common.outstanding_walks.clear();
+            common.fetch_reorder.clear();
+            // Bump the emit cursor past every fetch_seq allocated so far so
+            // any straggler responses for pre-flush fetches are dropped
+            // rather than entering the post-flush fetch stream.
+            common.next_emit_fetch_seq = common.next_fetch_seq;
         }
 
         if cpu.check_exit().is_none() && !cpu.hart.wfi_waiting {
