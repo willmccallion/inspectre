@@ -299,8 +299,8 @@ fn harness_boot_default_pc() {
 #[test]
 fn harness_with_memory_adds_device() {
     let mut ctx = TestContext::new().with_memory(4096, 0x1000);
-    ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(0x1000), 0xDEADBEEF);
-    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1000)), 0xDEADBEEF);
+    ctx.sim.probe_mem_store(PhysAddr::new(0x1000), 0xDEAD_BEEF, 4);
+    assert_eq!(ctx.sim.probe_mem_load(PhysAddr::new(0x1000), 4), 0xDEAD_BEEF);
 }
 
 #[test]
@@ -312,8 +312,8 @@ fn harness_load_program_writes_instructions_and_sets_pc() {
     let mut ctx = TestContext::new().with_memory(4096, 0x1000).load_program(0x1000, &program);
 
     assert_eq!(ctx.cpu().hart.pc, 0x1000, "PC should be set to program base");
-    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1000)), nop);
-    assert_eq!(ctx.cpu_mut().soc.bus.read_u32(PhysAddr::new(0x1004)), addi);
+    assert_eq!(ctx.sim.probe_mem_load(PhysAddr::new(0x1000), 4) as u32, nop);
+    assert_eq!(ctx.sim.probe_mem_load(PhysAddr::new(0x1004), 4) as u32, addi);
 }
 
 #[test]
@@ -328,53 +328,6 @@ fn harness_x0_always_zero() {
     let mut ctx = TestContext::new();
     ctx.set_reg(0, 999);
     assert_eq!(ctx.get_reg(0), 0, "x0 must always read as zero");
-}
-
-#[test]
-fn mock_memory_read_write_all_widths() {
-    use rvsim_core::soc::devices::Device;
-
-    let mut mem = MockMemory::new(1024, 0x0);
-    mem.write_u8(0, 0xAB);
-    assert_eq!(mem.read_u8(0), 0xAB);
-
-    mem.write_u16(8, 0x1234);
-    assert_eq!(mem.read_u16(8), 0x1234);
-
-    mem.write_u32(16, 0xDEADBEEF);
-    assert_eq!(mem.read_u32(16), 0xDEADBEEF);
-
-    mem.write_u64(24, 0xCAFEBABE_12345678);
-    assert_eq!(mem.read_u64(24), 0xCAFEBABE_12345678);
-}
-
-#[test]
-fn mock_memory_out_of_bounds_reads_zero() {
-    use rvsim_core::soc::devices::Device;
-
-    let mut mem = MockMemory::new(16, 0x0);
-    assert_eq!(mem.read_u32(20), 0, "Out-of-bounds read should return 0");
-    assert_eq!(mem.read_u64(20), 0);
-}
-
-#[test]
-#[should_panic(expected = "Bus Error")]
-fn mock_memory_fault_injection_panics() {
-    use rvsim_core::soc::devices::Device;
-
-    let mut mem = MockMemory::new(1024, 0x1000);
-    mem.inject_fault(0x1010);
-    mem.read_u32(0x10);
-}
-
-#[test]
-fn mock_memory_fault_only_affects_target_address() {
-    use rvsim_core::soc::devices::Device;
-
-    let mut mem = MockMemory::new(1024, 0x1000);
-    mem.inject_fault(0x1010);
-    mem.write_u32(0x0, 42);
-    assert_eq!(mem.read_u32(0x0), 42);
 }
 
 #[test]

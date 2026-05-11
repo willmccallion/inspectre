@@ -1,12 +1,8 @@
-use crate::common::mocks::memory::{MockMemory, MockMemoryController};
+use crate::common::mocks::memory::MockMemory;
 use rvsim_core::Simulator;
 use rvsim_core::common::{PhysAddr, RegIdx};
-use rvsim_core::config::CacheConfig;
 use rvsim_core::config::Config;
 use rvsim_core::core::Cpu;
-use rvsim_core::core::units::cache::CacheSim;
-use rvsim_core::soc::Soc;
-use rvsim_core::soc::interconnect::Bus;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -31,16 +27,8 @@ impl TestContext {
     pub fn new_with_config(config: &Config) -> Self {
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let bus = Bus::new(8, 0);
         let exit_signal = Arc::new(AtomicU64::new(u64::MAX));
-
-        let soc = Soc {
-            cycle: 0,
-            bus,
-            mem_controller: Box::new(MockMemoryController::new(1)),
-            l3_cache: CacheSim::new(&CacheConfig::default()),
-        };
-
+        let soc = rvsim_core::soc::Soc::new(config, "", &exit_signal);
         let mut sim = Simulator::new(soc, config, exit_signal);
 
         // Bypass cache simulation in tests: default cache_base == ram_base routes
@@ -70,7 +58,7 @@ impl TestContext {
     pub fn load_program(mut self, addr: u64, instructions: &[u32]) -> Self {
         for (i, inst) in instructions.iter().enumerate() {
             let offset = addr + (i as u64) * 4;
-            self.sim.cpu.soc.bus.write_u32(PhysAddr::new(offset), *inst);
+            self.sim.probe_mem_store(PhysAddr::new(offset), u64::from(*inst), 4);
         }
         self.sim.cpu.hart.pc = addr;
         self

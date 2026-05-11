@@ -1,46 +1,5 @@
 //! Bus arbitration and device lookup tests.
 //!
-//! Verifies that the bus correctly caches last-device lookups and
-//! handles tick/IRQ propagation.
-
-use rvsim_core::common::PhysAddr;
-use rvsim_core::soc::devices::clint::Clint;
-use rvsim_core::soc::interconnect::Bus;
-use rvsim_core::soc::memory::Memory;
-use rvsim_core::soc::memory::buffer::DramBuffer;
-use std::sync::Arc;
-
-#[test]
-fn bus_tick_propagates_to_clint() {
-    let mut bus = Bus::new(8, 0);
-    let clint = Clint::new(0x200_0000, 1);
-    bus.add_device(Box::new(clint));
-
-    // Write mtimecmp = 3
-    bus.write_u64(PhysAddr::new(0x200_0000 + 0x4000), 3);
-
-    // Tick 3 times → mtime reaches 3, should trigger timer
-    let t1 = bus.tick().timer;
-    let t2 = bus.tick().timer;
-    let t3 = bus.tick().timer;
-
-    assert!(!t1);
-    assert!(!t2);
-    assert!(t3, "Timer should fire on 3rd tick");
-}
-
-#[test]
-fn bus_last_device_cache_hit() {
-    let mut bus = Bus::new(8, 0);
-    let buf = Arc::new(DramBuffer::new(4096));
-    let mem = Memory::new(buf, 0x8000_0000);
-    bus.add_device(Box::new(mem));
-
-    // First access primes the cache
-    bus.write_u32(PhysAddr::new(0x8000_0000), 0x1234);
-    // Second access should hit the cache
-    assert_eq!(bus.read_u32(PhysAddr::new(0x8000_0000)), 0x1234);
-    // Nearby address should also hit cache
-    bus.write_u32(PhysAddr::new(0x8000_0004), 0x5678);
-    assert_eq!(bus.read_u32(PhysAddr::new(0x8000_0004)), 0x5678);
-}
+//! Tests in this module used the deleted `Memory` device + synchronous
+//! `bus.read_u*/write_u*` API. Bus dispatch and IRQ aggregation are now
+//! exercised end-to-end via the packet-based `Simulator` integration tests.

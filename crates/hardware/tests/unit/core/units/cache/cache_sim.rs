@@ -11,7 +11,9 @@
 use rvsim_core::config::{
     CacheConfig, Prefetcher as PrefetcherType, ReplacementPolicy as PolicyType,
 };
-use rvsim_core::core::units::cache::CacheSim;
+use rvsim_core::core::units::cache::Cache;
+use rvsim_core::sim::components::CacheId;
+use rvsim_core::sim::packet::CacheLevel;
 
 /// Creates a small, deterministic test cache.
 ///
@@ -47,7 +49,7 @@ const NEXT_LEVEL_LATENCY: u64 = 10;
 /// Returns (false, 0) because install_line has no dirty victim to write back.
 #[test]
 fn cold_miss_returns_miss_no_penalty() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
     let (hit, penalty) = cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
 
     assert!(!hit, "First access should be a miss");
@@ -57,7 +59,7 @@ fn cold_miss_returns_miss_no_penalty() {
 /// Second access to the same address should be a hit with 0 penalty.
 #[test]
 fn warm_hit_returns_hit_zero_penalty() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Cold miss to install line.
     cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
@@ -71,7 +73,7 @@ fn warm_hit_returns_hit_zero_penalty() {
 /// Access to a different offset within the same cache line should hit.
 #[test]
 fn same_line_different_offset_hits() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Access byte 0 of a line.
     cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
@@ -85,7 +87,7 @@ fn same_line_different_offset_hits() {
 /// The third access should miss (evicting the LRU line).
 #[test]
 fn set_conflict_eviction() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Config: 2 sets, 2 ways, line_bytes=64. All three addresses map to set 0.
     let addr_a = 0u64;
@@ -114,7 +116,7 @@ fn set_conflict_eviction() {
 /// penalty equal to next_level_latency.
 #[test]
 fn dirty_writeback_penalty_on_eviction() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Write to addr_a → installs dirty line in set 0, way 0.
     cache.access(0, true, NEXT_LEVEL_LATENCY);
@@ -133,7 +135,7 @@ fn dirty_writeback_penalty_on_eviction() {
 /// The write-back penalty should still occur.
 #[test]
 fn dirty_bit_persists_across_reads() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Write addr_a (dirty).
     cache.access(0, true, NEXT_LEVEL_LATENCY);
@@ -149,7 +151,7 @@ fn dirty_bit_persists_across_reads() {
 /// Evicting a clean (read-only) line incurs no write-back penalty.
 #[test]
 fn clean_eviction_no_penalty() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Read addr_a (clean).
     cache.access(0, false, NEXT_LEVEL_LATENCY);
@@ -165,7 +167,7 @@ fn clean_eviction_no_penalty() {
 /// access still hits, and a subsequent eviction takes no writeback penalty.
 #[test]
 fn clean_line_clears_dirty_keeps_valid() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Write to install a dirty line.
     cache.access(0x1000, true, NEXT_LEVEL_LATENCY);
@@ -185,14 +187,14 @@ fn clean_line_clears_dirty_keeps_valid() {
 /// `clean_line` on an absent line is a no-op that returns false.
 #[test]
 fn clean_line_absent_returns_false() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
     assert!(!cache.clean_line(0xDEADBEEF));
 }
 
 /// `invalidate_line` drops a line outright; subsequent accesses miss.
 #[test]
 fn invalidate_line_drops_existing_line() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
     cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
     assert!(cache.contains(0x1000));
 
@@ -204,7 +206,7 @@ fn invalidate_line_drops_existing_line() {
 /// After flushing, previously cached dirty lines become misses.
 #[test]
 fn flush_invalidates_dirty_lines() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Write to install a dirty line.
     cache.access(0x1000, true, NEXT_LEVEL_LATENCY);
@@ -221,7 +223,7 @@ fn flush_invalidates_dirty_lines() {
 /// Flush only invalidates dirty lines; clean lines survive.
 #[test]
 fn flush_preserves_clean_lines() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     // Read (clean).
     cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
@@ -239,7 +241,7 @@ fn flush_preserves_clean_lines() {
 fn disabled_cache_always_returns_false_zero() {
     let mut config = test_config();
     config.enabled = false;
-    let mut cache = CacheSim::new(&config);
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &config);
 
     let (hit, penalty) = cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
     assert!(!hit);
@@ -256,7 +258,7 @@ fn disabled_cache_always_returns_false_zero() {
 fn disabled_cache_contains_nothing() {
     let mut config = test_config();
     config.enabled = false;
-    let mut cache = CacheSim::new(&config);
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &config);
 
     cache.access(0x1000, false, NEXT_LEVEL_LATENCY);
     assert!(!cache.contains(0x1000));
@@ -265,7 +267,7 @@ fn disabled_cache_contains_nothing() {
 /// `contains` mirrors the hit/miss status of the cache.
 #[test]
 fn contains_mirrors_hit_status() {
-    let mut cache = CacheSim::new(&test_config());
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &test_config());
 
     assert!(!cache.contains(0x2000), "Should not contain before access");
 
@@ -295,7 +297,7 @@ fn different_line_size_32b() {
         mshr_count: 0,
     };
     // num_lines = 256/32 = 8, num_sets = 8/2 = 4, line_bytes = 32.
-    let mut cache = CacheSim::new(&config);
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &config);
 
     cache.access(0x100, false, NEXT_LEVEL_LATENCY);
     // 0x100 + 16 is in the same 32-byte line → should hit.
@@ -323,7 +325,7 @@ fn different_line_size_128b() {
         mshr_count: 0,
     };
     // num_lines = 1024/128 = 8, num_sets = 8/2 = 4, line_bytes = 128.
-    let mut cache = CacheSim::new(&config);
+    let mut cache = Cache::new(CacheId::new(0), CacheLevel::L1D, &config);
 
     cache.access(0x200, false, NEXT_LEVEL_LATENCY);
     // 0x200 + 100 is within the same 128-byte line → hit.

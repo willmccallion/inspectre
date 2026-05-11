@@ -36,7 +36,7 @@ fn make_pte(ppn: u64, perms: u64) -> u64 {
 
 fn write_pte(ctx: &mut TestContext, table_ppn: u64, vpn_index: u64, pte: u64) {
     let addr = (table_ppn << PAGE_SHIFT) | (vpn_index * PTE_SIZE);
-    ctx.cpu_mut().soc.bus.write_u64(PhysAddr::new(addr), pte);
+    ctx.sim.probe_mem_store(PhysAddr::new(addr), pte, 8);
 }
 
 fn mode_to_satp(mode: u64) -> u64 {
