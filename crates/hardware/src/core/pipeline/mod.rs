@@ -70,3 +70,7 @@ pub mod snapshot;
 /// stage uses these maps to wake up parked operations when their `MemResp`
 /// arrives.
 pub mod outstanding;
+
+/// Mailbox-drain logic: matches `MemResp` packets against the pipeline's
+/// outstanding tables and wakes the parked operations.
+pub mod mailbox;

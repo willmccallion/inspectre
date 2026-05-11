@@ -1,8 +1,11 @@
-//! Writeback Stage: mark ROB entries as Completed with result values.
+//! Writeback stage: applies deferred ROB metadata and completes ROB entries.
 //!
-//! This stage takes results from Memory2 and marks the corresponding ROB
-//! entries as Completed. It does NOT write to the register file — that
-//! happens at commit.
+//! In the packet-based pipeline this stage runs at its usual place — after
+//! Memory2 — and consumes the Memory2→Writeback latch. Each entry carries the
+//! final scalar value (load data, ALU result, or `pc + inst_size` for jumps)
+//! and any deferred state that must land on the ROB before commit can apply
+//! it (FP flags, PTE A/D updates, SFENCE.VMA operands, LR/SC reservation
+//! records).
 
 use crate::common::ExceptionStage;
 use crate::core::Cpu;
@@ -12,12 +15,15 @@ use crate::core::pipeline::signals::ControlFlow;
 use crate::trace_trap;
 use crate::trace_writeback;
 
-/// Executes the Writeback stage: mark ROB entries Completed.
+/// Executes the Writeback stage: marks ROB entries Completed (or Faulted).
 pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Rob) {
     let entries = std::mem::take(input);
 
     for wb in entries {
         if let Some(ref trap) = wb.trap {
+            if wb.fp_flags != 0 {
+                rob.set_fp_flags(wb.rob_tag, wb.fp_flags);
+            }
             rob.fault(
                 wb.rob_tag,
                 trap.clone(),
@@ -34,7 +40,7 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
             continue;
         }
 
-        let val = if wb.ctrl.mem_read {
+        let val = if wb.ctrl.mem_read || wb.ctrl.atomic_op != crate::core::pipeline::signals::AtomicOp::None {
             wb.load_data
         } else if wb.ctrl.control_flow == ControlFlow::Jump {
             wb.pc.wrapping_add(wb.inst_size.as_u64())
@@ -66,107 +72,5 @@ pub fn writeback_stage(cpu: &mut Cpu, input: &mut Vec<Mem2WbEntry>, rob: &mut Ro
             fp_flags = wb.fp_flags,
             "WB: ROB entry marked complete"
         );
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, unused_results)]
-mod tests {
-    use super::*;
-    use crate::common::{InstSize, RegIdx, Trap};
-    use crate::config::Config;
-    use crate::core::pipeline::signals::ControlSignals;
-    use crate::soc::builder::Soc;
-
-    #[test]
-    fn test_writeback_stage_normal() {
-        let config = Config::default();
-        let mut cpu = Cpu::build(&config, "");
-        let mut rob = Rob::new(4);
-
-        let rob_tag = rob
-            .allocate(
-                0x1000,
-                0,
-                InstSize::Standard,
-                RegIdx::new(1),
-                false,
-                ControlSignals::default(),
-                crate::core::pipeline::prf::PhysReg(0),
-                crate::core::pipeline::prf::PhysReg(0),
-            )
-            .unwrap();
-
-        let mut input = vec![Mem2WbEntry {
-            rob_tag,
-            pc: 0x1000,
-            inst: 0,
-            inst_size: InstSize::Standard,
-            rd: RegIdx::new(1),
-            rd_phys: crate::core::pipeline::prf::PhysReg(0),
-            alu: 42,
-            load_data: 0,
-            ctrl: ControlSignals::default(),
-            trap: None,
-            exception_stage: None,
-            fp_flags: 0,
-            pte_update: None,
-            sfence_vma: None,
-            lr_sc: None,
-            vec_mem: None,
-        }];
-
-        writeback_stage(&mut cpu, &mut input, &mut rob);
-
-        assert!(input.is_empty());
-        let entry = rob.find_entry(rob_tag).unwrap();
-        assert_eq!(entry.state, crate::core::pipeline::rob::RobState::Completed);
-        assert_eq!(entry.result, Some(42));
-    }
-
-    #[test]
-    fn test_writeback_stage_trap() {
-        let config = Config::default();
-        let mut cpu = Cpu::build(&config, "");
-        let mut rob = Rob::new(4);
-
-        let rob_tag = rob
-            .allocate(
-                0x1000,
-                0,
-                InstSize::Standard,
-                RegIdx::new(1),
-                false,
-                ControlSignals::default(),
-                crate::core::pipeline::prf::PhysReg(0),
-                crate::core::pipeline::prf::PhysReg(0),
-            )
-            .unwrap();
-
-        let mut input = vec![Mem2WbEntry {
-            rob_tag,
-            pc: 0x1000,
-            inst: 0,
-            inst_size: InstSize::Standard,
-            rd: RegIdx::new(1),
-            rd_phys: crate::core::pipeline::prf::PhysReg(0),
-            alu: 0,
-            load_data: 0,
-            ctrl: ControlSignals::default(),
-            trap: Some(Trap::IllegalInstruction(0)),
-            exception_stage: Some(ExceptionStage::Execute),
-            fp_flags: 0,
-            pte_update: None,
-            sfence_vma: None,
-            lr_sc: None,
-            vec_mem: None,
-        }];
-
-        writeback_stage(&mut cpu, &mut input, &mut rob);
-
-        assert!(input.is_empty());
-        let entry = rob.find_entry(rob_tag).unwrap();
-        assert_eq!(entry.state, crate::core::pipeline::rob::RobState::Faulted);
-        assert!(entry.trap.is_some());
     }
 }

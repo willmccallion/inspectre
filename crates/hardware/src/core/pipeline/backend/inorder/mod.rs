@@ -1,8 +1,13 @@
 //! In-order backend: FIFO issue, single execution path.
 //!
-//! This backend implements the simple in-order pipeline with:
-//! - `InOrderIssueUnit`: FIFO pass-through (no reordering)
-//! - `InOrderExecuteUnit`: Single ALU/FPU/BRU execution
+//! Implements the simple in-order pipeline with:
+//! - [`InOrderIssueUnit`] — FIFO pass-through (no reordering).
+//! - `InOrderExecuteUnit` — single ALU/FPU/BRU execution.
+//!
+//! The engine owns its in-flight memory bookkeeping
+//! (`BackendCommon` = mailbox + outstanding_loads / stores / walks /
+//! fetches + next_req_id + routing IDs). Memory1 runs inside `tick`,
+//! reaching the outstanding tables and the event queue directly.
 
 pub mod execute;
 pub mod issue;
@@ -10,7 +15,7 @@ pub mod issue;
 use crate::config::Config;
 use crate::core::Cpu;
 use crate::core::pipeline::backend::shared::{commit, memory1, memory2, writeback};
-use crate::core::pipeline::engine::ExecutionEngine;
+use crate::core::pipeline::engine::{BackendCommon, ExecutionEngine};
 use crate::core::pipeline::free_list::FreeList;
 use crate::core::pipeline::latches::{ExMem1Entry, Mem1Mem2Entry, Mem2WbEntry, RenameIssueEntry};
 use crate::core::pipeline::prf::PhysReg;
@@ -19,38 +24,7 @@ use crate::core::pipeline::rob::Rob;
 use crate::core::pipeline::scoreboard::Scoreboard;
 use crate::core::pipeline::store_buffer::StoreBuffer;
 use crate::core::units::bru::BranchPredictor;
-
-/// Drain completed MSHRs: install cache lines in L1D and resume parked
-/// loads/atomics into the mem1→mem2 latch.  Mirrors the O3 backend's
-/// MSHR completion logic but without PRF/wakeup handling.
-fn drain_mshr_completions(cpu: &mut Cpu, mem1_mem2: &mut Vec<Mem1Mem2Entry>, now: u64) {
-    if cpu.core.l1d_mshrs.capacity() == 0 {
-        return;
-    }
-    let completed = cpu.core.l1d_mshrs.drain_completions(now);
-    for mshr_entry in completed {
-        let (_penalty, evicted) = cpu.core.l1_d_cache.install_line_public_tracked(
-            mshr_entry.line_addr,
-            mshr_entry.is_write,
-            0,
-        );
-
-        if cpu.config.cache.inclusion_policy == crate::config::InclusionPolicy::Exclusive
-            && cpu.core.l2_cache.enabled
-            && let Some(ev) = evicted
-        {
-            let _ = cpu.core.l2_cache.install_or_replace(ev.addr, ev.dirty, 0);
-            cpu.stats.exclusive_l1_to_l2_swaps += 1;
-        }
-
-        for waiter in mshr_entry.waiters {
-            if let Some(mut parked) = waiter.parked_entry {
-                parked.complete_cycle = now;
-                mem1_mem2.push(parked);
-            }
-        }
-    }
-}
+use crate::sim::components::{CacheId, PipelineId};
 
 use self::issue::InOrderIssueUnit;
 
@@ -67,15 +41,16 @@ pub struct InOrderEngine {
     pub issuer: InOrderIssueUnit,
     /// Pipeline width.
     pub width: usize,
-    /// Execute -> Memory1 latch.
+    /// Execute → Memory1 latch.
     pub execute_mem1: Vec<ExMem1Entry>,
-    /// Memory1 -> Memory2 latch.
+    /// Memory1 → Memory2 latch.
     pub mem1_mem2: Vec<Mem1Mem2Entry>,
-    /// Memory2 -> Writeback latch.
+    /// Memory2 → Writeback latch.
     pub mem2_wb: Vec<Mem2WbEntry>,
-    /// Memory1 stall counter (D-TLB / D-cache latency).
-    pub mem1_stall: u64,
-    /// Current cycle counter (for MSHR completion tracking).
+    /// In-flight memory bookkeeping: mailbox + outstanding tables + routing IDs.
+    pub common: BackendCommon,
+    /// Current cycle counter (used for debug stats; the simulator's cycle
+    /// drives all timing).
     cycle: u64,
     /// Committed rename map stub (unused; required by shared `commit_stage` signature).
     committed_rename_map: RenameMap,
@@ -84,8 +59,17 @@ pub struct InOrderEngine {
 }
 
 impl InOrderEngine {
-    /// Creates a new in-order engine from config.
-    pub fn new(config: &Config) -> Self {
+    /// Creates a new in-order engine from config and routing IDs.
+    pub fn new(
+        config: &Config,
+        pipeline_id: PipelineId,
+        l1_i_id: CacheId,
+        l1_d_id: CacheId,
+    ) -> Self {
+        let mut common = BackendCommon::default();
+        common.pipeline_id = pipeline_id;
+        common.l1_i_id = l1_i_id;
+        common.l1_d_id = l1_d_id;
         Self {
             rob: Rob::new(config.pipeline.rob_size),
             store_buffer: StoreBuffer::new(config.pipeline.store_buffer_size),
@@ -95,7 +79,7 @@ impl InOrderEngine {
             execute_mem1: Vec::with_capacity(config.pipeline.width),
             mem1_mem2: Vec::with_capacity(config.pipeline.width),
             mem2_wb: Vec::with_capacity(config.pipeline.width),
-            mem1_stall: 0,
+            common,
             cycle: 0,
             committed_rename_map: RenameMap::new(),
             free_list: FreeList::new(0, 0),
@@ -111,9 +95,6 @@ impl ExecutionEngine for InOrderEngine {
         redirect_pending: &mut bool,
     ) {
         self.cycle += 1;
-
-        // Drain MSHRs first so parked loads re-enter the mem1→mem2 latch.
-        drain_mshr_completions(cpu, &mut self.mem1_mem2, self.cycle);
 
         let pc_before_commit = cpu.hart.pc;
 
@@ -160,24 +141,13 @@ impl ExecutionEngine for InOrderEngine {
             None,
         );
 
-        if self.mem1_stall > 0 {
-            self.mem1_stall -= 1;
-            cpu.stats.stalls_mem += 1;
-        } else {
-            let _ = memory1::memory1_stage(
-                cpu,
-                &mut self.execute_mem1,
-                &mut self.mem1_mem2,
-                self.cycle,
-                None,
-            );
-            self.mem1_stall = self
-                .mem1_mem2
-                .iter()
-                .map(|e| e.complete_cycle.saturating_sub(self.cycle))
-                .max()
-                .unwrap_or(0);
-        }
+        // Memory1 consumes execute_mem1, emits MemReq packets for misses,
+        // and parks parked loads into self.common.outstanding_loads. SB
+        // forwards and stores resolve straight into mem1_mem2.
+        let mut input = std::mem::take(&mut self.execute_mem1);
+        memory1::memory1_stage(cpu, self, &mut input);
+        // Whatever didn't drain (SB stall, atomic-vs-SB stall) goes back.
+        self.execute_mem1.extend(input);
 
         // Skip issue+execute when M1 hasn't drained, so we don't overwrite held entries.
         let backpressured = !self.execute_mem1.is_empty();
@@ -209,12 +179,9 @@ impl ExecutionEngine for InOrderEngine {
             cpu.stats.pipeline_flushes += 1;
             self.issuer.flush();
             rename_output.clear();
-            // mem1_stall was from a pre-branch op already past M1; clear so the branch can drain.
-            self.mem1_stall = 0;
             if let Some(last) = self.execute_mem1.last() {
                 let keep_tag = last.rob_tag;
                 self.rob.flush_after(keep_tag);
-                // Pre-branch SB entries (Ready but not Committed) must survive for forwarding.
                 self.store_buffer.flush_after(keep_tag);
             }
             self.scoreboard.rebuild_from_rob(&self.rob);
@@ -244,8 +211,6 @@ impl ExecutionEngine for InOrderEngine {
         self.execute_mem1.clear();
         self.mem1_mem2.clear();
         self.mem2_wb.clear();
-        self.mem1_stall = 0;
-        cpu.core.l1d_mshrs.flush();
         cpu.core.branch_predictor.repair_to_committed();
     }
 
@@ -277,32 +242,46 @@ impl ExecutionEngine for InOrderEngine {
     fn scoreboard_mut(&mut self) -> &mut Scoreboard {
         &mut self.scoreboard
     }
+
+    fn execute_mem1_mut(&mut self) -> &mut Vec<ExMem1Entry> {
+        &mut self.execute_mem1
+    }
+
+    fn mem1_mem2_mut(&mut self) -> &mut Vec<Mem1Mem2Entry> {
+        &mut self.mem1_mem2
+    }
+
+    fn common(&self) -> &BackendCommon {
+        &self.common
+    }
+
+    fn common_mut(&mut self) -> &mut BackendCommon {
+        &mut self.common
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::soc::builder::Soc;
 
     #[test]
     fn test_inorder_engine_new() {
         let config = Config::default();
-        let engine = InOrderEngine::new(&config);
+        let engine =
+            InOrderEngine::new(&config, PipelineId::new(0), CacheId::new(0), CacheId::new(1));
         assert_eq!(engine.width, config.pipeline.width);
-        assert_eq!(engine.mem1_stall, 0);
     }
 
     #[test]
     fn test_inorder_engine_flush() {
         let config = Config::default();
-        let mut engine = InOrderEngine::new(&config);
+        let mut engine =
+            InOrderEngine::new(&config, PipelineId::new(0), CacheId::new(0), CacheId::new(1));
         let mut cpu = Cpu::build(&config, "");
 
-        engine.mem1_stall = 5;
         engine.flush(&mut cpu);
 
-        assert_eq!(engine.mem1_stall, 0);
         assert_eq!(engine.execute_mem1.len(), 0);
         assert_eq!(engine.mem1_mem2.len(), 0);
         assert_eq!(engine.mem2_wb.len(), 0);
@@ -311,14 +290,16 @@ mod tests {
     #[test]
     fn test_inorder_engine_can_accept() {
         let config = Config::default();
-        let engine = InOrderEngine::new(&config);
+        let engine =
+            InOrderEngine::new(&config, PipelineId::new(0), CacheId::new(0), CacheId::new(1));
         assert_eq!(engine.can_accept(), engine.width);
     }
 
     #[test]
     fn test_inorder_engine_read_csr_speculative() {
         let config = Config::default();
-        let engine = InOrderEngine::new(&config);
+        let engine =
+            InOrderEngine::new(&config, PipelineId::new(0), CacheId::new(0), CacheId::new(1));
         let mut cpu = Cpu::build(&config, "");
 
         cpu.csr_write(crate::core::arch::csr::MSCRATCH, 0x1234);

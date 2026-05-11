@@ -1351,6 +1351,16 @@ impl ExecutionEngine for O3Engine {
         &mut self.scoreboard
     }
 
+    fn execute_mem1_mut(&mut self) -> &mut Vec<crate::core::pipeline::latches::ExMem1Entry> {
+        &mut self.execute_mem1
+    }
+
+    fn mem1_mem2_mut(
+        &mut self,
+    ) -> &mut Vec<crate::core::pipeline::latches::Mem1Mem2Entry> {
+        &mut self.mem1_mem2
+    }
+
     fn rename_map(&self) -> &RenameMap {
         &self.rename_map
     }

@@ -42,11 +42,15 @@ pub enum BackendType {
     OutOfOrder,
 }
 
-/// The execution engine trait — implemented by `InOrderEngine` (and `O3Engine` in the future).
+/// The execution engine trait — implemented by `InOrderEngine` and `O3Engine`.
 ///
-/// Covers the backend pipeline: Issue -> Execute -> Memory1 -> Memory2 -> Writeback -> Commit.
+/// Covers the entire backend: Issue → Execute → Memory1 → Memory2 →
+/// Writeback → Commit. The engine owns its in-flight memory bookkeeping
+/// (mailbox + outstanding_* + next_req_id + cache routing IDs), giving
+/// memory1 direct access without splitting `tick` into phases.
 pub trait ExecutionEngine {
     /// Run one cycle of all backend stages (reverse order internally).
+    ///
     /// `redirect_pending` is set to `true` by the engine when an instruction
     /// flushes the frontend (branch misprediction, trap, FENCE.I, MRET/SRET).
     fn tick(
@@ -108,6 +112,30 @@ pub trait ExecutionEngine {
         None
     }
 
+    /// Mutable access to the Execute→Memory1 input latch. The mailbox-drain
+    /// stage uses this to re-inject `ExMem1Entry` values after a page-table
+    /// walk completes so memory1 reprocesses them with the new TLB entry in
+    /// place.
+    fn execute_mem1_mut(
+        &mut self,
+    ) -> &mut Vec<crate::core::pipeline::latches::ExMem1Entry>;
+
+    /// Mutable access to the Memory1→Memory2 latch. Memory1 pushes
+    /// completed (non-load or SB-forwarded) entries here directly; the
+    /// mailbox-drain stage pushes parked-load completions here once the
+    /// matching `MemResp` arrives.
+    fn mem1_mem2_mut(
+        &mut self,
+    ) -> &mut Vec<crate::core::pipeline::latches::Mem1Mem2Entry>;
+
+    /// Shared in-flight memory bookkeeping (mailbox + outstanding tables +
+    /// routing IDs).
+    fn common(&self) -> &BackendCommon;
+
+    /// Mutable access to the shared bookkeeping. Used by the mailbox-drain
+    /// stage on `Pipeline<E>` and by memory1 inside `tick`.
+    fn common_mut(&mut self) -> &mut BackendCommon;
+
     /// Returns true if this backend uses physical register renaming.
     fn has_prf(&self) -> bool {
         false
@@ -147,33 +175,52 @@ pub trait ExecutionEngine {
     }
 }
 
-/// Borrow bundle handed to each pipeline stage so it can schedule outgoing
-/// packets, mutate hierarchical stats, and consult routing IDs without
-/// reaching into [`Cpu`](crate::core::Cpu) for everything.
+/// State shared by every backend engine: in-flight memory bookkeeping and
+/// the routing IDs needed to emit `MemReq` packets and match `MemResp`
+/// packets to parked operations.
 ///
-/// Constructed once per cycle by the [`Pipeline::tick`] wrapper.  Stages
-/// receive `&mut PipelineCtx` and use it to emit [`MemReq`](crate::sim::packet::Packet::MemReq)
-/// packets and route them to the right L1 cache.
-#[derive(Debug)]
-pub struct PipelineCtx<'a> {
-    /// Global event scheduler.
-    pub scheduler: &'a mut EventQueue,
-    /// Hierarchical statistics tree.
-    pub stats: &'a mut Stats,
-    /// Read-only configuration.
-    pub config: &'a Config,
-    /// Current simulation cycle.
-    pub cycle: u64,
-    /// `ComponentId` of this pipeline; stamped on outgoing packets as `source`.
-    pub self_id: ComponentId,
-    /// L1 instruction cache target for fetch requests.
-    pub l1_i_id: ComponentId,
-    /// L1 data cache target for load / store requests.
-    pub l1_d_id: ComponentId,
+/// Each engine implementation (in-order, out-of-order) embeds a
+/// `BackendCommon` and exposes it through
+/// [`ExecutionEngine::common`] / [`ExecutionEngine::common_mut`]. The
+/// outer [`Pipeline`] uses these accessors to deliver inbound packets to
+/// the engine's mailbox and to drain completions, while memory1 inside
+/// `engine.tick` mutates the same fields directly to park new requests.
+#[derive(Debug, Default)]
+pub struct BackendCommon {
+    /// Inbound packets the simulator dispatch placed here this cycle.
+    pub mailbox: Vec<(ComponentId, Packet)>,
+    /// Inflight instruction fetches keyed by request id.
+    pub outstanding_fetches: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingFetch>,
+    /// Inflight demand loads (and atomic LR/AMO) keyed by request id.
+    pub outstanding_loads: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingLoad>,
+    /// Inflight store write-allocate requests keyed by request id.
+    pub outstanding_stores: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingStore>,
+    /// Inflight page-table walks keyed by the current PTE-read request id.
+    pub outstanding_walks: HashMap<ReqId, crate::core::pipeline::outstanding::OutstandingWalk>,
+    /// Monotonic request-id counter; allocate via [`BackendCommon::alloc_req_id`].
+    pub next_req_id: u64,
+    /// `PipelineId` of this engine; stamped on every outgoing packet as the
+    /// `source` so the response routes back here.
+    pub pipeline_id: PipelineId,
+    /// L1 instruction cache id (target for fetch requests).
+    pub l1_i_id: CacheId,
+    /// L1 data cache id (target for load / store / PTE-walk requests).
+    pub l1_d_id: CacheId,
 }
 
-/// The full pipeline combines a frontend, an engine, and the bookkeeping
-/// for in-flight memory operations routed through the event queue.
+impl BackendCommon {
+    /// Allocates a fresh [`ReqId`] for an outgoing packet.
+    #[inline]
+    pub fn alloc_req_id(&mut self) -> ReqId {
+        let id = self.next_req_id;
+        self.next_req_id = id.wrapping_add(1);
+        ReqId::new(id)
+    }
+}
+
+/// The full pipeline combines a frontend and an engine. In-flight memory
+/// bookkeeping lives on the engine's [`BackendCommon`]; the pipeline reaches
+/// it via [`ExecutionEngine::common`] / [`ExecutionEngine::common_mut`].
 #[derive(Debug)]
 pub struct Pipeline<E: ExecutionEngine> {
     /// Frontend stages: fetch, decode, rename.
@@ -186,44 +233,27 @@ pub struct Pipeline<E: ExecutionEngine> {
     /// (branch misprediction, trap, FENCE.I, MRET/SRET). Read at the top
     /// of `tick` to decide whether to flush the frontend, then cleared.
     pub redirect_pending: bool,
-    /// Identifier the dispatch loop uses to route `MemResp` packets here.
-    pub pipeline_id: PipelineId,
-    /// Inbound packets the dispatch loop placed here this cycle.
-    pub mailbox: Vec<(ComponentId, Packet)>,
-    /// Inflight instruction fetches keyed by request id.
-    pub outstanding_fetches: HashMap<ReqId, OutstandingFetch>,
-    /// Inflight demand loads keyed by request id.
-    pub outstanding_loads: HashMap<ReqId, OutstandingLoad>,
-    /// Inflight stores keyed by request id.
-    pub outstanding_stores: HashMap<ReqId, OutstandingStore>,
-    /// Inflight page-table walks keyed by the current PTE-read request id.
-    pub outstanding_walks: HashMap<ReqId, OutstandingWalk>,
-    /// Monotonic request-id counter.
-    pub next_req_id: u64,
-    /// Cached L1 instruction cache id.
-    pub l1_i_id: CacheId,
-    /// Cached L1 data cache id.
-    pub l1_d_id: CacheId,
 }
 
 impl<E: ExecutionEngine> Pipeline<E> {
-    /// Allocates a fresh [`ReqId`] for an outgoing packet.
-    pub fn alloc_req_id(&mut self) -> ReqId {
-        let id = self.next_req_id;
-        self.next_req_id = id.wrapping_add(1);
-        ReqId::new(id)
-    }
-
-    /// Places an inbound packet into the pipeline's mailbox.
+    /// Places an inbound packet into the engine's mailbox.
     pub fn deliver(&mut self, source: ComponentId, packet: Packet) {
-        self.mailbox.push((source, packet));
+        self.engine.common_mut().mailbox.push((source, packet));
     }
 }
 
 impl<E: ExecutionEngine> Pipeline<E> {
     /// Run one cycle of the entire pipeline.
+    ///
+    /// Order:
+    /// 1. Drain the mailbox — completed loads land in M1→M2; completed walks
+    ///    re-inject into Execute→Memory1; completed fetches land in F1→F2.
+    /// 2. `engine.tick` — commit, writeback, memory2, memory1, issue, execute.
+    /// 3. Frontend — fetch1 / fetch2 / decode / rename.
     pub fn tick(&mut self, cpu: &mut crate::core::Cpu) {
         let pc_before = cpu.hart.pc;
+
+        crate::core::pipeline::mailbox::drain(self, cpu);
 
         self.engine.tick(cpu, &mut self.rename_output, &mut self.redirect_pending);
 
@@ -244,6 +274,12 @@ impl<E: ExecutionEngine> Pipeline<E> {
     pub fn flush(&mut self, cpu: &mut crate::core::Cpu) {
         self.frontend.flush();
         self.rename_output.clear();
+        let common = self.engine.common_mut();
+        common.mailbox.clear();
+        common.outstanding_fetches.clear();
+        common.outstanding_loads.clear();
+        common.outstanding_stores.clear();
+        common.outstanding_walks.clear();
         self.engine.flush(cpu);
     }
 }
