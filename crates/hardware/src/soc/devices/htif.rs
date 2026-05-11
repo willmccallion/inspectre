@@ -52,12 +52,16 @@ impl Htif {
 
 impl Handle for Htif {
     fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
-        if let Packet::MemReq { req_id, paddr, op, .. } = packet {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
             let offset = paddr.val().saturating_sub(self.base_addr);
-            if offset == 0 {
-                if let MemOp::Write { data: WriteData::Small(val) } = op {
-                    self.handle_tohost(val);
-                }
+            // Only word- or doubleword-aligned writes to the tohost register
+            // (offset 0) trigger the protocol; spike's HTIF ignores sub-word
+            // partial writes and all writes to non-zero offsets in the slot.
+            if offset == 0
+                && matches!(size, crate::sim::packet::AccessSize::B4 | crate::sim::packet::AccessSize::B8)
+                && let MemOp::Write { data: WriteData::Small(val) } = op
+            {
+                self.handle_tohost(val);
             }
             ctx.scheduler.schedule(
                 ctx.cycle + 1,

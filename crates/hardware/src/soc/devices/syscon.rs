@@ -55,12 +55,16 @@ impl SysCon {
 
 impl Handle for SysCon {
     fn handle(&mut self, packet: Packet, source: ComponentId, ctx: &mut HandleCtx<'_>) {
-        if let Packet::MemReq { req_id, paddr, op, .. } = packet {
+        if let Packet::MemReq { req_id, paddr, size, op, .. } = packet {
             let offset = paddr.val().saturating_sub(self.base_addr);
-            if offset == 0 {
-                if let MemOp::Write { data: WriteData::Small(val) } = op {
-                    self.act_on_command(val as u32);
-                }
+            // SysCon commands are 32-bit (0x5555 / 0x7777 / 0x3333). Sub-word
+            // partial writes that don't reach a full register width are
+            // discarded, mirroring real device behaviour and what tests rely on.
+            if offset == 0
+                && matches!(size, crate::sim::packet::AccessSize::B4 | crate::sim::packet::AccessSize::B8)
+                && let MemOp::Write { data: WriteData::Small(val) } = op
+            {
+                self.act_on_command(val as u32);
             }
             ctx.scheduler.schedule(
                 ctx.cycle + 1,
