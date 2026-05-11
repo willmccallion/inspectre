@@ -513,13 +513,28 @@ impl PyCpu {
     ///     Physical address as ``int``, or raises ``ValueError`` on page fault.
     fn translate(&mut self, vaddr: u64) -> PyResult<u64> {
         use rvsim_core::common::{AccessType, VirtAddr};
-        let result = self.inner.cpu.translate(VirtAddr::new(vaddr), AccessType::Read, 8);
-        if let Some(trap) = result.trap {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "translation failed for VA {vaddr:#x}: {trap:?}"
-            )));
+        use rvsim_core::core::cpu::memory::TranslateResult;
+        // The Python binding can't park on a TLB miss, so we walk the PTW
+        // synchronously here — emit each PTE MemReq, drain it inline, and
+        // continue. This is an FFI-boundary helper; pipeline stages never
+        // take this path.
+        let mut outcome = self.inner.cpu.translate(VirtAddr::new(vaddr), AccessType::Read, 8);
+        loop {
+            match outcome {
+                TranslateResult::Ready(result) => {
+                    if let Some(trap) = result.trap {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "translation failed for VA {vaddr:#x}: {trap:?}"
+                        )));
+                    }
+                    return Ok(result.paddr.val());
+                }
+                TranslateResult::NeedPte { pte_addr, state } => {
+                    let raw_pte = self.inner.probe_mem_load(pte_addr, 8);
+                    outcome = self.inner.cpu.translate_continue(state, raw_pte, 0);
+                }
+            }
         }
-        Ok(result.paddr.val())
     }
 
     /// Read raw bytes from physical memory.
@@ -537,8 +552,14 @@ impl PyCpu {
         paddr: u64,
         length: usize,
     ) -> Bound<'py, pyo3::types::PyBytes> {
-        let cpu = &self.inner.cpu;
-        if let Some(r) = cpu.soc.bus.ram_region().filter(|r| r.contains(paddr, length as u64)) {
+        if let Some(r) = self
+            .inner
+            .cpu
+            .soc
+            .bus
+            .ram_region()
+            .filter(|r| r.contains(paddr, length as u64))
+        {
             // SAFETY: bounds-checked by `RamRegion::contains(paddr, length)` above.
             let slice = unsafe { std::slice::from_raw_parts(r.ptr(paddr), length) };
             pyo3::types::PyBytes::new(py, slice)
@@ -547,10 +568,8 @@ impl PyCpu {
             for (i, byte) in buf.iter_mut().enumerate() {
                 *byte = self
                     .inner
-                    .cpu
-                    .soc
-                    .bus
-                    .read_u8(rvsim_core::common::PhysAddr::new(paddr + i as u64));
+                    .probe_mem_load(rvsim_core::common::PhysAddr::new(paddr + i as u64), 1)
+                    as u8;
             }
             pyo3::types::PyBytes::new(py, &buf)
         }

@@ -121,11 +121,12 @@ impl Memory {
     fn __getitem__(&self, py: Python<'_>, addr: u64) -> u64 {
         let mut cpu = self.cpu.borrow_mut(py);
         let paddr = rvsim_core::common::PhysAddr::new(addr);
-        match self.width {
-            32 => u64::from(cpu.inner.cpu.soc.bus.read_u32(paddr)),
-            64 => cpu.inner.cpu.soc.bus.read_u64(paddr),
+        let width = match self.width {
+            32 => 4,
+            64 => 8,
             _ => unreachable!(),
-        }
+        };
+        cpu.inner.probe_mem_load(paddr, width)
     }
 
     fn __repr__(&self) -> String {
@@ -148,20 +149,35 @@ pub struct VirtualMemory {
 impl VirtualMemory {
     fn __getitem__(&self, py: Python<'_>, addr: u64) -> PyResult<u64> {
         use rvsim_core::common::{AccessType, VirtAddr};
+        use rvsim_core::core::cpu::memory::TranslateResult;
 
         let mut cpu = self.cpu.borrow_mut(py);
-        let result = cpu.inner.cpu.translate(VirtAddr::new(addr), AccessType::Read, 8);
-        if let Some(trap) = result.trap {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "translation failed for VA {addr:#x}: {trap:?}"
-            )));
-        }
-        let paddr = result.paddr;
-        Ok(match self.width {
-            32 => u64::from(cpu.inner.cpu.soc.bus.read_u32(paddr)),
-            64 => cpu.inner.cpu.soc.bus.read_u64(paddr),
+        // FFI-boundary translate: synchronously drive the walk inline,
+        // because the Python caller can't park.
+        let mut outcome = cpu.inner.cpu.translate(VirtAddr::new(addr), AccessType::Read, 8);
+        let paddr = loop {
+            match outcome {
+                TranslateResult::Ready(result) => {
+                    if let Some(trap) = result.trap {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "translation failed for VA {addr:#x}: {trap:?}"
+                        )));
+                    }
+                    break result.paddr;
+                }
+                TranslateResult::NeedPte { pte_addr, state } => {
+                    let raw_pte = cpu.inner.probe_mem_load(pte_addr, 8);
+                    outcome = cpu.inner.cpu.translate_continue(state, raw_pte, 0);
+                }
+            }
+        };
+
+        let width = match self.width {
+            32 => 4,
+            64 => 8,
             _ => unreachable!(),
-        })
+        };
+        Ok(cpu.inner.probe_mem_load(paddr, width))
     }
 
     fn __repr__(&self) -> String {

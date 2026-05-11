@@ -160,6 +160,131 @@ impl Simulator {
     pub fn take_exit(&self) -> Option<u64> {
         self.cpu.take_exit()
     }
+
+    /// Synchronously reads `width` bytes from physical memory.
+    ///
+    /// Used at the FFI boundary (Python bindings, save/restore tooling) to
+    /// inspect memory without driving the full pipeline. RAM addresses use
+    /// the fast-path pointer; MMIO addresses dispatch a `MemReq` through the
+    /// bus's `Handle` impl with a local event queue and read the response
+    /// data out of the synchronously-scheduled `MemResp`.
+    ///
+    /// Not for use inside pipeline stages — those emit `MemReq` packets
+    /// through the global event queue and consume responses via the
+    /// mailbox-drain stage.
+    pub fn probe_mem_load(&mut self, paddr: crate::common::PhysAddr, width: u8) -> u64 {
+        let raw = paddr.val();
+        if let Some(r) = self
+            .cpu
+            .soc
+            .bus
+            .ram_region()
+            .filter(|r| r.contains(raw, u64::from(width)))
+        {
+            // SAFETY: bounds-checked by `RamRegion::contains(raw, width)`.
+            return unsafe {
+                match width {
+                    1 => u64::from(*r.ptr(raw)),
+                    2 => u64::from(r.ptr(raw).cast::<u16>().read_unaligned()),
+                    4 => u64::from(r.ptr(raw).cast::<u32>().read_unaligned()),
+                    8 => r.ptr(raw).cast::<u64>().read_unaligned(),
+                    _ => 0,
+                }
+            };
+        }
+        self.probe_mmio(paddr, width, crate::sim::packet::MemOp::Read)
+    }
+
+    /// Synchronously writes `width` bytes to physical memory. For RAM the
+    /// fast-path pointer is used directly; for MMIO a `MemReq` is dispatched
+    /// through the bus's `Handle` impl so the device's side effect runs.
+    pub fn probe_mem_store(
+        &mut self,
+        paddr: crate::common::PhysAddr,
+        value: u64,
+        width: u8,
+    ) {
+        let raw = paddr.val();
+        if let Some(r) = self
+            .cpu
+            .soc
+            .bus
+            .ram_region()
+            .filter(|r| r.contains(raw, u64::from(width)))
+        {
+            // SAFETY: bounds-checked above.
+            unsafe {
+                match width {
+                    1 => *r.ptr(raw) = value as u8,
+                    2 => r.ptr(raw).cast::<u16>().write_unaligned(value as u16),
+                    4 => r.ptr(raw).cast::<u32>().write_unaligned(value as u32),
+                    8 => r.ptr(raw).cast::<u64>().write_unaligned(value),
+                    _ => {}
+                }
+            }
+            return;
+        }
+        let op = crate::sim::packet::MemOp::Write {
+            data: crate::sim::packet::WriteData::Small(value),
+        };
+        let _ = self.probe_mmio(paddr, width, op);
+    }
+
+    /// Internal helper: synchronously dispatches an MMIO `MemReq` through the
+    /// bus and reads the response data out of a local event queue.
+    fn probe_mmio(
+        &mut self,
+        paddr: crate::common::PhysAddr,
+        width: u8,
+        op: crate::sim::packet::MemOp,
+    ) -> u64 {
+        use crate::sim::components::{ComponentId, PipelineId, ReqId};
+        use crate::sim::events::EventQueue;
+        use crate::sim::handle::HandleCtx;
+        use crate::sim::handle::Handle;
+        use crate::sim::packet::{AccessSize, MemRespData, Packet};
+        use crate::sim::stats::Stats;
+
+        let access_size = match width {
+            1 => AccessSize::B1,
+            2 => AccessSize::B2,
+            4 => AccessSize::B4,
+            _ => AccessSize::B8,
+        };
+        let req_id = ReqId::new(u64::MAX);
+        let mut local_queue = EventQueue::new();
+        let mut local_stats = Stats::new();
+        let cycle = self.cpu.soc.cycle;
+        let mut ctx = HandleCtx {
+            scheduler: &mut local_queue,
+            stats: &mut local_stats,
+            config: &self.cpu.config,
+            cycle,
+            self_id: ComponentId::Bus,
+        };
+        self.cpu.soc.bus.handle(
+            Packet::MemReq {
+                req_id,
+                paddr,
+                vaddr: None,
+                size: access_size,
+                op,
+            },
+            ComponentId::Pipeline(PipelineId::new(0)),
+            &mut ctx,
+        );
+        while let Some(event) = local_queue.pop_ready(u64::MAX) {
+            if let Packet::MemResp { req_id: rid, data, .. } = event.packet
+                && rid == req_id
+            {
+                return match data {
+                    MemRespData::Small(v) => v,
+                    MemRespData::Line(_) => 0,
+                };
+            }
+        }
+        0
+    }
 }
 
 /// Dispatches a packet to the cache identified by `id`.
