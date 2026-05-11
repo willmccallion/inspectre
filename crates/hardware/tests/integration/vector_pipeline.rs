@@ -54,7 +54,7 @@ fn run_program(config: &Config, program: &[u32], cycles: u64) -> TestContext {
     let mut ctx = TestContext::new_with_config(config).with_memory(RAM_SIZE, RAM_BASE);
     for (i, inst) in program.iter().enumerate() {
         let addr = RAM_BASE + (i as u64) * 4;
-        ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(addr), *inst);
+        ctx.sim.probe_mem_store(PhysAddr::new(addr), u64::from(*inst), 4);
     }
     ctx.cpu_mut().hart.pc = RAM_BASE;
     ctx.run(cycles);
@@ -75,7 +75,7 @@ fn vsetvli_consumes_immediately_preceding_li() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&wide_inorder_config(), &program, 64);
+    let ctx = run_program(&wide_inorder_config(), &program, 500);
 
     assert_eq!(ctx.get_reg(5), 4, "t0 should hold 4 after li");
     assert_eq!(
@@ -97,7 +97,7 @@ fn vsetvli_consumes_immediately_preceding_li_width1() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&Config::default(), &program, 64);
+    let ctx = run_program(&Config::default(), &program, 500);
 
     assert_eq!(ctx.get_reg(5), 4);
     assert_eq!(ctx.cpu().hart.csrs.vl, 4, "got vl={}", ctx.cpu().hart.csrs.vl);
@@ -124,7 +124,7 @@ fn vsetvli_after_flushing_vsetvli_then_li() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 500);
 
     assert_eq!(ctx.get_reg(5), 12, "t0 should hold 12");
     assert_eq!(
@@ -148,7 +148,7 @@ fn vsetvli_after_flushing_vsetvli_then_li_width1() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&Config::default(), &program, 96);
+    let ctx = run_program(&Config::default(), &program, 500);
 
     assert_eq!(ctx.get_reg(5), 12);
     assert_eq!(
@@ -198,7 +198,7 @@ fn vwaddu_vv_at_mf8_does_not_trap_for_odd_vd() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 500);
 
     // mcause = 2 (illegal instruction) is the failure mode we're catching.
     let mcause = ctx.cpu().hart.csrs.mcause;
@@ -228,7 +228,7 @@ fn vid_v_does_not_check_vs2_alignment() {
         .chain(std::iter::repeat_n(NOP, 32))
         .collect();
 
-    let ctx = run_program(&wide_inorder_config(), &program, 96);
+    let ctx = run_program(&wide_inorder_config(), &program, 500);
 
     let mcause = ctx.cpu().hart.csrs.mcause;
     assert_eq!(mcause, 0, "vid.v with vs2_field=1 must not trap (mcause={:#x})", mcause);

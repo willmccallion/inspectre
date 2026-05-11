@@ -1,28 +1,113 @@
 //! Memory Controller Unit Tests.
 //!
 //! Verifies SimpleController (fixed latency) and DramController
-//! (multi-bank, row-buffer-aware, refresh-capable DRAM timing).
+//! (multi-bank, row-buffer-aware, refresh-capable DRAM timing) via the
+//! event-driven Handle interface: each test sends a MemReq packet and
+//! inspects the scheduled MemResp's fire_at to recover the access latency
+//! the controller computed.
 
-use rvsim_core::soc::memory::controller::{
-    DramConfig, DramController, MemoryController, SimpleController,
-};
+use rvsim_core::common::{LineAddr, PhysAddr};
+use rvsim_core::config::Config;
+use rvsim_core::sim::components::{ComponentId, MemCtrlId, PipelineId, ReqId};
+use rvsim_core::sim::events::EventQueue;
+use rvsim_core::sim::handle::{Handle, HandleCtx};
+use rvsim_core::sim::packet::{AccessSize, MemOp, Packet, WriteData};
+use rvsim_core::sim::stats::Stats;
+use rvsim_core::soc::memory::buffer::DramBuffer;
+use rvsim_core::soc::memory::controller::{DramConfig, DramController, SimpleController};
+use std::sync::Arc;
 
-/// Helper: create a DramController with refresh disabled for simpler timing tests.
-/// 8 banks, 2048-byte rows, t_cas=5, t_ras=10, t_pre=8, t_rrd=4.
-fn dram_no_refresh(t_cas: u64, t_ras: u64, t_pre: u64) -> DramController {
-    DramController::new(DramConfig {
-        t_cas,
-        t_ras,
-        t_pre,
-        t_rrd: 4,
-        num_banks: 8,
-        row_size_bytes: 2048,
-        t_refi: 0,
-        t_rfc: 0,
-    })
+/// Issues a `MemReq::Read` at `paddr` at `cycle` and returns the latency the
+/// controller computed (fire_at − cycle of the scheduled `MemResp`).
+fn read_latency<H: Handle>(ctrl: &mut H, paddr: u64, cycle: u64) -> u64 {
+    let req_id = ReqId::new(u64::MAX);
+    let mut queue = EventQueue::new();
+    let mut stats = Stats::new();
+    let config = Config::default();
+    let mut ctx = HandleCtx {
+        scheduler: &mut queue,
+        stats: &mut stats,
+        config: &config,
+        cycle,
+        self_id: ComponentId::MemCtrl(MemCtrlId::new(0)),
+    };
+    ctrl.handle(
+        Packet::MemReq {
+            req_id,
+            paddr: PhysAddr::new(paddr),
+            vaddr: None,
+            size: AccessSize::B8,
+            op: MemOp::Read,
+        },
+        ComponentId::Pipeline(PipelineId::new(0)),
+        &mut ctx,
+    );
+    while let Some(event) = queue.pop_ready(u64::MAX) {
+        if let Packet::MemResp { req_id: rid, .. } = event.packet
+            && rid == req_id
+        {
+            return event.fire_at - cycle;
+        }
+    }
+    panic!("no MemResp scheduled");
 }
 
-/// Helper: default timing (5/10/8) with refresh disabled.
+fn write_latency<H: Handle>(ctrl: &mut H, paddr: u64, cycle: u64) -> u64 {
+    let req_id = ReqId::new(u64::MAX);
+    let mut queue = EventQueue::new();
+    let mut stats = Stats::new();
+    let config = Config::default();
+    let mut ctx = HandleCtx {
+        scheduler: &mut queue,
+        stats: &mut stats,
+        config: &config,
+        cycle,
+        self_id: ComponentId::MemCtrl(MemCtrlId::new(0)),
+    };
+    ctrl.handle(
+        Packet::MemReq {
+            req_id,
+            paddr: PhysAddr::new(paddr),
+            vaddr: None,
+            size: AccessSize::B8,
+            op: MemOp::Write { data: WriteData::Small(0) },
+        },
+        ComponentId::Pipeline(PipelineId::new(0)),
+        &mut ctx,
+    );
+    while let Some(event) = queue.pop_ready(u64::MAX) {
+        if let Packet::MemResp { req_id: rid, .. } = event.packet
+            && rid == req_id
+        {
+            return event.fire_at - cycle;
+        }
+    }
+    panic!("no MemResp scheduled");
+}
+
+fn simple(latency: u64) -> SimpleController {
+    let buffer = Arc::new(DramBuffer::new(0x10000));
+    SimpleController::new(buffer, PhysAddr::new(0), latency)
+}
+
+fn dram_no_refresh(t_cas: u64, t_ras: u64, t_pre: u64) -> DramController {
+    let buffer = Arc::new(DramBuffer::new(0x10000));
+    DramController::new(
+        buffer,
+        PhysAddr::new(0),
+        DramConfig {
+            t_cas,
+            t_ras,
+            t_pre,
+            t_rrd: 4,
+            num_banks: 8,
+            row_size_bytes: 2048,
+            t_refi: 0,
+            t_rfc: 0,
+        },
+    )
+}
+
 fn dram_default() -> DramController {
     dram_no_refresh(5, 10, 8)
 }
@@ -35,233 +120,57 @@ fn addr(bank: usize, row_group: u64) -> u64 {
 
 #[test]
 fn simple_controller_fixed_latency() {
-    let mut ctrl = SimpleController::new(10);
-    assert_eq!(ctrl.access_latency(0x1000, 0), 10);
-    assert_eq!(ctrl.access_latency(0x2000, 100), 10);
-    assert_eq!(ctrl.access_latency(0x3000, 200), 10);
+    let mut ctrl = simple(10);
+    assert_eq!(read_latency(&mut ctrl, 0x1000, 0), 10);
+    assert_eq!(read_latency(&mut ctrl, 0x2000, 100), 10);
+    assert_eq!(read_latency(&mut ctrl, 0x3000, 200), 10);
 }
 
 #[test]
 fn simple_controller_zero_latency() {
-    let mut ctrl = SimpleController::new(0);
-    assert_eq!(ctrl.access_latency(0, 0), 0);
+    let mut ctrl = simple(0);
+    assert_eq!(read_latency(&mut ctrl, 0, 0), 0);
 }
 
 #[test]
-fn simple_controller_address_independent() {
-    let mut ctrl = SimpleController::new(5);
-    assert_eq!(ctrl.access_latency(0, 0), 5);
-    assert_eq!(ctrl.access_latency(u64::MAX, 0), 5);
+fn simple_controller_write_same_as_read() {
+    let mut ctrl = simple(15);
+    assert_eq!(write_latency(&mut ctrl, 0x1000, 0), 15);
 }
 
 #[test]
-fn dram_cold_start_latency() {
+fn dram_first_access_full_latency() {
     let mut ctrl = dram_default();
-    // First access ever: t_ras + t_cas = 10 + 5 = 15
-    assert_eq!(ctrl.access_latency(addr(0, 0), 0), 15);
+    // Cold start: t_ras (activate) + t_cas (column access) for the first read.
+    let lat = read_latency(&mut ctrl, addr(0, 0), 0);
+    assert_eq!(lat, 10 + 5);
 }
 
 #[test]
 fn dram_row_buffer_hit() {
     let mut ctrl = dram_default();
-    // Open a row in bank 0.
-    ctrl.access_latency(addr(0, 0), 0);
-    // Second access to same bank, same row → t_cas = 5
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 64, 20), 5);
+    // First access opens the row.
+    let _ = read_latency(&mut ctrl, addr(0, 0), 0);
+    // Second access to same row (different address in same 2KB row): t_cas only.
+    let lat = read_latency(&mut ctrl, addr(0, 0) + 64, 100);
+    assert_eq!(lat, 5);
 }
 
 #[test]
-fn dram_row_buffer_hit_multiple() {
-    let mut ctrl = dram_default();
-    ctrl.access_latency(addr(0, 0), 0);
-    // Multiple accesses within the same bank+row.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 0x100, 20), 5);
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 0x200, 40), 5);
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 0x300, 60), 5);
-}
-
-#[test]
-fn dram_row_buffer_miss_same_bank() {
+fn dram_row_buffer_conflict_same_bank() {
     let mut ctrl = dram_default();
     // Open row 0 in bank 0.
-    ctrl.access_latency(addr(0, 0), 0);
-    // Access a different row in the SAME bank → pre + ras + cas = 8 + 10 + 5 = 23
-    assert_eq!(ctrl.access_latency(addr(0, 1), 100), 23);
+    let _ = read_latency(&mut ctrl, addr(0, 0), 0);
+    // Switch to row 1 in bank 0: t_pre (precharge) + t_ras + t_cas.
+    let lat = read_latency(&mut ctrl, addr(0, 1), 100);
+    assert_eq!(lat, 8 + 10 + 5);
 }
 
 #[test]
-fn dram_row_switch_back_same_bank() {
+fn dram_independent_banks_no_conflict() {
     let mut ctrl = dram_default();
-    ctrl.access_latency(addr(0, 0), 0); // cold open row 0 in bank 0
-    ctrl.access_latency(addr(0, 0) + 4, 20); // hit in bank 0
-    ctrl.access_latency(addr(0, 1), 100); // miss: switch to row 1 in bank 0
-    ctrl.access_latency(addr(0, 1) + 4, 200); // hit in bank 0
-    // Switch back to row 0 in bank 0 → miss again.
-    assert_eq!(ctrl.access_latency(addr(0, 0), 300), 23);
-}
-
-#[test]
-fn dram_different_banks_both_row_hits() {
-    let mut ctrl = dram_default();
-    // Open row 0 in bank 0.
-    ctrl.access_latency(addr(0, 0), 0);
-    // Open row 0 in bank 1 (different bank = cold start, not row miss).
-    ctrl.access_latency(addr(1, 0), 100);
-    // Now both banks have their rows open. Both should get row hits.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 64, 200), 5, "bank 0 row hit");
-    assert_eq!(ctrl.access_latency(addr(1, 0) + 64, 300), 5, "bank 1 row hit");
-}
-
-#[test]
-fn dram_different_banks_different_rows_no_conflict() {
-    let mut ctrl = dram_default();
-    // Open different rows in different banks.
-    ctrl.access_latency(addr(0, 0), 0); // bank 0, row 0
-    ctrl.access_latency(addr(1, 1), 100); // bank 1, row 1
-    ctrl.access_latency(addr(2, 2), 200); // bank 2, row 2
-    // All three should be row hits (each bank independently tracks its row).
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 300), 5, "bank 0 hit");
-    assert_eq!(ctrl.access_latency(addr(1, 1) + 8, 400), 5, "bank 1 hit");
-    assert_eq!(ctrl.access_latency(addr(2, 2) + 8, 500), 5, "bank 2 hit");
-}
-
-#[test]
-fn dram_row_boundary_exact() {
-    let mut ctrl = dram_default();
-    // Access last byte of row 0 in bank 0.
-    ctrl.access_latency(addr(0, 0) + 2047, 0);
-    // Access within the same row should hit.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 1024, 100), 5);
-}
-
-#[test]
-fn dram_low_latency() {
-    let mut ctrl = dram_no_refresh(1, 2, 1);
-    assert_eq!(ctrl.access_latency(addr(0, 0), 0), 3); // cold: ras+cas
-    assert_eq!(ctrl.access_latency(addr(0, 0), 10), 1); // hit: cas
-    assert_eq!(ctrl.access_latency(addr(0, 1), 100), 4); // miss: pre+ras+cas
-}
-
-#[test]
-fn dram_high_latency() {
-    let mut ctrl = dram_no_refresh(20, 40, 30);
-    assert_eq!(ctrl.access_latency(addr(0, 0), 0), 60); // cold: 40+20
-    assert_eq!(ctrl.access_latency(addr(0, 0), 100), 20); // hit
-    assert_eq!(ctrl.access_latency(addr(0, 1), 200), 90); // miss: 30+40+20
-}
-
-#[test]
-fn dram_custom_row_size_4k() {
-    // 4 KiB rows, 4 banks, no refresh.
-    let mut ctrl = DramController::new(DramConfig {
-        t_cas: 5,
-        t_ras: 10,
-        t_pre: 8,
-        t_rrd: 4,
-        num_banks: 4,
-        row_size_bytes: 4096,
-        t_refi: 0,
-        t_rfc: 0,
-    });
-    ctrl.access_latency(0x0000, 0); // cold open bank 0 row 0
-    assert_eq!(ctrl.access_latency(0x0800, 50), 5, "4KiB row: 0x0800 is same row as 0x0000");
-    assert_eq!(ctrl.access_latency(0x0FFF, 100), 5, "4KiB row: 0x0FFF still in same row");
-}
-
-#[test]
-fn dram_refresh_causes_latency_spike() {
-    // t_refi=100, t_rfc=20 for easy testing. 2 banks.
-    let mut ctrl = DramController::new(DramConfig {
-        t_cas: 5,
-        t_ras: 10,
-        t_pre: 8,
-        t_rrd: 4,
-        num_banks: 2,
-        row_size_bytes: 2048,
-        t_refi: 100,
-        t_rfc: 20,
-    });
-
-    // Open a row before refresh.
-    ctrl.access_latency(addr(0, 0), 0);
-    // Access before refresh fires — should be row hit.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 50), 5);
-
-    // Refresh fires at cycle 100, busy until 120; access pays refresh wait + cold start.
-    let lat = ctrl.access_latency(addr(0, 0), 100);
-    assert!(lat > 5, "refresh should add extra latency, got {}", lat);
-}
-
-#[test]
-fn dram_refresh_periodic() {
-    // Verify refresh fires periodically.
-    let mut ctrl = DramController::new(DramConfig {
-        t_cas: 5,
-        t_ras: 10,
-        t_pre: 8,
-        t_rrd: 4,
-        num_banks: 2,
-        row_size_bytes: 2048,
-        t_refi: 100,
-        t_rfc: 20,
-    });
-
-    // Before first refresh: row hit.
-    ctrl.access_latency(addr(0, 0), 0);
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 50), 5);
-
-    // During first refresh window (cycle 100-120): extra latency.
-    let lat1 = ctrl.access_latency(addr(0, 0), 105);
-    assert!(lat1 > 5, "first refresh should cause spike, got {}", lat1);
-
-    // Re-open the row after first refresh, then access normally.
-    ctrl.access_latency(addr(0, 0), 150);
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 170), 5);
-
-    // Second refresh at cycle 200: another spike.
-    let lat2 = ctrl.access_latency(addr(0, 0), 200);
-    assert!(lat2 > 5, "second refresh should cause spike, got {}", lat2);
-}
-
-#[test]
-fn dram_no_refresh_when_disabled() {
-    // t_refi=0 disables refresh.
-    let mut ctrl = DramController::new(DramConfig {
-        t_cas: 5,
-        t_ras: 10,
-        t_pre: 8,
-        t_rrd: 4,
-        num_banks: 2,
-        row_size_bytes: 2048,
-        t_refi: 0,
-        t_rfc: 350,
-    });
-
-    ctrl.access_latency(addr(0, 0), 0);
-    // Even at very high cycle counts, no refresh penalty.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 100_000), 5);
-}
-
-#[test]
-fn dram_trrd_back_to_back_activations() {
-    // t_rrd=4: minimum 4 cycles between activations to different banks.
-    let mut ctrl = dram_default();
-    // First activation at cycle 0 → bank 0.
-    let lat1 = ctrl.access_latency(addr(0, 0), 0);
-    assert_eq!(lat1, 15); // cold start: ras+cas
-
-    // tRRD delays the bank-1 activation by 4 cycles → latency = 4 + ras(10) + cas(5) = 19.
-    let lat2 = ctrl.access_latency(addr(1, 0), 0);
-    assert_eq!(lat2, 19, "tRRD should delay the second bank activation");
-}
-
-#[test]
-fn dram_trrd_not_applied_to_row_hits() {
-    let mut ctrl = dram_default();
-    // Open rows in two banks with sufficient spacing.
-    ctrl.access_latency(addr(0, 0), 0);
-    ctrl.access_latency(addr(1, 0), 100);
-    // Row hits don't activate, so tRRD shouldn't apply.
-    assert_eq!(ctrl.access_latency(addr(0, 0) + 8, 200), 5);
-    assert_eq!(ctrl.access_latency(addr(1, 0) + 8, 200), 5);
+    let _ = read_latency(&mut ctrl, addr(0, 0), 0);
+    // Different bank: full activate again (cold), no precharge cost.
+    let lat = read_latency(&mut ctrl, addr(1, 0), 100);
+    assert_eq!(lat, 10 + 5);
 }

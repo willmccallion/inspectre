@@ -11,15 +11,15 @@ use rvsim_core::soc::devices::uart::Uart;
 fn uart_transmit_data_via_thr() {
     let mut uart = Uart::new(0x1000_0000, true, true);
     // Write to THR (offset 0)
-    uart.write_u8(0, 0x41); // ASCII 'A'
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x41) as u64, 1); // ASCII 'A'
     // UART should buffer this for transmission
 }
 
 #[test]
 fn uart_transmit_multiple_bytes() {
     let mut uart = Uart::new(0x1000_0000, true, true);
-    uart.write_u8(0, 0x48); // 'H'
-    uart.write_u8(0, 0x69); // 'i'
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x48) as u64, 1); // 'H'
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x69) as u64, 1); // 'i'
 }
 
 #[test]
@@ -27,7 +27,7 @@ fn uart_transmit_full_message() {
     let mut uart = Uart::new(0x1000_0000, true, true);
     let message = b"Hello";
     for &byte in message {
-        uart.write_u8(0, byte);
+        crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (byte) as u64, 1);
     }
 }
 
@@ -35,8 +35,8 @@ fn uart_transmit_full_message() {
 fn uart_dlab_set() {
     let mut uart = Uart::new(0, true, true);
     // Set DLAB bit (bit 7 of LCR)
-    uart.write_u8(3, 0x80);
-    let lcr = uart.read_u8(3);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
+    let lcr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8);
     assert_eq!(lcr & 0x80, 0x80);
 }
 
@@ -44,150 +44,150 @@ fn uart_dlab_set() {
 fn uart_dlab_divisor_low() {
     let mut uart = Uart::new(0, true, true);
     // Enable DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Write divisor low byte
-    uart.write_u8(0, 0x01);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x01) as u64, 1);
     // Verify
-    assert_eq!(uart.read_u8(0), 0x01);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0), 1) as u8), 0x01);
 }
 
 #[test]
 fn uart_dlab_divisor_high() {
     let mut uart = Uart::new(0, true, true);
     // Enable DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Write divisor high byte
-    uart.write_u8(1, 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1);
     // Verify
-    assert_eq!(uart.read_u8(1), 0x00);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x00);
 }
 
 #[test]
 fn uart_dlab_full_divisor() {
     let mut uart = Uart::new(0, true, true);
     // Set DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Set divisor = 0x000C (common for 9600 baud)
-    uart.write_u8(0, 0x0C); // DLL
-    uart.write_u8(1, 0x00); // DLH
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x0C) as u64, 1); // DLL
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1); // DLH
 
-    assert_eq!(uart.read_u8(0), 0x0C);
-    assert_eq!(uart.read_u8(1), 0x00);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0), 1) as u8), 0x0C);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x00);
 }
 
 #[test]
 fn uart_dlab_disable() {
     let mut uart = Uart::new(0, true, true);
     // Enable DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Disable DLAB
-    uart.write_u8(3, 0x03); // 8N1, no DLAB
-    let lcr = uart.read_u8(3);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x03) as u64, 1); // 8N1, no DLAB
+    let lcr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8);
     assert_eq!(lcr & 0x80, 0);
 }
 
 #[test]
 fn uart_lcr_data_bits_5() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x00); // 5 data bits
-    assert_eq!(uart.read_u8(3) & 0x03, 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x00) as u64, 1); // 5 data bits
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x00);
 }
 
 #[test]
 fn uart_lcr_data_bits_6() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x01); // 6 data bits
-    assert_eq!(uart.read_u8(3) & 0x03, 0x01);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x01) as u64, 1); // 6 data bits
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x01);
 }
 
 #[test]
 fn uart_lcr_data_bits_7() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x02); // 7 data bits
-    assert_eq!(uart.read_u8(3) & 0x03, 0x02);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x02) as u64, 1); // 7 data bits
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x02);
 }
 
 #[test]
 fn uart_lcr_data_bits_8() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x03); // 8 data bits
-    assert_eq!(uart.read_u8(3) & 0x03, 0x03);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x03) as u64, 1); // 8 data bits
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x03);
 }
 
 #[test]
 fn uart_lcr_stop_bits() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x04); // 2 stop bits
-    assert_eq!(uart.read_u8(3) & 0x04, 0x04);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x04) as u64, 1); // 2 stop bits
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x04, 0x04);
 }
 
 #[test]
 fn uart_lcr_parity_enable() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x08); // Enable parity
-    assert_eq!(uart.read_u8(3) & 0x08, 0x08);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x08) as u64, 1); // Enable parity
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x08, 0x08);
 }
 
 #[test]
 fn uart_lcr_even_parity() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x18); // Enable parity + even parity
-    assert_eq!(uart.read_u8(3) & 0x18, 0x18);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x18) as u64, 1); // Enable parity + even parity
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x18, 0x18);
 }
 
 #[test]
 fn uart_lcr_break_control() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(3, 0x40); // Set break
-    assert_eq!(uart.read_u8(3) & 0x40, 0x40);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x40) as u64, 1); // Set break
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x40, 0x40);
 }
 
 #[test]
 fn uart_ier_disable_all() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x00);
-    assert_eq!(uart.read_u8(1), 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x00);
 }
 
 #[test]
 fn uart_ier_enable_received_data() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x01); // Enable received data interrupt
-    assert_eq!(uart.read_u8(1), 0x01);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x01) as u64, 1); // Enable received data interrupt
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x01);
 }
 
 #[test]
 fn uart_ier_enable_transmitter_empty() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x02); // Enable transmitter empty interrupt
-    assert_eq!(uart.read_u8(1), 0x02);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x02) as u64, 1); // Enable transmitter empty interrupt
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x02);
 }
 
 #[test]
 fn uart_ier_enable_line_status() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x04); // Enable line status interrupt
-    assert_eq!(uart.read_u8(1), 0x04);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x04) as u64, 1); // Enable line status interrupt
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x04);
 }
 
 #[test]
 fn uart_ier_enable_modem_status() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x08); // Enable modem status interrupt
-    assert_eq!(uart.read_u8(1), 0x08);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x08) as u64, 1); // Enable modem status interrupt
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x08);
 }
 
 #[test]
 fn uart_ier_enable_multiple() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(1, 0x0F); // Enable all interrupts
-    assert_eq!(uart.read_u8(1), 0x0F);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x0F) as u64, 1); // Enable all interrupts
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x0F);
 }
 
 #[test]
 fn uart_iir_no_interrupt_pending() {
     let mut uart = Uart::new(0, true, true);
-    let iir = uart.read_u8(2);
+    let iir = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(2), 1) as u8);
     // Bit 0 = 1 means no interrupt pending
     assert_ne!(iir & 0x01, 0);
 }
@@ -195,56 +195,56 @@ fn uart_iir_no_interrupt_pending() {
 #[test]
 fn uart_iir_fifo_enabled() {
     let mut uart = Uart::new(0, true, true);
-    let _iir = uart.read_u8(2);
+    let _iir = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(2), 1) as u8);
     // Bits 6-7 should indicate FIFO status
 }
 
 #[test]
 fn uart_mcr_dtr() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x01); // DTR
-    assert_eq!(uart.read_u8(4) & 0x01, 0x01);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x01) as u64, 1); // DTR
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x01, 0x01);
 }
 
 #[test]
 fn uart_mcr_rts() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x02); // RTS
-    assert_eq!(uart.read_u8(4) & 0x02, 0x02);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x02) as u64, 1); // RTS
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x02, 0x02);
 }
 
 #[test]
 fn uart_mcr_out1() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x04); // OUT1
-    assert_eq!(uart.read_u8(4) & 0x04, 0x04);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x04) as u64, 1); // OUT1
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x04, 0x04);
 }
 
 #[test]
 fn uart_mcr_out2() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x08); // OUT2
-    assert_eq!(uart.read_u8(4) & 0x08, 0x08);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x08) as u64, 1); // OUT2
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x08, 0x08);
 }
 
 #[test]
 fn uart_mcr_loopback() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x10); // Loopback mode
-    assert_eq!(uart.read_u8(4) & 0x10, 0x10);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x10) as u64, 1); // Loopback mode
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x10, 0x10);
 }
 
 #[test]
 fn uart_mcr_all_bits() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(4, 0x1F); // All bits set
-    assert_eq!(uart.read_u8(4), 0x1F);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x1F) as u64, 1); // All bits set
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8), 0x1F);
 }
 
 #[test]
 fn uart_lsr_overrun_error() {
     let mut uart = Uart::new(0, true, true);
-    let lsr = uart.read_u8(5);
+    let lsr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(5), 1) as u8);
     // Check bit 1 (overrun error)
     let _ = (lsr >> 1) & 1;
 }
@@ -252,7 +252,7 @@ fn uart_lsr_overrun_error() {
 #[test]
 fn uart_lsr_parity_error() {
     let mut uart = Uart::new(0, true, true);
-    let lsr = uart.read_u8(5);
+    let lsr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(5), 1) as u8);
     // Check bit 2 (parity error)
     let _ = (lsr >> 2) & 1;
 }
@@ -260,7 +260,7 @@ fn uart_lsr_parity_error() {
 #[test]
 fn uart_lsr_framing_error() {
     let mut uart = Uart::new(0, true, true);
-    let lsr = uart.read_u8(5);
+    let lsr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(5), 1) as u8);
     // Check bit 3 (framing error)
     let _ = (lsr >> 3) & 1;
 }
@@ -268,7 +268,7 @@ fn uart_lsr_framing_error() {
 #[test]
 fn uart_lsr_break_interrupt() {
     let mut uart = Uart::new(0, true, true);
-    let lsr = uart.read_u8(5);
+    let lsr = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(5), 1) as u8);
     // Check bit 4 (break interrupt)
     let _ = (lsr >> 4) & 1;
 }
@@ -276,56 +276,56 @@ fn uart_lsr_break_interrupt() {
 #[test]
 fn uart_read_u16() {
     let mut uart = Uart::new(0, true, true);
-    let _ = uart.read_u16(0);
+    let _ = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0), 2) as u16);
 }
 
 #[test]
 fn uart_read_u32() {
     let mut uart = Uart::new(0, true, true);
-    let _ = uart.read_u32(0);
+    let _ = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0), 4) as u32);
 }
 
 #[test]
 fn uart_read_u64() {
     let mut uart = Uart::new(0, true, true);
-    let _ = uart.read_u64(0);
+    let _ = crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0), 8);
 }
 
 #[test]
 fn uart_write_u16() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u16(0, 0x4142);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x4142) as u64, 2);
 }
 
 #[test]
 fn uart_write_u32() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u32(0, 0x41424344);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x41424344) as u64, 4);
 }
 
 #[test]
 fn uart_write_u64() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u64(0, 0x4142434445464748);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), 0x4142434445464748, 8);
 }
 
 #[test]
 fn uart_invalid_register_read() {
     let mut uart = Uart::new(0, true, true);
-    let _ = uart.read_u8(0xFF); // Invalid offset
+    let _ = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(0xFF), 1) as u8); // Invalid offset
 }
 
 #[test]
 fn uart_invalid_register_write() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(0xFF, 0x00); // Invalid offset
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0xFF), (0x00) as u64, 1); // Invalid offset
 }
 
 #[test]
 fn uart_read_write_only_register() {
     let mut uart = Uart::new(0, true, true);
     // Try reading FCR (write-only)
-    let _ = uart.read_u8(2);
+    let _ = (crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(2), 1) as u8);
 }
 
 #[test]
@@ -344,82 +344,82 @@ fn uart_tick_no_interrupt() {
 fn uart_configure_9600_8n1() {
     let mut uart = Uart::new(0, true, true);
     // Set DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Set divisor for 9600 baud
-    uart.write_u8(0, 0x0C);
-    uart.write_u8(1, 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x0C) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1);
     // Clear DLAB, set 8N1
-    uart.write_u8(3, 0x03);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x03) as u64, 1);
 
-    assert_eq!(uart.read_u8(3) & 0x03, 0x03);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x03);
 }
 
 #[test]
 fn uart_configure_115200_8n1() {
     let mut uart = Uart::new(0, true, true);
     // Set DLAB
-    uart.write_u8(3, 0x80);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x80) as u64, 1);
     // Set divisor for 115200 baud
-    uart.write_u8(0, 0x01);
-    uart.write_u8(1, 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(0), (0x01) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1);
     // Clear DLAB, set 8N1
-    uart.write_u8(3, 0x03);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x03) as u64, 1);
 
-    assert_eq!(uart.read_u8(3) & 0x03, 0x03);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8) & 0x03, 0x03);
 }
 
 #[test]
 fn uart_configure_with_parity() {
     let mut uart = Uart::new(0, true, true);
     // 8 data bits, 1 stop bit, even parity
-    uart.write_u8(3, 0x1B); // 0b00011011
-    assert_eq!(uart.read_u8(3), 0x1B);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x1B) as u64, 1); // 0b00011011
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(3), 1) as u8), 0x1B);
 }
 
 #[test]
 fn uart_configure_with_flow_control() {
     let mut uart = Uart::new(0, true, true);
     // Set RTS/DTR for flow control
-    uart.write_u8(4, 0x03);
-    assert_eq!(uart.read_u8(4) & 0x03, 0x03);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x03) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(4), 1) as u8) & 0x03, 0x03);
 }
 
 #[test]
 fn uart_reset_configuration() {
     let mut uart = Uart::new(0, true, true);
     // Set some configuration
-    uart.write_u8(3, 0x03);
-    uart.write_u8(4, 0x03);
-    uart.write_u8(1, 0x0F);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x03) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x03) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x0F) as u64, 1);
 
     // Reset
-    uart.write_u8(3, 0x00);
-    uart.write_u8(4, 0x00);
-    uart.write_u8(1, 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(3), (0x00) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(4), (0x00) as u64, 1);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(1), (0x00) as u64, 1);
 
-    assert_eq!(uart.read_u8(1), 0x00);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(1), 1) as u8), 0x00);
 }
 
 #[test]
 fn uart_scratch_all_zeros() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(7, 0x00);
-    assert_eq!(uart.read_u8(7), 0x00);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(7), (0x00) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(7), 1) as u8), 0x00);
 }
 
 #[test]
 fn uart_scratch_all_ones() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(7, 0xFF);
-    assert_eq!(uart.read_u8(7), 0xFF);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(7), (0xFF) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(7), 1) as u8), 0xFF);
 }
 
 #[test]
 fn uart_scratch_pattern() {
     let mut uart = Uart::new(0, true, true);
-    uart.write_u8(7, 0x55);
-    assert_eq!(uart.read_u8(7), 0x55);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(7), (0x55) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(7), 1) as u8), 0x55);
 
-    uart.write_u8(7, 0xAA);
-    assert_eq!(uart.read_u8(7), 0xAA);
+    crate::common::probe::write(&mut uart, rvsim_core::common::PhysAddr::new(7), (0xAA) as u64, 1);
+    assert_eq!((crate::common::probe::read(&mut uart, rvsim_core::common::PhysAddr::new(7), 1) as u8), 0xAA);
 }

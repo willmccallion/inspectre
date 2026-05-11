@@ -44,12 +44,12 @@ fn cbo_flush(rs1: u32) -> u32 {
 fn fill_pattern(ctx: &mut TestContext, base: u64, len: u64) {
     for off in (0..len).step_by(8) {
         let val = 0xDEAD_BEEF_CAFE_F00Du64.wrapping_add(off);
-        ctx.cpu_mut().soc.bus.write_u64(PhysAddr::new(base + off), val);
+        ctx.sim.probe_mem_store(PhysAddr::new(base + off), val, 8);
     }
 }
 
 fn read_u64(ctx: &mut TestContext, addr: u64) -> u64 {
-    ctx.cpu_mut().soc.bus.read_u64(PhysAddr::new(addr))
+    ctx.sim.probe_mem_load(PhysAddr::new(addr), 8)
 }
 
 /// Run `<inst> x10; jal x0, 0` after seeding x10 with `addr_in_x10`.
@@ -60,17 +60,17 @@ fn read_u64(ctx: &mut TestContext, addr: u64) -> u64 {
 /// reflects the CBO op (no secondary fault from running off the program).
 fn run_cbo(ctx: &mut TestContext, inst: u32, addr_in_x10: u64) {
     let park_offset = 4u64;
-    ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(RAM_BASE), inst);
-    ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(RAM_BASE + park_offset), JAL_SELF);
+    ctx.sim.probe_mem_store(PhysAddr::new(RAM_BASE), u64::from(inst), 4);
+    ctx.sim.probe_mem_store(PhysAddr::new(RAM_BASE + park_offset), u64::from(JAL_SELF), 4);
     // A few NOPs after the jal so any in-flight speculative fetch has
     // valid bytes to decode before the redirect lands.
     for i in 2..16 {
-        ctx.cpu_mut().soc.bus.write_u32(PhysAddr::new(RAM_BASE + i * 4), NOP);
+        ctx.sim.probe_mem_store(PhysAddr::new(RAM_BASE + i * 4), u64::from(NOP), 4);
     }
     ctx.set_reg(X10 as usize, addr_in_x10);
     ctx.cpu_mut().hart.pc = RAM_BASE;
     ctx.cpu_mut().hart.csrs.mtvec = RAM_BASE + park_offset;
-    ctx.run(128);
+    ctx.run(1000);
 }
 
 fn run_cbo_zero(ctx: &mut TestContext, addr_in_x10: u64) {

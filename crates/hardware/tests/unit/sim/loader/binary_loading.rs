@@ -113,7 +113,12 @@ fn test_setup_kernel_load_with_dtb_file() {
 
     // Verify DTB was loaded into memory at expected address
     let dtb_addr = config.system.ram_base + 0x2200000;
-    let loaded_byte = cpu.soc.bus.read_u8(PhysAddr::new(dtb_addr));
+    // Probe RAM directly via the bus's RamRegion: the bus's Handle defers
+    // RAM reads to the memory controller, which is out of reach inside the
+    // probe's local event queue. Loader-side data lives in DRAM unconditionally.
+    let loaded_byte = unsafe {
+        cpu.soc.bus.ram_region().expect("ram region").ptr(dtb_addr).read()
+    };
     assert_eq!(loaded_byte, 0xd0);
 }
 
@@ -151,7 +156,9 @@ fn test_setup_kernel_load_mret_instruction_at_ram_base() {
 
     // MRET instruction (0x30200073) should be loaded at RAM base
     let ram_base = config.system.ram_base;
-    let instruction = cpu.soc.bus.read_u32(PhysAddr::new(ram_base));
+    let instruction = unsafe {
+        cpu.soc.bus.ram_region().expect("ram region").ptr(ram_base).cast::<u32>().read_unaligned()
+    };
 
     // MRET opcode is 0x30200073
     assert_eq!(instruction, 0x30200073);

@@ -9,10 +9,34 @@
 
 use crate::common::harness::TestContext;
 use proptest::prelude::*;
-use rvsim_core::common::{AccessType, PhysAddr, Trap, VirtAddr};
+use rvsim_core::common::{AccessType, PhysAddr, TranslationResult, Trap, VirtAddr};
 use rvsim_core::core::arch::csr::{self, Csrs};
 use rvsim_core::core::arch::mode::PrivilegeMode;
-use rvsim_core::core::units::mmu::Mmu;
+use rvsim_core::core::units::mmu::{Mmu, TranslateOutcome};
+
+/// Drives a synchronous translation: repeatedly invokes `translate_async` /
+/// `continue_walk` against the MMU and reads PTEs out of memory through the
+/// test context so the property tests stay shaped like the deleted
+/// synchronous `Mmu::translate`.
+fn translate_sync(
+    mmu: &mut Mmu,
+    va: VirtAddr,
+    access: AccessType,
+    privilege: PrivilegeMode,
+    csrs: &Csrs,
+    ctx: &mut TestContext,
+) -> TranslationResult {
+    let mut outcome = mmu.translate_async(va, access, privilege, csrs, None);
+    loop {
+        match outcome {
+            TranslateOutcome::Ready(result) => return result,
+            TranslateOutcome::NeedPte { pte_addr, state } => {
+                let raw_pte = ctx.sim.probe_mem_load(pte_addr, 8);
+                outcome = mmu.continue_walk(state, raw_pte, csrs, None, 0);
+            }
+        }
+    }
+}
 
 const ROOT_PPN: u64 = 0x80000;
 const MEM_BASE: u64 = 0x8000_0000;
@@ -144,12 +168,13 @@ proptest! {
         let leaf_ppn = aligned_leaf_ppn(leaf_level, leaf_ppn_seed);
         let expected_paddr = install_table(&mut ctx, levels, leaf_level, va, leaf_ppn);
 
-        let result = mmu.translate(
+        let result = translate_sync(
+            &mut mmu,
             VirtAddr::new(va),
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().soc.bus,
+            &mut ctx,
         );
         prop_assert!(result.trap.is_none(), "unexpected trap: {:?}", result.trap);
         prop_assert_eq!(result.paddr.val(), expected_paddr);
@@ -171,12 +196,13 @@ proptest! {
         let va = 1u64 << bit;
 
         let (mut mmu, csrs, mut ctx) = build_mmu(mode_to_satp(mode_val));
-        let result = mmu.translate(
+        let result = translate_sync(
+            &mut mmu,
             VirtAddr::new(va),
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().soc.bus,
+            &mut ctx,
         );
         prop_assert!(matches!(result.trap, Some(Trap::LoadPageFault(_))));
     }
@@ -200,12 +226,13 @@ proptest! {
         let misaligned_ppn = aligned_ppn | 0x1;
         let _ = install_table(&mut ctx, levels, leaf_level, va, misaligned_ppn);
 
-        let result = mmu.translate(
+        let result = translate_sync(
+            &mut mmu,
             VirtAddr::new(va),
             AccessType::Read,
             PrivilegeMode::Supervisor,
             &csrs,
-            &mut ctx.cpu_mut().soc.bus,
+            &mut ctx,
         );
         prop_assert!(matches!(result.trap, Some(Trap::LoadPageFault(_))));
     }

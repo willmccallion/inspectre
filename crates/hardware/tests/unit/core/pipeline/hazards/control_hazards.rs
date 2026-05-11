@@ -32,7 +32,7 @@ fn taken_branch_redirects_pc() {
         ],
     );
 
-    tc.run(60);
+    tc.run(500);
 
     assert_eq!(tc.get_reg(1), 10, "x1 should be 10");
     assert_eq!(tc.get_reg(2), 20, "x2 should be 20");
@@ -57,7 +57,7 @@ fn not_taken_branch_continues() {
         ],
     );
 
-    tc.run(60);
+    tc.run(500);
 
     assert_eq!(tc.get_reg(3), 33, "Not-taken: x3 should execute normally");
 }
@@ -80,7 +80,7 @@ fn jal_redirects_and_links() {
         ],
     );
 
-    tc.run(60);
+    tc.run(500);
 
     assert_eq!(tc.get_reg(1), BASE_ADDR + 4, "x1 = return address (PC+4)");
     assert_eq!(tc.get_reg(6), 0, "x6 should NOT execute (after JAL)");
@@ -105,7 +105,7 @@ fn jalr_indirect_jump() {
         ],
     );
 
-    tc.run(60);
+    tc.run(500);
 
     assert_eq!(tc.get_reg(3), 77, "x3 should be 77 (JALR target)");
     assert_eq!(tc.get_reg(1), BASE_ADDR + 12, "x1 = return address");
@@ -129,7 +129,7 @@ fn backward_branch_loop() {
         ],
     );
 
-    tc.run(200);
+    tc.run(1000);
 
     assert_eq!(tc.get_reg(1), 3, "x1 should be 3 after loop");
     assert_eq!(tc.get_reg(3), 100, "x3 should be 100 after loop exit");
@@ -151,7 +151,7 @@ fn blt_taken() {
             nop,
         ],
     );
-    tc.run(60);
+    tc.run(500);
     assert_eq!(tc.get_reg(3), 0, "BLT taken → x3 flushed");
     assert_eq!(tc.get_reg(4), 42, "BLT target reached");
 }
@@ -172,7 +172,7 @@ fn bge_taken() {
             nop,
         ],
     );
-    tc.run(60);
+    tc.run(500);
     assert_eq!(tc.get_reg(3), 0);
     assert_eq!(tc.get_reg(4), 42);
 }
@@ -194,7 +194,7 @@ fn bltu_taken() {
             nop,
         ],
     );
-    tc.run(60);
+    tc.run(500);
     assert_eq!(tc.get_reg(3), 0);
     assert_eq!(tc.get_reg(4), 42);
 }
@@ -215,6 +215,6 @@ fn bgeu_not_taken() {
             nop,
         ],
     );
-    tc.run(60);
+    tc.run(500);
     assert_eq!(tc.get_reg(3), 33, "BGEU not taken → sequential execution");
 }
