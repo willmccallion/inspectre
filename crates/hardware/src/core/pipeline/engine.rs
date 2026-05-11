@@ -283,14 +283,20 @@ impl<E: ExecutionEngine> Pipeline<E> {
         if needs_frontend_flush {
             self.frontend.flush();
             self.rename_output.clear();
-            // Drop wrong-path in-flight fetches and walks; their MemResps will
-            // arrive over the next several cycles and would otherwise re-enter
-            // the just-cleared latches as stale instructions. Committed stores
-            // (outstanding_stores) and pre-redirect loads still in the kept
-            // ROB range remain so they can complete.
+            // Drop wrong-path frontend speculation (fetches, fetch-walks, the
+            // fetch reorder buffer). Backend resources — outstanding loads,
+            // stores, and load/store-walks — belong to ROB entries that the
+            // mispredict-redirect path leaves intact (only the engine's own
+            // flush path empties the ROB), so they must survive this flush
+            // or the parked op never completes and commit deadlocks.
             let common = self.engine.common_mut();
             common.outstanding_fetches.clear();
-            common.outstanding_walks.clear();
+            common.outstanding_walks.retain(|_, walk| {
+                !matches!(
+                    walk.continuation,
+                    crate::core::pipeline::outstanding::WalkContinuation::Fetch(_)
+                )
+            });
             common.fetch_reorder.clear();
             common.fetch_walk_pending = false;
             // Bump the emit cursor past every fetch_seq allocated so far so
