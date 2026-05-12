@@ -542,7 +542,7 @@ fn write_line_to_memory(
 
 /// Emits a `MemReq` (op = Write) for a single VSB-drained write. The cache
 /// hierarchy + memory controller + device handle the actual data delivery
-/// (no direct RamRegion writes — bit-exact writes propagate via the
+/// (no direct `RamRegion` writes — bit-exact writes propagate via the
 /// memory controller's `service_request`).
 fn issue_drained_write(
     cpu: &mut Cpu,

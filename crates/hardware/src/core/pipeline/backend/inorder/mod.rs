@@ -5,8 +5,8 @@
 //! - `InOrderExecuteUnit` — single ALU/FPU/BRU execution.
 //!
 //! The engine owns its in-flight memory bookkeeping
-//! (`BackendCommon` = mailbox + outstanding_loads / stores / walks /
-//! fetches + next_req_id + routing IDs). Memory1 runs inside `tick`,
+//! (`BackendCommon` = mailbox + `outstanding_loads` / stores / walks /
+//! fetches + `next_req_id` + routing IDs). Memory1 runs inside `tick`,
 //! reaching the outstanding tables and the event queue directly.
 
 pub mod execute;

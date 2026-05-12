@@ -23,7 +23,6 @@ use crate::core::pipeline::vec_prf::VecPhysRegFile;
 use crate::core::units::vpu::types::VecPhysReg;
 use crate::sim::components::{CacheId, ComponentId, PipelineId, ReqId};
 use crate::sim::packet::Packet;
-use crate::sim::stats::Stats;
 use serde::Deserialize;
 
 /// Backend type selection.
@@ -41,7 +40,7 @@ pub enum BackendType {
 ///
 /// Covers the entire backend: Issue → Execute → Memory1 → Memory2 →
 /// Writeback → Commit. The engine owns its in-flight memory bookkeeping
-/// (mailbox + outstanding_* + next_req_id + cache routing IDs), giving
+/// (mailbox + outstanding_* + `next_req_id` + cache routing IDs), giving
 /// memory1 direct access without splitting `tick` into phases.
 pub trait ExecutionEngine {
     /// Run one cycle of all backend stages (reverse order internally).
@@ -205,7 +204,7 @@ pub struct BackendCommon {
     /// `next_fetch_seq` on flush so post-flush fetches stay in order.
     pub next_emit_fetch_seq: u64,
     /// True while a fetch is parked on a page-table walk. fetch1 stalls
-    /// instead of re-emitting the same PC every cycle (gem5 MinorCPU's
+    /// instead of re-emitting the same PC every cycle (gem5 `MinorCPU`'s
     /// IFU `ItlbWait` state). Cleared when the matching walk completes.
     pub fetch_walk_pending: bool,
     /// Monotonic request-id counter; allocate via [`BackendCommon::alloc_req_id`].
@@ -222,7 +221,7 @@ pub struct BackendCommon {
 impl BackendCommon {
     /// Allocates a fresh [`ReqId`] for an outgoing packet.
     #[inline]
-    pub fn alloc_req_id(&mut self) -> ReqId {
+    pub const fn alloc_req_id(&mut self) -> ReqId {
         let id = self.next_req_id;
         self.next_req_id = id.wrapping_add(1);
         ReqId::new(id)
@@ -231,7 +230,7 @@ impl BackendCommon {
     /// Allocates a fresh fetch sequence number for the in-program-order
     /// fetch reorder buffer.
     #[inline]
-    pub fn alloc_fetch_seq(&mut self) -> u64 {
+    pub const fn alloc_fetch_seq(&mut self) -> u64 {
         let seq = self.next_fetch_seq;
         self.next_fetch_seq = seq.wrapping_add(1);
         seq

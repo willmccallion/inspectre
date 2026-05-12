@@ -44,7 +44,7 @@ use crate::sim::packet::{self, AccessSize, MemOp, Packet};
 
 /// Outcome of processing a single `ExMem1Entry`.
 enum EntryOutcome {
-    /// Entry was passed downstream (Mem1Mem2 push); continue iterating.
+    /// Entry was passed downstream (`Mem1Mem2` push); continue iterating.
     Done,
     /// SB partial overlap or atomic-vs-SB stall — push back to input.
     Stall(ExMem1Entry),

@@ -6,8 +6,6 @@ pub mod buffer;
 /// Memory controller implementations for access latency modeling.
 pub mod controller;
 
-use self::buffer::DramBuffer;
-use std::sync::Arc;
 
 /// Direct view of a contiguous physical RAM region. Lets the pipeline
 /// bypass bus device dispatch on the hot load/store path.

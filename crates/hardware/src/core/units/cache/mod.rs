@@ -158,7 +158,7 @@ impl Cache {
     }
 
     /// Sets the downstream target for forwarded misses.
-    pub fn set_downstream(&mut self, downstream: ComponentId) {
+    pub const fn set_downstream(&mut self, downstream: ComponentId) {
         self.downstream = Some(downstream);
     }
 

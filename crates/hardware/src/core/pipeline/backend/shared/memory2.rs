@@ -244,7 +244,7 @@ pub fn memory2_stage(
     violation
 }
 
-fn merge_violation(slot: &mut Option<(RobTag, u64)>, new: (RobTag, u64)) {
+const fn merge_violation(slot: &mut Option<(RobTag, u64)>, new: (RobTag, u64)) {
     match slot {
         None => *slot = Some(new),
         Some((existing, _)) if new.0.is_older_than(*existing) => *slot = Some(new),
@@ -254,7 +254,7 @@ fn merge_violation(slot: &mut Option<(RobTag, u64)>, new: (RobTag, u64)) {
 
 /// Sign / zero-extends a raw load value according to the access width and
 /// the signed-load control bit.
-fn sign_extend(raw: u64, width: MemWidth, signed: bool) -> u64 {
+const fn sign_extend(raw: u64, width: MemWidth, signed: bool) -> u64 {
     if signed {
         match width {
             MemWidth::Byte => (raw as u8 as i8) as i64 as u64,

@@ -95,7 +95,7 @@ impl Bus {
 
     /// Tells the bus which memory controller handles RAM-range accesses and
     /// the `RamRegion` fast-path view.
-    pub fn attach_ram(&mut self, ctrl_id: MemCtrlId, region: RamRegion) {
+    pub const fn attach_ram(&mut self, ctrl_id: MemCtrlId, region: RamRegion) {
         self.ram_ctrl = Some((ctrl_id, region.base(), region.base() + region.size()));
         self.ram_region = Some(region);
     }
@@ -133,7 +133,7 @@ impl Bus {
     }
 
     /// Writes a binary blob into RAM at the given physical address.
-    pub fn load_binary_at(&mut self, data: &[u8], addr: PhysAddr) {
+    pub const fn load_binary_at(&mut self, data: &[u8], addr: PhysAddr) {
         if let Some(region) = self.ram_region
             && region.contains(addr.val(), data.len() as u64)
         {
@@ -224,12 +224,12 @@ impl Bus {
     }
 }
 
-/// Bytes-on-the-bus for the address phase of any MemReq (the bus carries an
+/// Bytes-on-the-bus for the address phase of any `MemReq` (the bus carries an
 /// 8-byte address plus control). Pre-refactor `simulate_memory_access`
 /// charged `calculate_transit_time(8)` here too.
 const BUS_REQ_BYTES: usize = 8;
 
-/// Bytes-on-the-bus for a MemResp returning a cache line. Sub-line responses
+/// Bytes-on-the-bus for a `MemResp` returning a cache line. Sub-line responses
 /// are still charged this size to match the pre-refactor cycle model, which
 /// always pulled a full line for the demand miss.
 const BUS_RESP_BYTES: usize = 64;

@@ -318,7 +318,7 @@ pub struct Mem1Mem2Entry {
     pub paddr: PhysAddr,
     /// Store data.
     pub store_data: u64,
-    /// Raw load value when memory1 emitted a MemReq for this entry and the
+    /// Raw load value when memory1 emitted a `MemReq` for this entry and the
     /// mailbox-drain has filled it in from the response. Holds the
     /// pre-sign-extension bytes; memory2 turns it into the final register
     /// value. For SB-forwarded loads, memory1 writes the forwarded value

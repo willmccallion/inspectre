@@ -57,8 +57,8 @@ pub struct OutstandingFetch {
 /// `vaddr` is retained for trace + load-queue updates.
 #[derive(Clone, Debug)]
 pub struct OutstandingLoad {
-    /// Original Execute→Memory1 entry, carrying ctrl signals, rd / rd_phys,
-    /// pc, inst, fp_flags, vec_mem, sfence_vma, and store_data (used by AMO
+    /// Original Execute→Memory1 entry, carrying ctrl signals, rd / `rd_phys`,
+    /// pc, inst, `fp_flags`, `vec_mem`, `sfence_vma`, and `store_data` (used by AMO
     /// as the second operand).
     pub entry: ExMem1Entry,
     /// Translated physical address.
