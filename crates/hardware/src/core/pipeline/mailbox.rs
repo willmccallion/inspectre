@@ -101,7 +101,7 @@ fn complete_fetch<E: ExecutionEngine>(pipeline: &mut Pipeline<E>, fetch: Outstan
 /// latch. Memory2 handles sign-extension, AMO RMW, and SB resolution.
 fn complete_load<E: ExecutionEngine>(
     pipeline: &mut Pipeline<E>,
-    cpu: &mut Cpu,
+    cpu: &Cpu,
     load: OutstandingLoad,
     resp_data: &MemRespData,
 ) {

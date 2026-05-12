@@ -76,7 +76,7 @@ pub fn memory1_stage<E: ExecutionEngine>(
 
     while let Some(ex) = iter.next() {
         match process_entry(cpu, engine, ex) {
-            EntryOutcome::Done => continue,
+            EntryOutcome::Done => {}
             EntryOutcome::Stall(ex) => {
                 input.push(ex);
                 input.extend(iter);

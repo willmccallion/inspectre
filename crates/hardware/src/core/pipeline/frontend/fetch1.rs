@@ -145,10 +145,11 @@ pub fn fetch1_stage<E: ExecutionEngine>(cpu: &mut Cpu, engine: &mut E) {
         // path the same way.
         let fetch_seq = engine.common_mut().alloc_fetch_seq();
 
-        let mut fetch_trap = None;
-        if (current_pc & align_mask) != 0 {
-            fetch_trap = Some(Trap::InstructionAddressMisaligned(current_pc));
-        }
+        let fetch_trap = if (current_pc & align_mask) != 0 {
+            Some(Trap::InstructionAddressMisaligned(current_pc))
+        } else {
+            None
+        };
 
         // 1. Translate the PC.
         let translated = if fetch_trap.is_none() {
