@@ -561,10 +561,13 @@ fn try_drain_one_store(
         return true;
     };
 
-    let is_ram = cpu.soc.bus.ram_region().is_some_and(|r| r.contains(paddr.val(), 1));
+    // Only pure RAM addresses go through the WCB coalesce path. HTIF and
+    // other MMIO overlays must bypass it so the per-store MemReq carries the
+    // original data to the device (WCB drain packets carry zero data).
     let width_bytes = width_to_bytes(store.width);
+    let is_pure_ram = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes as u64).is_some();
 
-    if !cpu.core.wcb.is_disabled() && is_ram {
+    if !cpu.core.wcb.is_disabled() && is_pure_ram {
         // Update RAM directly so subsequent loads via the fast path see the
         // new value while the WCB coalesces dirty-line accounting; the WCB
         // drain only signals the line was dirty, it doesn't carry data.
@@ -584,7 +587,7 @@ fn try_drain_one_store(
         paddr      = %crate::trace::Hex(paddr.val()),
         data       = %crate::trace::Hex(data),
         width      = ?store.width,
-        via_wcb    = !cpu.core.wcb.is_disabled() && is_ram,
+        via_wcb    = !cpu.core.wcb.is_disabled() && is_pure_ram,
         "CM: committed store drained to memory"
     );
     true
