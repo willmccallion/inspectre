@@ -1236,7 +1236,11 @@ impl ExecutionEngine for O3Engine {
             for entry in entries {
                 let is_load = entry.ctrl.mem_read;
                 let is_store = entry.ctrl.mem_write;
-                let mem_dep = self.mdp.dispatch(entry.pc, entry.rob_tag, is_load, is_store);
+                let is_atomic = entry.ctrl.atomic_op
+                    != crate::core::pipeline::signals::AtomicOp::None;
+                let mem_dep = self
+                    .mdp
+                    .dispatch(entry.pc, entry.rob_tag, is_load, is_store, is_atomic);
                 let ok = self.issue_queue.dispatch(
                     entry,
                     &self.rob,
