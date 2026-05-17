@@ -153,8 +153,15 @@ impl LoadQueue {
     /// Checks for memory ordering violations when a store resolves its address.
     ///
     /// Scans for younger loads (`rob_tag` > `store_rob_tag`) that have already
-    /// executed and overlap the store's address range. Returns the oldest
-    /// violating load's `rob_tag`, if any.
+    /// translated their address (and therefore either have data, or have an
+    /// in-flight `MemReq` whose response will carry pre-store memory bytes).
+    /// Returns the oldest violating load's `rob_tag`, if any.
+    ///
+    /// Translated loads must be flagged too, not just Executed ones: with a
+    /// Bypass prediction, a load can issue its `MemReq` before an older store
+    /// to the same address resolves. If we wait until the load's response
+    /// arrives (Executed) to detect the conflict, the store's check has
+    /// already run and missed it, and the load commits with stale data.
     pub fn check_ordering_violation(
         &self,
         store_paddr: PhysAddr,
@@ -169,7 +176,7 @@ impl LoadQueue {
         for entry in &self.entries {
             if !entry.valid
                 || !entry.rob_tag.is_newer_than(store_rob_tag)
-                || entry.state != LoadState::Executed
+                || matches!(entry.state, LoadState::Pending)
             {
                 continue;
             }
