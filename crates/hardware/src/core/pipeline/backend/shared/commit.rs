@@ -565,12 +565,15 @@ fn try_drain_one_store(
     let width_bytes = width_to_bytes(store.width);
 
     if !cpu.core.wcb.is_disabled() && is_ram {
+        // Update RAM directly so subsequent loads via the fast path see the
+        // new value while the WCB coalesces dirty-line accounting; the WCB
+        // drain only signals the line was dirty, it doesn't carry data.
+        write_store_data_to_ram(cpu, paddr, data, store.width);
         let evicted = cpu.core.wcb.merge_store(paddr, data, width_bytes);
         if evicted.is_none() {
             cpu.stats.wcb_coalesces += 1;
         }
         if let Some(drain) = evicted {
-            // Cache-line drain from WCB: emit a write-back MemReq.
             emit_line_writeback(cpu, common, PhysAddr::new(drain.line_addr));
             cpu.stats.wcb_drains += 1;
         }
@@ -776,20 +779,7 @@ fn write_store_to_memory(
         MemWidth::Nop => return,
     };
 
-    if let Some(r) = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes) {
-        // SAFETY: `ram_region_for` confirms the address is pure RAM and
-        // bounds-checks the write.
-        unsafe {
-            let ptr = r.ptr(paddr.val());
-            match width {
-                MemWidth::Byte => *ptr = data as u8,
-                MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
-                MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
-                MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
-                MemWidth::Nop => {}
-            }
-        }
-    }
+    write_store_data_to_ram(cpu, paddr, data, width);
 
     let is_ram = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes).is_some();
     let req_id = common.alloc_req_id();
@@ -816,6 +806,31 @@ fn write_store_to_memory(
             op: MemOp::Write { data: WriteData::Small(data) },
         },
     );
+}
+
+/// Writes a committed store's bytes into the `RamRegion` fast-path so subsequent
+/// loads (which read RAM directly via `read_load_bytes`) see the new value.
+/// No-op for addresses outside RAM (MMIO) — those reach their device via packet.
+fn write_store_data_to_ram(cpu: &mut Cpu, paddr: PhysAddr, data: u64, width: MemWidth) {
+    let width_bytes = match width {
+        MemWidth::Byte => 1u64,
+        MemWidth::Half => 2,
+        MemWidth::Word => 4,
+        MemWidth::Double => 8,
+        MemWidth::Nop => return,
+    };
+    let Some(r) = cpu.soc.bus.ram_region_for(paddr.val(), width_bytes) else { return };
+    // SAFETY: `ram_region_for` confirms pure-RAM coverage and bounds-checks.
+    unsafe {
+        let ptr = r.ptr(paddr.val());
+        match width {
+            MemWidth::Byte => *ptr = data as u8,
+            MemWidth::Half => ptr.cast::<u16>().write_unaligned(data as u16),
+            MemWidth::Word => ptr.cast::<u32>().write_unaligned(data as u32),
+            MemWidth::Double => ptr.cast::<u64>().write_unaligned(data),
+            MemWidth::Nop => {}
+        }
+    }
 }
 
 /// Checks for pending interrupts. Returns the trap if one should be taken.
