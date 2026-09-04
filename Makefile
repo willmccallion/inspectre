@@ -278,7 +278,7 @@ run-example: software
 
 run-linux:
 	@printf "$(GREEN)Booting Linux…$(RESET)\n"
-	.venv/bin/rvsim --script scripts/setup/boot_linux.py
+	.venv/bin/rvsim scripts/setup/boot_linux.py
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Profiling
